@@ -6,6 +6,8 @@ interface ServerState {
   id: number;
   status: string;
   lastUpdate: number;
+  secret_key?: string;
+  secretKey?: string;
   name?: string;
   ip?: string;
   port?: number;
@@ -132,6 +134,13 @@ export const useServerStore = defineStore('serverStore', {
       if (data.status) {
         this.servers[serverId].status = data.status;
       }
+      if (data.secret_key !== undefined) {
+        this.servers[serverId].secret_key = data.secret_key;
+        this.servers[serverId].secretKey = data.secret_key;
+      } else if (data.SecretKey !== undefined) {
+        this.servers[serverId].secret_key = data.SecretKey;
+        this.servers[serverId].secretKey = data.SecretKey;
+      }
 
       // 更新时间戳
       this.servers[serverId].lastUpdate = Date.now();
@@ -190,6 +199,8 @@ export const useServerStore = defineStore('serverStore', {
               description: server.Description || server.description,
               tags: server.Tags || server.tags,
               system_info: server.SystemInfo || server.system_info,
+              secret_key: server.secret_key || server.SecretKey || existingServer?.secret_key,
+              secretKey: server.secret_key || server.SecretKey || existingServer?.secretKey,
               lastUpdate: Date.now(),
               // 确保 monitorData 不被覆盖为空
               monitorData: existingServer?.monitorData || {}

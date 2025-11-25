@@ -6,7 +6,7 @@ heartbeat_interval: 5s
 log_file: ./logs/agent.log
 log_level: debug
 monitor_interval: 10s
-update_repo: better-monitor/better-monitor-agent
+update_repo: EnderKC/BetterMonitor
 update_channel: stable
 update_mirror: ""
 register_token: 78161d9b2a9e00cd76140ff4809ca7c0

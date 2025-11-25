@@ -182,8 +182,10 @@ const viewServer = (id: number) => {
 
 // 查看服务器令牌
 const viewToken = (server: any) => {
-  let releaseRepo = '';
+  console.log('Server object:', server);
   const dashboardUrl = window.location.origin;
+  const secretKey = server.secret_key || server.SecretKey || '';
+  const serverId = server.id || server.ID;
 
   const copyToClipboard = (text, type) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -195,7 +197,7 @@ const viewToken = (server: any) => {
   };
 
   request.get('/public/settings').then((res) => {
-    releaseRepo = res?.agent_release_repo || 'your-org/better-monitor-agent';
+    const releaseRepo = res?.agent_release_repo || 'EnderKC/BetterMonitor';
 
     Modal.info({
       title: '服务器令牌',
@@ -204,37 +206,26 @@ const viewToken = (server: any) => {
         h('div', { class: 'token-info' }, [
           h('p', [
             h('strong', 'ID: '),
-            h('span', { class: 'token-value' }, server.id || server.ID)
+            h('span', { class: 'token-value' }, serverId)
           ]),
           h('p', [
             h('strong', '密钥: '),
-            h('span', { class: 'token-value' }, server.secret_key)
+            h('span', { class: 'token-value' }, secretKey || '未找到密钥')
           ])
         ]),
         h('div', { class: 'token-help' }, [
-          h('p', { style: 'font-weight: bold; margin-top: 16px' }, '安装步骤：'),
-          h('ol', [
-            h('li', [
-              '访问 ',
-              h('a', {
-                href: `https://github.com/${releaseRepo}/releases/latest`,
-                target: '_blank'
-              }, 'Agent发布页面'),
-              '，下载对应系统的二进制文件'
-            ]),
-            h('li', '授予执行权限，例如：chmod +x better-monitor-agent'),
-            h('li', '使用以下参数运行Agent：')
-          ]),
-          h('div', { style: 'position: relative; margin-top: 16px;' }, [
+          h('p', { style: 'font-weight: bold; margin-top: 16px; color: #52c41a;' }, '方式一：一键安装（推荐）'),
+          h('p', { style: 'margin: 8px 0; color: #666;' }, '在目标服务器上执行以下命令即可自动安装并启动 Agent：'),
+          h('div', { style: 'position: relative; margin: 12px 0;' }, [
             h('div', { style: 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;' }, [
-              h('span', { style: 'font-weight: bold;' }, '启动命令:'),
+              h('span', { style: 'font-weight: bold;' }, '一键安装命令:'),
               h('a-button', {
                 type: 'primary',
                 size: 'small',
                 shape: 'round',
                 onClick: () => copyToClipboard(
-                  `./better-monitor-agent --server ${dashboardUrl} --server-id ${server.id || server.ID} --secret-key ${server.secret_key}`,
-                  '启动'
+                  `curl -fsSL https://raw.githubusercontent.com/${releaseRepo}/main/install-agent.sh | bash -s -- --server-id ${serverId} --secret-key ${secretKey} --server ${dashboardUrl}`,
+                  '一键安装'
                 )
               }, [
                 h(CopyOutlined),
@@ -242,7 +233,41 @@ const viewToken = (server: any) => {
               ])
             ]),
             h('pre', { class: 'install-command' },
-              `./better-monitor-agent --server ${dashboardUrl} --server-id ${server.id || server.ID} --secret-key ${server.secret_key}`
+              `curl -fsSL https://raw.githubusercontent.com/${releaseRepo}/main/install-agent.sh | bash -s -- --server-id ${serverId} --secret-key ${secretKey} --server ${dashboardUrl}`
+            )
+          ]),
+          h('p', { style: 'font-weight: bold; margin-top: 24px;' }, '方式二：手动安装'),
+          h('ol', { style: 'margin-top: 8px;' }, [
+            h('li', [
+              '访问 ',
+              h('a', {
+                href: `https://github.com/${releaseRepo}/releases/latest`,
+                target: '_blank',
+                style: 'color: #1890ff;'
+              }, 'Agent发布页面'),
+              '，下载对应系统的二进制文件'
+            ]),
+            h('li', '授予执行权限：chmod +x better-monitor-agent'),
+            h('li', '使用以下命令启动：')
+          ]),
+          h('div', { style: 'position: relative; margin-top: 12px;' }, [
+            h('div', { style: 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;' }, [
+              h('span', { style: 'font-weight: bold;' }, '手动启动命令:'),
+              h('a-button', {
+                type: 'default',
+                size: 'small',
+                shape: 'round',
+                onClick: () => copyToClipboard(
+                  `./better-monitor-agent --server ${dashboardUrl} --server-id ${serverId} --secret-key ${secretKey}`,
+                  '手动启动'
+                )
+              }, [
+                h(CopyOutlined),
+                ' 复制命令'
+              ])
+            ]),
+            h('pre', { class: 'install-command' },
+              `./better-monitor-agent --server ${dashboardUrl} --server-id ${serverId} --secret-key ${secretKey}`
             )
           ])
         ])

@@ -381,7 +381,6 @@ const installOpenResty = async () => {
     await request.post(`/servers/${serverId.value}/nginx/openresty/install`);
     message.success('OpenResty 已安装并启动');
     await fetchOpenRestyStatus();
-    await fetchNginxStatus();
     await fetchWebsites();
   } catch (error) {
     console.error('安装OpenResty失败:', error);

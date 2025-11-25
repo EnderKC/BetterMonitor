@@ -54,7 +54,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("enable_mem_monitor", true)
 	v.SetDefault("enable_disk_monitor", true)
 	v.SetDefault("enable_network_monitor", true)
-	v.SetDefault("update_repo", "better-monitor/better-monitor-agent")
+	v.SetDefault("update_repo", "EnderKC/BetterMonitor")
 	v.SetDefault("update_channel", "stable")
 	v.SetDefault("update_mirror", "")
 

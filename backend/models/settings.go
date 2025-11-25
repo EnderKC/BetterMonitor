@@ -23,9 +23,9 @@ type SystemSettings struct {
 	DataRetentionDays int `json:"data_retention_days" gorm:"default:7"` // 监控数据保留天数
 
 	// Agent升级设置
-	AgentReleaseRepo    string `json:"agent_release_repo" gorm:"default:'better-monitor/better-monitor-agent'"` // GitHub仓库
-	AgentReleaseChannel string `json:"agent_release_channel" gorm:"default:'stable'"`                           // stable/nightly等
-	AgentReleaseMirror  string `json:"agent_release_mirror" gorm:"default:''"`                                  // 下载镜像（可选）
+	AgentReleaseRepo    string `json:"agent_release_repo" gorm:"default:'EnderKC/BetterMonitor'"` // GitHub仓库
+	AgentReleaseChannel string `json:"agent_release_channel" gorm:"default:'stable'"`             // stable/nightly等
+	AgentReleaseMirror  string `json:"agent_release_mirror" gorm:"default:''"`                    // 下载镜像（可选）
 }
 
 // 默认设置值
@@ -35,7 +35,7 @@ var defaultSettings = SystemSettings{
 	UIRefreshInterval:   "10s",
 	ChartHistoryHours:   24,
 	DataRetentionDays:   7,
-	AgentReleaseRepo:    "better-monitor/better-monitor-agent",
+	AgentReleaseRepo:    "EnderKC/BetterMonitor",
 	AgentReleaseChannel: "stable",
 	AgentReleaseMirror:  "",
 }

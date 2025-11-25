@@ -24,6 +24,7 @@ func SetupRoutes(r *gin.Engine) {
 	r.GET("/", controllers.HealthCheck)
 	r.HEAD("/", controllers.HealthCheck)
 
+
 	// 添加不带前缀的WebSocket路由，便于客户端连接
 	r.GET("/servers/:id/ws", controllers.WebSocketHandler)
 	// 添加前端当前使用的WebSocket路由路径

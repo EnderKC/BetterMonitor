@@ -527,7 +527,7 @@ jwt:
   expire: "24h"
 
 agent_release:
-  repo: "better-monitor/better-monitor-agent"
+  repo: "EnderKC/BetterMonitor"
   channel: "stable"
   mirror: ""
 ```
@@ -556,7 +556,7 @@ log:
   max_size: 100  # MB
   max_backups: 5
 
-update_repo: "better-monitor/better-monitor-agent"
+update_repo: "EnderKC/BetterMonitor"
 update_channel: "stable"
 update_mirror: ""
 ```
