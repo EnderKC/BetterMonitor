@@ -1,0 +1,99 @@
+# 通用的 .gitignore 文件
+
+# 编译产生的文件
+Release/dist/*
+Release/output/*
+better-monitor-agent*
+better-monitor-ota
+dashboard
+agent
+backend
+
+!dashboard/
+!agent/
+!backend/
+
+# 忽略操作系统生成的文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+
+# 忽略日志文件和临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.old
+
+# 忽略编译生成的文件
+*.out
+*.o
+*.obj
+*.pyc
+*.pyo
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+
+# 忽略包管理器生成的依赖目录
+node_modules/
+bower_components/
+jspm_packages/
+vendor/
+dist/
+build/
+target/
+out/
+coverage/
+.env
+.env.*
+*.env
+
+# 忽略 IDE 和编辑器相关文件
+.idea/
+.vscode/
+.claude/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+
+# 忽略 macOS Finder 属性文件
+.AppleDouble
+.LSOverride
+
+# 忽略 Python 虚拟环境
+venv/
+ENV/
+env/
+.venv/
+
+# 忽略 Jupyter Notebook 检查点
+.ipynb_checkpoints
+
+# 忽略压缩包
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 忽略图片缓存
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
+# 忽略数据库文件
+*.sqlite
+*.sqlite3
+*.db
+
+# 忽略自定义本地配置文件
+local.settings.json
+settings.local.json

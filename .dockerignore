@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Environment files
+.env.example
+
+# Development files
+*.log
+*.tmp
+
+# Node modules (前端会在Dockerfile中重新安装)
+frontend/node_modules
+frontend/dist
+
+# Go build artifacts
+backend/dashboard
+backend/server-ops-backend
+backend/test_backend
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+data/
+
+# Release files
+Releases/*.zip
+Releases/*.tar.gz
+
+# SSL certificates
+ssl/ 

@@ -1,0 +1,102 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--body-bg);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--text-primary);
+  background-color: var(--body-bg);
+}
+
+#app {
+  height: 100vh;
+  width: 100%;
+}
+
+a {
+  text-decoration: none;
+  color: var(--primary-color);
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* 全局覆盖 Ant Design 样式以匹配紧凑风格 */
+.ant-card-body {
+  padding: 16px !important;
+}
+
+.ant-table-small .ant-table-thead>tr>th {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+:root.dark .ant-table-small .ant-table-thead>tr>th {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 响应式布局 */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+/* Global Layout Overrides */
+.ant-layout {
+  background: transparent !important;
+}
+
+.ant-layout-content {
+  background: transparent !important;
+}
+
+/* Ensure dark mode background for specific components that might default to white */
+:root.dark .ant-layout-sider-trigger {
+  background: #2c313c;
+  color: #abb2bf;
+}
+
+:root.dark .ant-spin-nested-loading {
+  color: #abb2bf;
+}
+
+:root.dark .ant-spin-container {
+  background: transparent;
+}
+
+.ant-page-header {
+  background: transparent !important;
+}
+
+:root.dark .ant-page-header-heading-title {
+  color: var(--text-primary);
+}
+
+:root.dark .ant-page-header-heading-sub-title {
+  color: var(--text-secondary);
+}

@@ -1,0 +1,15 @@
+enable_cpu_monitor: true
+enable_disk_monitor: true
+enable_mem_monitor: true
+enable_network_monitor: true
+heartbeat_interval: 5s
+log_file: ./logs/agent.log
+log_level: debug
+monitor_interval: 10s
+update_repo: better-monitor/better-monitor-agent
+update_channel: stable
+update_mirror: ""
+register_token: 78161d9b2a9e00cd76140ff4809ca7c0
+secret_key: 78161d9b2a9e00cd76140ff4809ca7c0
+server_id: 1
+server_url: 127.0.0.1:8085
