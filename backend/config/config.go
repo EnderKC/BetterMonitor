@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -17,24 +20,49 @@ type Config struct {
 	TokenExpiration int
 }
 
-// LoadConfig 加载配置
+var (
+	instance *Config
+	once     sync.Once
+)
+
+// generateRandomSecret 生成随机的JWT密钥
+func generateRandomSecret() string {
+	bytes := make([]byte, 32) // 256位密钥
+	if _, err := rand.Read(bytes); err != nil {
+		log.Fatalf("生成随机密钥失败: %v", err)
+	}
+	return base64.URLEncoding.EncodeToString(bytes)
+}
+
+// LoadConfig 加载配置（单例模式）
 func LoadConfig() *Config {
-	// 尝试加载.env文件
-	if err := godotenv.Load(); err != nil {
-		log.Println("未找到.env文件，使用默认配置或环境变量")
-	}
+	once.Do(func() {
+		// 尝试加载.env文件
+		if err := godotenv.Load(); err != nil {
+			log.Println("未找到.env文件，使用默认配置或环境变量")
+		}
 
-	// 设置默认值或从环境变量获取
-	port := getEnv("PORT", "8080")
-	dbPath := getEnv("DB_PATH", "./data.db")
-	jwtSecret := getEnv("JWT_SECRET", "your_secret_key_change_this_in_production")
+		// 设置默认值或从环境变量获取
+		port := getEnv("PORT", "8085")
+		dbPath := getEnv("DB_PATH", "./data/data.db")
 
-	return &Config{
-		Port:            port,
-		DBPath:          dbPath,
-		JWTSecret:       jwtSecret,
-		TokenExpiration: 24, // 默认24小时
-	}
+		// 如果没有设置JWT_SECRET，自动生成一个随机密钥
+		jwtSecret := os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			jwtSecret = generateRandomSecret()
+			log.Println("未设置JWT_SECRET环境变量，已自动生成随机密钥")
+			log.Printf("警告: 使用随机生成的JWT密钥，重启后所有token将失效")
+		}
+
+		instance = &Config{
+			Port:            port,
+			DBPath:          dbPath,
+			JWTSecret:       jwtSecret,
+			TokenExpiration: 24, // 默认24小时
+		}
+	})
+
+	return instance
 }
 
 // CorsMiddleware 配置CORS中间件
