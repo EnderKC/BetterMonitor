@@ -153,6 +153,8 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: [build-agent, build-backend, build-frontend, build-docker]
     steps:
       - uses: actions/checkout@v4
