@@ -117,13 +117,13 @@ better_monitor/
 使用官方安装脚本，支持安装、升级、卸载和数据迁移：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitorrefs/heads/main/install-dashboard.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/install-dashboard.sh | sudo bash
 ```
 
 或者下载后执行：
 
 ```bash
-wget https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-dashboard.sh
+wget https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/install-dashboard.sh
 chmod +x install-dashboard.sh
 sudo ./install-dashboard.sh
 ```

@@ -68,6 +68,13 @@ jobs:
   build-backend:
     name: Build Backend Binary
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -79,20 +86,30 @@ jobs:
         id: version
         run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
 
+      - name: Install cross-compilation tools
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build backend
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+          CC: ${{ matrix.arch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cd backend
-          CGO_ENABLED=1 go build -ldflags="-w -s \
+          go build -ldflags="-w -s \
             -X 'github.com/user/server-ops-backend/pkg/version.Version=${{ steps.version.outputs.VERSION }}' \
             -X 'github.com/user/server-ops-backend/pkg/version.BuildDate=${BUILD_DATE}'" \
-            -o better-monitor-backend main.go
+            -o better-monitor-backend-${{ matrix.arch }} main.go
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: backend
-          path: backend/better-monitor-backend
+          name: backend-${{ matrix.arch }}
+          path: backend/better-monitor-backend-${{ matrix.arch }}
 
   build-frontend:
     name: Build Frontend
@@ -127,10 +144,16 @@ jobs:
         id: version
         run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
 
-      - name: Download backend artifact
+      - name: Download backend amd64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: backend
+          name: backend-amd64
+          path: backend
+
+      - name: Download backend arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-arm64
           path: backend
 
       - name: Download frontend artifact
@@ -139,8 +162,17 @@ jobs:
           name: frontend
           path: frontend/dist
 
-      - name: Set executable permission for backend
-        run: chmod +x backend/better-monitor-backend
+      - name: Set executable permissions for backend binaries
+        run: |
+          chmod +x backend/better-monitor-backend-amd64
+          chmod +x backend/better-monitor-backend-arm64
+
+      - name: Verify downloaded files
+        run: |
+          echo "Checking backend files:"
+          ls -lh backend/
+          echo "Checking frontend files:"
+          ls -lh frontend/dist/ | head -20
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -164,6 +196,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 
   create-release:
     name: Create GitHub Release
