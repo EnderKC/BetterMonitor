@@ -1,29 +1,4 @@
-# 构建前端
-FROM node:18-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm config set fetch-timeout 600000 && \
-    npm config set fetch-retries 10 && \
-    npm config set fetch-retry-mintimeout 20000 && \
-    npm config set fetch-retry-maxtimeout 120000 && \
-    npm ci --prefer-offline --no-audit --no-fund
-COPY frontend/ .
-RUN npm run build
-
-# 构建后端
-FROM golang:1.24-alpine AS backend-builder
-WORKDIR /app
-RUN apk add --no-cache git gcc musl-dev
-ENV CGO_ENABLED=1 \
-    GOOS=linux
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-COPY backend/ .
-ARG VERSION=1.0.6
-ARG BUILD_DATE=unknown
-RUN go build -trimpath -ldflags="-s -w -linkmode external -extldflags '-static' -X 'github.com/user/server-ops-backend/pkg/version.Version=${VERSION}' -X 'github.com/user/server-ops-backend/pkg/version.BuildDate=${BUILD_DATE}'" -a -installsuffix cgo -o /app/main .
-
-# 最终镜像
+# 最终镜像（前后端已在 GitHub Actions 中编译完成）
 FROM debian:bookworm-slim
 ARG VERSION=1.0.6
 ARG BUILD_DATE=unknown
@@ -53,11 +28,11 @@ RUN mkdir -p /app/data /app/logs /var/log/supervisor \
     && chown -R appuser:appuser /app \
     && chmod 755 /app
 
-# 复制前端文件到nginx目录
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+# 复制前端文件到nginx目录（已在 GitHub Actions 中编译）
+COPY frontend/dist /usr/share/nginx/html
 
-# 复制后端二进制文件
-COPY --from=backend-builder /app/main /app/main
+# 复制后端二进制文件（已在 GitHub Actions 中编译）
+COPY backend/better-monitor-backend /app/main
 RUN chmod +x /app/main && chown appuser:appuser /app/main
 
 # 配置supervisor

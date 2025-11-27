@@ -127,6 +127,21 @@ jobs:
         id: version
         run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
 
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend
+          path: backend
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend
+          path: frontend/dist
+
+      - name: Set executable permission for backend
+        run: chmod +x backend/better-monitor-backend
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
