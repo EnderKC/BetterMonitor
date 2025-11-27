@@ -169,10 +169,26 @@ jobs:
 
       - name: Verify downloaded files
         run: |
+          set -euo pipefail
           echo "Checking backend files:"
           ls -lh backend/
+          for arch in amd64 arm64; do
+            if [ ! -f "backend/better-monitor-backend-${arch}" ]; then
+              echo "::error::Missing backend/better-monitor-backend-${arch} after artifact download"
+              exit 1
+            fi
+          done
+
           echo "Checking frontend files:"
+          if [ ! -d frontend/dist ]; then
+            echo "::error::frontend/dist directory is missing after artifact download"
+            exit 1
+          fi
           ls -lh frontend/dist/ | head -20
+          if ! ls -A frontend/dist >/dev/null; then
+            echo "::error::frontend/dist is empty after artifact download"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

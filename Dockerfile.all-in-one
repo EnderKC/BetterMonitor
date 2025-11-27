@@ -30,11 +30,10 @@ RUN mkdir -p /app/data /app/logs /var/log/supervisor \
     && chmod 755 /app
 
 # 复制前端文件到nginx目录（已在 GitHub Actions 中编译）
-COPY frontend/dist /usr/share/nginx/html
+COPY --chown=appuser:appuser frontend/dist/ /usr/share/nginx/html
 
 # 复制后端二进制文件（已在 GitHub Actions 中编译，根据目标架构选择）
-COPY backend/better-monitor-backend-${TARGETARCH} /app/main
-RUN chmod +x /app/main && chown appuser:appuser /app/main
+COPY --chown=appuser:appuser --chmod=755 backend/better-monitor-backend-${TARGETARCH} /app/main
 
 # 配置supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
