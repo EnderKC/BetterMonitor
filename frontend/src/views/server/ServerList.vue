@@ -182,14 +182,13 @@ const viewServer = (id: number) => {
 
 // 查看服务器令牌
 const viewToken = (server: any) => {
-  console.log('Server object:', server);
   const dashboardUrl = window.location.origin;
   const secretKey = server.secret_key || server.SecretKey || '';
   const serverId = server.id || server.ID;
 
   const copyToClipboard = (text, type) => {
     navigator.clipboard.writeText(text).then(() => {
-      message.success(`${type}命令已复制到剪贴板`);
+      message.success(`${type}命令已复制`);
     }).catch(err => {
       console.error('复制失败:', err);
       message.error('复制失败，请手动复制');
@@ -200,85 +199,101 @@ const viewToken = (server: any) => {
     const releaseRepo = res?.agent_release_repo || 'EnderKC/BetterMonitor';
 
     Modal.info({
-      title: '服务器令牌',
-      content: h('div', {}, [
-        h('p', '请保存以下令牌信息，用于安装Agent到服务器：'),
-        h('div', { class: 'token-info' }, [
-          h('p', [
-            h('strong', 'ID: '),
-            h('span', { class: 'token-value' }, serverId)
-          ]),
-          h('p', [
-            h('strong', '密钥: '),
-            h('span', { class: 'token-value' }, secretKey || '未找到密钥')
+      title: '部署 Agent',
+      icon: h(KeyOutlined),
+      content: h('div', { class: 'deploy-modal-content' }, [
+        h('p', { class: 'deploy-desc' }, '请选择一种方式将 Agent 安装到您的服务器：'),
+
+        // 区块1：服务器信息
+        h('div', { class: 'deploy-block' }, [
+          h('div', { class: 'block-title' }, '服务器信息'),
+          h('div', { class: 'token-grid' }, [
+            h('div', { class: 'token-item' }, [
+              h('span', { class: 'token-label' }, 'Server ID'),
+              h('div', { class: 'token-value-box' }, [
+                h('code', { class: 'token-value' }, serverId),
+                h(CopyOutlined, {
+                  class: 'token-copy-icon',
+                  onClick: () => copyToClipboard(String(serverId), 'Server ID')
+                })
+              ])
+            ]),
+            h('div', { class: 'token-item' }, [
+              h('span', { class: 'token-label' }, 'Secret Key'),
+              h('div', { class: 'token-value-box' }, [
+                h('code', { class: 'token-value' }, secretKey || '未找到密钥'),
+                h(CopyOutlined, {
+                  class: 'token-copy-icon',
+                  onClick: () => copyToClipboard(secretKey, 'Secret Key')
+                })
+              ])
+            ])
           ])
         ]),
-        h('div', { class: 'token-help' }, [
-          h('p', { style: 'font-weight: bold; margin-top: 16px; color: #52c41a;' }, '方式一：一键安装（推荐）'),
-          h('p', { style: 'margin: 8px 0; color: #666;' }, '在目标服务器上执行以下命令即可自动安装并启动 Agent：'),
-          h('div', { style: 'position: relative; margin: 12px 0;' }, [
-            h('div', { style: 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;' }, [
-              h('span', { style: 'font-weight: bold;' }, '一键安装命令:'),
-              h('a-button', {
-                type: 'primary',
-                size: 'small',
-                shape: 'round',
-                onClick: () => copyToClipboard(
-                  `curl -fsSL https://raw.githubusercontent.com/${releaseRepo}/refs/heads/main/install-agent.sh | bash -s -- --server-id ${serverId} --secret-key ${secretKey} --server ${dashboardUrl}`,
-                  '一键安装'
-                )
-              }, [
-                h(CopyOutlined),
-                ' 复制命令'
-              ])
-            ]),
-            h('pre', { class: 'install-command' },
+
+        // 区块2：一键安装
+        h('div', { class: 'deploy-block recommended-block' }, [
+          h('div', { class: 'block-header' }, [
+            h('div', { class: 'block-title' }, '方案一：一键安装'),
+            h('span', { class: 'recommend-badge' }, '推荐')
+          ]),
+          h('p', { class: 'block-desc' }, '在目标服务器上执行以下命令即可自动完成安装和启动：'),
+          h('div', { class: 'command-box' }, [
+            h('pre', { class: 'command-text' },
               `curl -fsSL https://raw.githubusercontent.com/${releaseRepo}/refs/heads/main/install-agent.sh | bash -s -- --server-id ${serverId} --secret-key ${secretKey} --server ${dashboardUrl}`
-            )
-          ]),
-          h('p', { style: 'font-weight: bold; margin-top: 24px;' }, '方式二：手动安装'),
-          h('ol', { style: 'margin-top: 8px;' }, [
-            h('li', [
-              '访问 ',
-              h('a', {
-                href: `https://github.com/${releaseRepo}/releases/latest`,
-                target: '_blank',
-                style: 'color: #1890ff;'
-              }, 'Agent发布页面'),
-              '，下载对应系统的二进制文件'
-            ]),
-            h('li', '授予执行权限：chmod +x better-monitor-agent'),
-            h('li', '使用以下命令启动：')
-          ]),
-          h('div', { style: 'position: relative; margin-top: 12px;' }, [
-            h('div', { style: 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;' }, [
-              h('span', { style: 'font-weight: bold;' }, '手动启动命令:'),
-              h('a-button', {
-                type: 'default',
-                size: 'small',
-                shape: 'round',
-                onClick: () => copyToClipboard(
-                  `./better-monitor-agent --server ${dashboardUrl} --server-id ${serverId} --secret-key ${secretKey}`,
-                  '手动启动'
-                )
-              }, [
-                h(CopyOutlined),
-                ' 复制命令'
+            ),
+            h('div', {
+              class: 'copy-btn',
+              onClick: () => copyToClipboard(
+                `curl -fsSL https://raw.githubusercontent.com/${releaseRepo}/refs/heads/main/install-agent.sh | bash -s -- --server-id ${serverId} --secret-key ${secretKey} --server ${dashboardUrl}`,
+                '一键安装'
+              )
+            }, [h(CopyOutlined)])
+          ])
+        ]),
+
+        // 区块3：手动安装
+        h('div', { class: 'deploy-block' }, [
+          h('div', { class: 'block-title' }, '方案二：手动安装'),
+          h('div', { class: 'step-list' }, [
+            h('div', { class: 'step-item' }, [
+              h('span', { class: 'step-num' }, '1'),
+              h('span', { class: 'step-text' }, [
+                '下载对应系统的二进制文件：',
+                h('a', { href: `https://github.com/${releaseRepo}/releases/latest`, target: '_blank' }, '前往下载')
               ])
             ]),
-            h('pre', { class: 'install-command' },
+            h('div', { class: 'step-item' }, [
+              h('span', { class: 'step-num' }, '2'),
+              h('span', { class: 'step-text' }, '赋予执行权限：chmod +x better-monitor-agent')
+            ]),
+            h('div', { class: 'step-item' }, [
+              h('span', { class: 'step-num' }, '3'),
+              h('span', { class: 'step-text' }, '使用以下命令启动：')
+            ])
+          ]),
+          h('div', { class: 'command-box' }, [
+            h('pre', { class: 'command-text' },
               `./better-monitor-agent --server ${dashboardUrl} --server-id ${serverId} --secret-key ${secretKey}`
-            )
+            ),
+            h('div', {
+              class: 'copy-btn',
+              onClick: () => copyToClipboard(
+                `./better-monitor-agent --server ${dashboardUrl} --server-id ${serverId} --secret-key ${secretKey}`,
+                '启动'
+              )
+            }, [h(CopyOutlined)])
           ])
         ])
       ]),
-      okText: '我已保存',
-      width: 700,
-      class: 'token-modal'
+      okText: '完成',
+      width: 720,
+      class: 'deploy-modal glass-modal',
+      maskClosable: true
     });
   }).catch(err => {
     console.error('获取设置失败:', err);
-    message.warning('无法获取发布仓库信息，请参考文档手动安装');
+    message.warning('无法获取发布仓库信息');
   });
 };
 
@@ -386,7 +401,7 @@ onMounted(() => {
   align-items: center;
   padding: 16px;
   margin-bottom: 16px;
-  
+
 }
 
 .header-title h2 {
@@ -508,18 +523,18 @@ onMounted(() => {
 </style>
 
 <style>
-.dark .modern-table .ant-table-thead > tr > th {
+.dark .modern-table .ant-table-thead>tr>th {
   background: #2d2d2d;
   color: #ccc;
   border-bottom: 1px solid #333;
 }
 
-.dark .modern-table .ant-table-tbody > tr > td {
+.dark .modern-table .ant-table-tbody>tr>td {
   border-bottom: 1px solid #333;
   color: #ccc;
 }
 
-.dark .modern-table .ant-table-tbody > tr:hover > td {
+.dark .modern-table .ant-table-tbody>tr:hover>td {
   background: #2a2d2e !important;
 }
 
@@ -547,8 +562,368 @@ onMounted(() => {
   color: #e0e0e0;
 }
 
-.dark .token-info {
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+
+:deep(.deploy-modal .ant-modal-content) {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(246, 250, 255, 0.55));
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 35px 80px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+:deep(.deploy-modal .ant-modal-content)::before,
+:deep(.deploy-modal .ant-modal-content)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:deep(.deploy-modal .ant-modal-content)::before {
+  background: radial-gradient(circle at 20% 15%, rgba(255, 255, 255, 0.7), transparent 60%);
+  opacity: 0.9;
+}
+
+:deep(.deploy-modal .ant-modal-content)::after {
+  background: radial-gradient(circle at 80% -10%, rgba(59, 130, 246, 0.4), transparent 55%);
+  filter: blur(18px);
+}
+
+:deep(.deploy-modal .ant-modal-header),
+:deep(.deploy-modal .ant-modal-body),
+:deep(.deploy-modal .ant-modal-footer) {
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+
+:deep(.deploy-modal .ant-modal-header) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 22px 32px 12px;
+  margin-bottom: 0;
+}
+
+:deep(.deploy-modal .ant-modal-body) {
+  padding: 28px 32px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+:deep(.deploy-modal .ant-modal-footer) {
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 16px 32px 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0));
+}
+
+:deep(.deploy-modal .ant-modal-title) {
+  font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(120deg, #2563eb, #7c3aed);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:deep(.deploy-modal .ant-modal-footer .ant-btn-primary) {
+  border: none;
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  box-shadow: 0 15px 40px rgba(37, 99, 235, 0.35);
+  border-radius: 999px;
+  padding: 0 32px;
+  height: 40px;
+}
+
+:deep(.deploy-desc) {
+  color: rgba(15, 23, 42, 0.65);
+  margin-bottom: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+:deep(.deploy-block) {
+  position: relative;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 20px;
+  padding: 20px;
+  margin-bottom: 4px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  overflow: hidden;
+}
+
+:deep(.deploy-block::after) {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+  opacity: 0.6;
+}
+
+:deep(.deploy-block.recommended-block) {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: linear-gradient(150deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.06));
+  box-shadow: 0 25px 60px rgba(59, 130, 246, 0.25);
+}
+
+:deep(.block-header) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+:deep(.block-title) {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+:deep(.block-header .block-title) {
+  margin-bottom: 0;
+}
+
+:deep(.recommend-badge) {
+  font-size: 10px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.2);
+  color: #2563eb;
+  letter-spacing: 0.05em;
+}
+
+:deep(.block-desc) {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.6);
+  margin-bottom: 12px;
+}
+
+:deep(.token-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+:deep(.token-item) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:deep(.token-label) {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.5);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+:deep(.token-value-box) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4), 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+:deep(.token-value) {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+:deep(.token-copy-icon) {
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  padding: 4px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+:deep(.token-copy-icon:hover) {
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-color: transparent;
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.35);
+}
+
+:deep(.command-box) {
+  position: relative;
+  background: rgba(15, 23, 42, 0.92);
+  border-radius: 16px;
+  padding: 16px 48px 16px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 25px 50px rgba(15, 23, 42, 0.45);
+}
+
+:deep(.command-text) {
+  margin: 0;
+  color: #f1f5f9;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+:deep(.copy-btn) {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #cbd5f5;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 15px 30px rgba(37, 99, 235, 0.3);
+}
+
+:deep(.copy-btn:hover) {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  color: #fff;
+  transform: translateY(-2px);
+}
+
+:deep(.step-list) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+:deep(.step-item) {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.65);
+}
+
+:deep(.step-num) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.35));
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  flex-shrink: 0;
+  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.25);
+}
+
+/* Dark Mode Adaptations */
+.dark :deep(.deploy-modal .ant-modal-content) {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.92), rgba(12, 18, 30, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 35px 90px rgba(0, 0, 0, 0.75);
+}
+
+.dark :deep(.deploy-modal .ant-modal-content)::before {
+  background: radial-gradient(circle at 15% 10%, rgba(255, 255, 255, 0.25), transparent 60%);
+  opacity: 0.5;
+}
+
+.dark :deep(.deploy-modal .ant-modal-content)::after {
+  background: radial-gradient(circle at 80% -10%, rgba(99, 102, 241, 0.45), transparent 55%);
+}
+
+.dark :deep(.deploy-modal .ant-modal-header) {
+  border-bottom-color: rgba(148, 163, 184, 0.25);
+}
+
+.dark :deep(.deploy-modal .ant-modal-footer) {
+  border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+.dark :deep(.deploy-desc) {
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.dark :deep(.block-title),
+.dark :deep(.block-desc),
+.dark :deep(.token-label),
+.dark :deep(.step-item) {
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.dark :deep(.deploy-block) {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.65);
+}
+
+.dark :deep(.deploy-block.recommended-block) {
+  background: linear-gradient(150deg, rgba(59, 130, 246, 0.22), rgba(79, 70, 229, 0.15));
+  border-color: rgba(79, 70, 229, 0.4);
+}
+
+.dark :deep(.recommend-badge) {
+  background: rgba(59, 130, 246, 0.25);
+  color: #c4d6ff;
+}
+
+.dark :deep(.token-value-box) {
+  background: rgba(30, 41, 59, 0.75);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.dark :deep(.token-copy-icon) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.dark :deep(.token-copy-icon:hover) {
+  color: #fff;
+}
+
+.dark :deep(.command-box) {
+  background: rgba(2, 6, 23, 0.9);
+  border-color: rgba(59, 130, 246, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15), 0 30px 60px rgba(0, 0, 0, 0.75);
+}
+
+.dark :deep(.copy-btn) {
+  border-color: rgba(59, 130, 246, 0.3);
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.dark :deep(.copy-btn:hover) {
+  box-shadow: 0 15px 35px rgba(59, 130, 246, 0.45);
+}
+
+.dark :deep(.step-num) {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6));
+  color: #e0e7ff;
 }
 </style>

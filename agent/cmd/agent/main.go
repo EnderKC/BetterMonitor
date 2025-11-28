@@ -26,6 +26,8 @@ func main() {
 		configFile    string
 		serverURL     string
 		registerToken string
+		serverID      uint
+		secretKey     string
 		logFile       string
 		logLevel      string
 	)
@@ -39,6 +41,8 @@ func main() {
 	flag.StringVar(&configFile, "c", "", "指定配置文件路径(简写)")
 	flag.StringVar(&serverURL, "server", "", "服务器URL(例如: 127.0.0.1:8080)")
 	flag.StringVar(&registerToken, "token", "", "注册令牌")
+	flag.UintVar(&serverID, "server-id", 0, "服务器ID")
+	flag.StringVar(&secretKey, "secret-key", "", "服务器密钥")
 	flag.StringVar(&logFile, "log", "", "日志文件路径")
 	flag.StringVar(&logLevel, "level", "", "日志级别(debug, info, warn, error)")
 
@@ -117,6 +121,12 @@ func main() {
 	}
 	if registerToken != "" {
 		cfg.RegisterToken = registerToken
+	}
+	if serverID > 0 {
+		cfg.ServerID = serverID
+	}
+	if secretKey != "" {
+		cfg.SecretKey = secretKey
 	}
 	if logFile != "" {
 		cfg.LogFile = logFile
