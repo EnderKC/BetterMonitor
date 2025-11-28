@@ -21,11 +21,20 @@ const userStore = useUserStore();
 const router = useRouter();
 const settingsStore = useSettingsStore();
 
-// 如果不是管理员，重定向到首页
-if (!userStore.isAdmin) {
-  message.error('只有管理员才能访问此页面');
-  router.push('/');
-}
+const ensureAdminAccess = async () => {
+  // 如果当前状态不是管理员，尝试刷新一次用户信息
+  if (!userStore.isAdmin) {
+    await userStore.getUserInfo(true);
+  }
+
+  if (!userStore.isAdmin) {
+    message.error('只有管理员才能访问此页面');
+    router.push('/');
+    return false;
+  }
+
+  return true;
+};
 
 // 设置表单
 const form = reactive({
@@ -203,6 +212,11 @@ const saveSettings = async () => {
 
 // 页面初始化
 onMounted(async () => {
+  const hasAccess = await ensureAdminAccess();
+  if (!hasAccess) {
+    return;
+  }
+
   // 先加载settingsStore的值（如果已有）
   if (settingsStore.loaded) {
     form.heartbeat_interval = settingsStore.heartbeatInterval;

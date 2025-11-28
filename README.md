@@ -252,7 +252,7 @@ docker logs -f better-monitor
 
 - **访问地址**: http://your-server-ip:3333
 - **默认账号**: admin
-- **默认密码**: 123456
+- **默认密码**: admin123
 
 > ⚠️ **安全提醒**:
 > 1. 首次登录后请立即修改默认密码

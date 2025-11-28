@@ -32,8 +32,9 @@ const showPasswordForm = ref(false);
 const fetchUserProfile = async () => {
   loading.value = true;
   try {
+    // axios拦截器已经返回了 response.data，这里直接使用响应体即可
     const response = await request.get('/profile');
-    userInfo.value = response.data || {};
+    userInfo.value = response || {};
 
     // 填充表单数据
     formState.username = userInfo.value.username || '';

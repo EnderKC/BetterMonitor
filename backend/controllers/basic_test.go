@@ -236,58 +236,6 @@ func TestGetServerStatus_InvalidID(t *testing.T) {
 	assert.Equal(t, "无效的服务器ID", response["error"])
 }
 
-func TestHeartbeat_InvalidID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	// 创建测试请求
-	req := httptest.NewRequest(http.MethodPost, "/servers/invalid/heartbeat", nil)
-	w := httptest.NewRecorder()
-
-	// 创建Gin上下文
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
-	c.Params = []gin.Param{{Key: "id", Value: "invalid"}}
-
-	// 调用心跳函数
-	Heartbeat(c)
-
-	// 验证响应状态码
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-
-	// 验证响应内容
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "无效的服务器ID", response["error"])
-}
-
-func TestHeartbeat_NoSecretKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	// 创建测试请求
-	req := httptest.NewRequest(http.MethodPost, "/servers/1/heartbeat", nil)
-	w := httptest.NewRecorder()
-
-	// 创建Gin上下文
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
-	c.Params = []gin.Param{{Key: "id", Value: "1"}}
-
-	// 调用心跳函数
-	Heartbeat(c)
-
-	// 验证响应状态码
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-	// 验证响应内容
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "未提供密钥", response["error"])
-}
-
 func TestReportMonitorData_InvalidID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -339,7 +287,7 @@ func TestResponseTimeValidation(t *testing.T) {
 
 	// 测试健康检查响应时间
 	start := time.Now()
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 

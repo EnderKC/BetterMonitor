@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -22,13 +23,23 @@ func init() {
 	_ = godotenv.Load("../.env")
 	_ = godotenv.Load(".env")
 
-	// 从环境变量读取版本信息
-	if envVersion := os.Getenv("VERSION"); envVersion != "" {
+	// 记录通过ldflags注入的版本信息，以便作为回退
+	buildVersion := strings.TrimSpace(Version)
+
+	// 从环境变量读取版本信息（优先级最高）
+	if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" {
 		Version = envVersion
-	} else {
-		// 如果没有找到版本信息，使用unknown作为默认值
-		Version = "unknown"
+		return
 	}
+
+	// 如果没有环境变量，则优先使用编译时注入的版本号
+	if buildVersion != "" {
+		Version = buildVersion
+		return
+	}
+
+	// 最后使用默认值
+	Version = "unknown"
 }
 
 // Info 版本信息结构

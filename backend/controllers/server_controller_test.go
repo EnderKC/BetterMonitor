@@ -333,121 +333,6 @@ func TestGetServerStatus(t *testing.T) {
 	}
 }
 
-func TestHeartbeat(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	tests := []struct {
-		name           string
-		serverID       string
-		secretKey      string
-		requestBody    map[string]interface{}
-		expectedStatus int
-		expectedError  string
-		setupMocks     func()
-	}{
-		{
-			name:      "成功心跳",
-			serverID:  "1",
-			secretKey: "valid-secret",
-			requestBody: map[string]interface{}{
-				"status":    "online",
-				"timestamp": time.Now().Unix(),
-				"version":   "1.0.0",
-			},
-			expectedStatus: http.StatusOK,
-			setupMocks: func() {
-				models.GetServerByID = func(id uint) (*models.Server, error) {
-					return &models.Server{
-						ID:        1,
-						SecretKey: "valid-secret",
-					}, nil
-				}
-				models.UpdateServerHeartbeatAndStatus = func(id uint, status string) error {
-					return nil
-				}
-				models.UpdateServerAgentVersion = func(id uint, version string) error {
-					return nil
-				}
-			},
-		},
-		{
-			name:           "无效的服务器ID",
-			serverID:       "invalid",
-			secretKey:      "valid-secret",
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "无效的服务器ID",
-			setupMocks:     func() {},
-		},
-		{
-			name:           "未提供密钥",
-			serverID:       "1",
-			secretKey:      "",
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  "未提供密钥",
-			setupMocks:     func() {},
-		},
-		{
-			name:           "密钥无效",
-			serverID:       "1",
-			secretKey:      "invalid-secret",
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  "密钥无效",
-			setupMocks: func() {
-				models.GetServerByID = func(id uint) (*models.Server, error) {
-					return &models.Server{
-						ID:        1,
-						SecretKey: "valid-secret",
-					}, nil
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 设置模拟
-			tt.setupMocks()
-
-			// 创建测试请求
-			var body []byte
-			if tt.requestBody != nil {
-				body, _ = json.Marshal(tt.requestBody)
-			}
-			req := httptest.NewRequest(http.MethodPost, "/servers/"+tt.serverID+"/heartbeat", bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			if tt.secretKey != "" {
-				req.Header.Set("X-Secret-Key", tt.secretKey)
-			}
-
-			// 创建响应记录器
-			w := httptest.NewRecorder()
-
-			// 创建Gin上下文
-			c, _ := gin.CreateTestContext(w)
-			c.Request = req
-			c.Params = []gin.Param{{Key: "id", Value: tt.serverID}}
-
-			// 调用心跳函数
-			Heartbeat(c)
-
-			// 验证响应状态码
-			assert.Equal(t, tt.expectedStatus, w.Code)
-
-			// 验证响应内容
-			var response map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &response)
-			assert.NoError(t, err)
-
-			if tt.expectedError != "" {
-				assert.Equal(t, tt.expectedError, response["error"])
-			} else {
-				assert.Equal(t, "心跳接收成功", response["message"])
-				assert.NotEmpty(t, response["serverTime"])
-			}
-		})
-	}
-}
-
 func TestReportMonitorData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -466,9 +351,9 @@ func TestReportMonitorData(t *testing.T) {
 			secretKey: "valid-secret",
 			requestBody: map[string]interface{}{
 				"cpu_usage":    25.5,
-				"memory_used":  1073741824,  // 1GB
-				"memory_total": 4294967296,  // 4GB
-				"disk_used":    10737418240, // 10GB
+				"memory_used":  1073741824,   // 1GB
+				"memory_total": 4294967296,   // 4GB
+				"disk_used":    10737418240,  // 10GB
 				"disk_total":   107374182400, // 100GB
 				"network_in":   1024.0,
 				"network_out":  2048.0,
@@ -573,4 +458,3 @@ func TestReportMonitorData(t *testing.T) {
 		})
 	}
 }
-

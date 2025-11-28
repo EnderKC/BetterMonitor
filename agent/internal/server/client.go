@@ -20,6 +20,7 @@ import (
 	"github.com/user/server-ops-agent/config"
 	"github.com/user/server-ops-agent/internal/monitor"
 	"github.com/user/server-ops-agent/pkg/logger"
+	"github.com/user/server-ops-agent/pkg/version"
 )
 
 // Client 与服务器通信的客户端
@@ -119,11 +120,13 @@ func (c *Client) SendHeartbeat() error {
 		Type      string `json:"type"`
 		Timestamp int64  `json:"timestamp"`
 		Status    string `json:"status"`
+		Version   string `json:"version"`
 		IsReply   bool   `json:"is_reply"`
 	}{
 		Type:      "heartbeat",
 		Timestamp: time.Now().Unix(),
 		Status:    "online",
+		Version:   version.Version,
 		IsReply:   false, // 标记为主动发送的心跳，非回复
 	}
 
@@ -306,11 +309,13 @@ func (c *Client) ConnectWebSocket() error {
 			Type      string `json:"type"`
 			Timestamp int64  `json:"timestamp"`
 			Status    string `json:"status"`
+			Version   string `json:"version"`
 			IsReply   bool   `json:"is_reply"`
 		}{
 			Type:      "heartbeat",
 			Timestamp: time.Now().Unix(),
 			Status:    "online",
+			Version:   version.Version,
 			IsReply:   false, // 标记为主动发送的心跳，非回复
 		}
 
@@ -417,11 +422,13 @@ func (c *Client) handleWebSocketMessages() {
 					Type      string `json:"type"`
 					Timestamp int64  `json:"timestamp"`
 					Status    string `json:"status"`
+					Version   string `json:"version"`
 					IsReply   bool   `json:"is_reply"` // 添加标记是否为回复的字段
 				}{
 					Type:      "heartbeat",
 					Timestamp: time.Now().Unix(),
 					Status:    "online",
+					Version:   version.Version,
 					IsReply:   true, // 标记为回复
 				}
 

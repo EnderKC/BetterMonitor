@@ -305,7 +305,7 @@ install_dashboard() {
         echo "=========================================="
         echo "  访问地址: http://$(hostname -I | awk '{print $1}'):${PORT}"
         echo "  默认账号: admin"
-        echo "  默认密码: 123456"
+        echo "  默认密码: admin123"
         echo "=========================================="
         echo ""
         echo "重要提示:"
@@ -716,7 +716,7 @@ show_status() {
         echo "访问信息:"
         echo "  地址: http://$(hostname -I | awk '{print $1}'):${PORT}"
         echo "  账号: admin"
-        echo "  密码: 123456 (首次登录请修改)"
+        echo "  密码: admin123 (首次登录请修改)"
         echo ""
 
         # 日志

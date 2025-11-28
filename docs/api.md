@@ -34,7 +34,7 @@ Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "123456"
+  "password": "admin123"
 }
 ```
 
@@ -154,12 +154,6 @@ Content-Type: application/json
   "system_info": "{\"uptime\":3600,\"kernel\":\"5.4.0-42-generic\"}",
   "agent_version": "1.0.0"
 }
-```
-
-#### 服务器心跳
-```http
-POST /api/servers/{id}/heartbeat
-X-Secret-Key: <secret_key>
 ```
 
 #### 提交监控数据
@@ -861,7 +855,7 @@ class BetterMonitorAPI:
 
 # 使用示例
 api = BetterMonitorAPI('http://localhost:3333')
-api.login('admin', '123456')
+api.login('admin', 'admin123')
 servers = api.get_servers()
 print(f"找到 {len(servers['servers'])} 台服务器")
 ```

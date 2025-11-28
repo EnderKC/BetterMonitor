@@ -1192,6 +1192,7 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				Type      string `json:"type"`
 				Timestamp int64  `json:"timestamp"`
 				Status    string `json:"status,omitempty"`
+				Version   string `json:"version,omitempty"`
 				IsReply   bool   `json:"is_reply,omitempty"` // 标记是否为回复
 			}
 			if err := json.Unmarshal(message, &heartbeatMsg); err != nil {
@@ -1213,6 +1214,16 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				server.Status = status
 				server.Online = true
 				server.LastHeartbeat = time.Now()
+			}
+
+			// 如果心跳中包含版本信息，则同步更新数据库中的Agent版本
+			if version := strings.TrimSpace(heartbeatMsg.Version); version != "" {
+				if err := models.UpdateServerAgentVersion(server.ID, version); err != nil {
+					log.Printf("更新服务器 %d Agent版本失败: %v", server.ID, err)
+				} else {
+					server.AgentVersion = version
+					log.Printf("服务器 %d Agent版本已更新为 %s", server.ID, version)
+				}
 			}
 
 			if !heartbeatMsg.IsReply {
