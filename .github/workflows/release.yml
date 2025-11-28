@@ -41,7 +41,23 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
+        run: |
+          if [ ! -f .env ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "::error::VERSION entry not found in .env"
+            exit 1
+          fi
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION value in .env is empty"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Build agent
         env:
@@ -84,7 +100,23 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
+        run: |
+          if [ ! -f .env ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "::error::VERSION entry not found in .env"
+            exit 1
+          fi
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION value in .env is empty"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install cross-compilation tools
         if: matrix.arch == 'arm64'
@@ -142,7 +174,23 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
+        run: |
+          if [ ! -f .env ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "::error::VERSION entry not found in .env"
+            exit 1
+          fi
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION value in .env is empty"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Download backend amd64 artifact
         uses: actions/download-artifact@v4
@@ -226,7 +274,23 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(grep VERSION .env | cut -d'=' -f2)" >> $GITHUB_OUTPUT
+        run: |
+          if [ ! -f .env ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "::error::VERSION entry not found in .env"
+            exit 1
+          fi
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION value in .env is empty"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
