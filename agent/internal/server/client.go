@@ -2424,10 +2424,12 @@ func (c *Client) handleAgentUpgrade(message []byte) {
 	var upgradeMsg struct {
 		Type      string `json:"type"`
 		RequestID string `json:"request_id"`
-		Data      struct {
+		Payload   struct {
+			Action        string `json:"action"`
 			TargetVersion string `json:"target_version"`
 			Channel       string `json:"channel"`
-		} `json:"data"`
+			ServerID      uint64 `json:"server_id"`
+		} `json:"payload"`
 	}
 
 	if err := json.Unmarshal(message, &upgradeMsg); err != nil {
@@ -2435,12 +2437,17 @@ func (c *Client) handleAgentUpgrade(message []byte) {
 		return
 	}
 
+	channel := c.effectiveChannel(upgradeMsg.Payload.Channel)
+	targetVersion := strings.TrimSpace(upgradeMsg.Payload.TargetVersion)
+
 	c.sendResponse(upgradeMsg.RequestID, "agent_upgrade_response", map[string]interface{}{
-		"status":  "started",
-		"message": "开始执行升级流程",
+		"status":         "started",
+		"message":        "开始执行升级流程",
+		"target_version": targetVersion,
+		"channel":        channel,
 	})
 
-	go c.performAgentUpgrade(upgradeMsg.RequestID, upgradeMsg.Data.TargetVersion, upgradeMsg.Data.Channel)
+	go c.performAgentUpgrade(upgradeMsg.RequestID, targetVersion, channel)
 }
 
 // 执行升级流程

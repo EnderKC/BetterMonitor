@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import {
   DashboardOutlined,
@@ -16,6 +16,7 @@ import {
 import { message } from 'ant-design-vue';
 import { clearLoginInfo, getUser } from '../utils/auth';
 import ThemeSwitch from '@/components/ThemeSwitch.vue';
+import { getDashboardVersion } from '@/utils/version';
 
 import { useThemeStore } from '@/stores/theme';
 import { storeToRefs } from 'pinia';
@@ -61,6 +62,22 @@ const goToSettings = () => router.push('/admin/settings');
 const goToAlertSettings = () => router.push('/admin/alerts/settings');
 const goToNotificationChannels = () => router.push('/admin/alerts/channels');
 const goToAlertRecords = () => router.push('/admin/alerts/records');
+
+const dashboardVersion = ref('');
+const currentYear = new Date().getFullYear();
+
+const loadDashboardVersion = async () => {
+  try {
+    const versionInfo = await getDashboardVersion();
+    dashboardVersion.value = versionInfo?.version || '';
+  } catch (error) {
+    console.error('获取面板版本失败:', error);
+  }
+};
+
+onMounted(() => {
+  loadDashboardVersion();
+});
 </script>
 
 <template>
@@ -183,7 +200,13 @@ const goToAlertRecords = () => router.push('/admin/alerts/records');
 
       <!-- 页脚 -->
       <a-layout-footer class="modern-footer">
-        <span class="gradient-text">Better-Monitor</span> &copy; {{ new Date().getFullYear() }}
+        <div class="footer-left">
+          <span class="gradient-text">Better-Monitor</span>
+          <span class="version-badge">
+            面板 {{ dashboardVersion ? 'v' + dashboardVersion : '版本未知' }}
+          </span>
+        </div>
+        <span>&copy; {{ currentYear }}</span>
       </a-layout-footer>
     </a-layout>
   </a-layout>
@@ -359,6 +382,11 @@ const goToAlertRecords = () => router.push('/admin/alerts/records');
 
 /* Footer */
 .modern-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   text-align: center;
   padding: 16px 24px;
   color: var(--text-hint);
@@ -367,6 +395,23 @@ const goToAlertRecords = () => router.push('/admin/alerts/records');
   border-top: 1px solid rgba(0, 0, 0, 0.04);
   box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.06);
   transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.version-badge {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 
@@ -491,5 +536,10 @@ const goToAlertRecords = () => router.push('/admin/alerts/records');
 
 .dark .ant-dropdown-menu-item-divider {
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .version-badge {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
 }
 </style>
