@@ -749,6 +749,34 @@ const formatCompactConfig = (server: any) => {
 
   return `${cores} ${mem} / ${disk}`;
 };
+
+// 获取简短的Device ID
+const getShortDeviceId = (id: string) => {
+  if (!id) return 'Unknown';
+  if (id.length <= 12) return id;
+  return id.substring(0, 6) + '...' + id.substring(id.length - 4);
+};
+
+// 估算距离 (km)
+const estimateDistance = (steps: number) => {
+  if (!steps) return '0.0';
+  return (steps * 0.0007).toFixed(1); // 假设一步0.7米
+};
+
+// 估算卡路里 (kcal)
+const estimateCalories = (steps: number) => {
+  if (!steps) return '0';
+  return Math.round(steps * 0.04).toLocaleString(); // 假设一步0.04千卡
+};
+
+// 获取同步延迟显示
+const getSyncLatency = (lastSync?: string) => {
+  if (!lastSync) return '--';
+  const diff = Date.now() - new Date(lastSync).getTime();
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
+  return `${Math.floor(diff / 3600000)}小时前`;
+};
 </script>
 
 <template>
@@ -802,6 +830,136 @@ const formatCompactConfig = (server: any) => {
         </div>
 
         <div v-else class="servers-grid">
+          <!-- Life Probes -->
+          <div v-for="probe in lifeProbes" :key="'life-' + probe.id" class="server-card glass-card life-probe-card"
+            @click="openLifeDetail(probe.id)">
+            <!-- 头部信息 -->
+            <div class="card-header">
+              <div class="header-left">
+                <span class="flag-icon">❤️</span>
+                <div class="header-text">
+                  <h3 class="server-name" :title="probe.name">{{ probe.name }}</h3>
+                </div>
+              </div>
+              <div class="header-right">
+                <div class="status-dot online"></div>
+              </div>
+            </div>
+
+            <!-- 信息条 (Device ID + Focus) -->
+            <div class="server-info-bar">
+              <span class="info-cpu" :title="probe.device_id">
+                <MobileOutlined /> {{ getShortDeviceId(probe.device_id) }}
+              </span>
+              <span class="info-divider">|</span>
+              <span class="info-config">{{ getLifeFocusLabel(probe) }}</span>
+            </div>
+
+            <!-- 核心指标网格 -->
+            <div class="metrics-grid-compact life-metrics-grid">
+              <!-- 心率 -->
+              <div class="metric-compact">
+                <div class="metric-row">
+                  <span class="metric-icon heart-icon-active">
+                    <HeartFilled />
+                  </span>
+                  <span class="metric-name">心率</span>
+                  <span class="metric-val">{{ getLifeHeartRate(probe) }} BPM</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill"
+                    :style="{ width: Math.min(100, (probe.latest_heart_rate?.value || 0) / 200 * 100) + '%', background: '#ff4d4f' }">
+                  </div>
+                </div>
+              </div>
+
+              <!-- 步数 -->
+              <div class="metric-compact">
+                <div class="metric-row">
+                  <span class="metric-icon" style="color: #faad14">
+                    <ThunderboltOutlined />
+                  </span>
+                  <span class="metric-name">步数</span>
+                  <span class="metric-val">{{ Math.round(probe.steps_today).toLocaleString() }}</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill"
+                    :style="{ width: getStepsProgress(probe) + '%', background: '#faad14' }"></div>
+                </div>
+              </div>
+
+              <!-- 电量 -->
+              <div class="metric-compact">
+                <div class="metric-row">
+                  <span class="metric-icon" style="color: #52c41a">
+                    <MobileOutlined />
+                  </span>
+                  <span class="metric-name">电量</span>
+                  <span class="metric-val">{{ getBatteryLevel(probe) }}</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill"
+                    :style="{ width: (probe.battery_level || 0) * 100 + '%', background: '#52c41a' }"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 活动数据 (模仿网络部分) -->
+            <div class="network-section">
+              <div class="net-item">
+                <span class="net-val success">{{ estimateDistance(probe.steps_today) }} km</span>
+              </div>
+              <div class="net-item">
+                <span class="net-val primary">{{ estimateCalories(probe.steps_today) }} kcal</span>
+              </div>
+            </div>
+
+            <div class="network-total-row">
+              <div class="net-total-item">
+                <span title="预估距离">今日里程</span>
+              </div>
+              <div class="net-total-item">
+                <span title="预估消耗">今日消耗</span>
+              </div>
+            </div>
+
+            <a-divider style="margin: 12px 0;" />
+
+            <!-- 同步状态 (模仿延迟部分) -->
+            <div class="latency-section">
+              <div class="latency-item">
+                <ClockCircleOutlined />
+                <span class="latency-label">同步延迟</span>
+                <span class="latency-val">{{ getSyncLatency(probe.last_sync_at) }}</span>
+              </div>
+              <div class="latency-item">
+                <span class="latency-label">目标达成</span>
+                <span class="latency-val">{{ getStepsProgress(probe) }}%</span>
+              </div>
+            </div>
+
+            <!-- 目标进度条 (模仿延迟条) -->
+            <div class="latency-bar-bg">
+              <div class="latency-bar-fill"
+                :style="{ width: getStepsProgress(probe) + '%', background: getStepsProgress(probe) >= 100 ? '#52c41a' : '#1677ff' }">
+              </div>
+            </div>
+
+            <a-divider style="margin: 12px 0;" />
+
+            <!-- 底部信息 -->
+            <div class="card-footer-compact">
+              <div class="footer-item">
+                <span>{{ probe.device_id ? '已连接' : '未连接' }}</span>
+              </div>
+              <div class="footer-item">
+                <SyncOutlined :spin="false" />
+                <span>{{ formatLifeTime(probe.last_sync_at) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Server Probes -->
           <div v-for="server in servers" :key="server.id" class="server-card glass-card">
             <!-- 头部信息 -->
             <div class="card-header">
@@ -956,74 +1114,7 @@ const formatCompactConfig = (server: any) => {
         </div>
       </a-spin>
 
-      <div class="life-section">
-        <div class="section-header">
-          <div>
-            <h2>生命探针</h2>
-            <p>实时关注健康探针状态</p>
-          </div>
-          <span class="life-count">{{ lifeProbes.length }} 台在线</span>
-        </div>
-        <a-spin :spinning="lifeLoading" tip="加载生命探针...">
-          <div v-if="!lifeLoading && lifeProbes.length === 0" class="empty-wrapper">
-            <a-empty description="暂无生命探针" />
-          </div>
-          <div v-else class="life-grid">
-            <div v-for="probe in lifeProbes" :key="probe.id" class="life-card glass-card"
-              @click="openLifeDetail(probe.id)">
-              <div class="life-card-header">
-                <div>
-                  <h3>{{ probe.name }}</h3>
-                  <p>{{ probe.device_id }}</p>
-                </div>
-                <a-tag :color="probe.focus_event?.is_focused ? 'green' : 'blue'">{{ getLifeFocusLabel(probe) }}</a-tag>
-              </div>
-              <div class="life-metrics">
-                <div class="life-metric">
-                  <div class="life-metric-icon heart">
-                    <HeartFilled />
-                  </div>
-                  <div>
-                    <p>心率</p>
-                    <h4>{{ getLifeHeartRate(probe) }} <span v-if="probe.latest_heart_rate">BPM</span></h4>
-                  </div>
-                </div>
-                <div class="life-metric">
-                  <div class="life-metric-icon steps">
-                    <ThunderboltOutlined />
-                  </div>
-                  <div>
-                    <p>今日步数</p>
-                    <h4>{{ Math.round(probe.steps_today).toLocaleString() }}</h4>
-                  </div>
-                </div>
-                <div class="life-metric">
-                  <div class="life-metric-icon focus">
-                    <MobileOutlined />
-                  </div>
-                  <div>
-                    <p>电量</p>
-                    <h4>{{ getBatteryLevel(probe) }}</h4>
-                  </div>
-                </div>
-              </div>
-              <div class="life-progress">
-                <div class="progress-label">
-                  <span>目标 {{ LIFE_STEP_GOAL.toLocaleString() }} 步</span>
-                  <span>{{ getStepsProgress(probe) }}%</span>
-                </div>
-                <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" :style="{ width: getStepsProgress(probe) + '%' }"></div>
-                </div>
-              </div>
-              <div class="life-meta">
-                <span>最后同步: {{ formatLifeTime(probe.last_sync_at) }}</span>
-                <span>点击查看详情</span>
-              </div>
-            </div>
-          </div>
-        </a-spin>
-      </div>
+      <!-- Life Section Removed and Merged into Grid -->
     </div>
 
     <LifeProbeDetailModal v-model="lifeDetailVisible" :probe-id="selectedLifeProbeId" public-mode />
@@ -1602,16 +1693,75 @@ const formatCompactConfig = (server: any) => {
   color: #fff;
 }
 
+.life-probe-card {
+  cursor: pointer;
+  border: 1px solid rgba(255, 77, 79, 0.2);
+}
+
+.life-probe-card:hover {
+  border-color: rgba(255, 77, 79, 0.5);
+  box-shadow: 0 12px 32px -4px rgba(255, 77, 79, 0.15);
+}
+
+.life-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  margin-bottom: 20px;
+}
+
+.heart-icon-active {
+  color: #ff4d4f;
+  animation: heartbeat 1.5s ease-in-out infinite;
+}
+
+@keyframes heartbeat {
+  0% {
+    transform: scale(1);
+  }
+
+  14% {
+    transform: scale(1.3);
+  }
+
+  28% {
+    transform: scale(1);
+  }
+
+  42% {
+    transform: scale(1.3);
+  }
+
+  70% {
+    transform: scale(1);
+  }
+}
+
+.focus-tag {
+  margin: 0;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
 .life-metric-icon.heart {
-  background: linear-gradient(135deg, #ff4d4f, #ff7875);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .life-metric-icon.steps {
   background: linear-gradient(135deg, #1677ff, #69c0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .life-metric-icon.focus {
   background: linear-gradient(135deg, #722ed1, #b37feb);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .life-progress .progress-label {

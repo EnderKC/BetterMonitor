@@ -546,15 +546,8 @@ function emptyBarOption(text: string) {
 </script>
 
 <template>
-  <a-modal
-    :open="modelValue"
-    centered
-    width="960px"
-    class="life-detail-modal"
-    :footer="null"
-    destroy-on-close
-    @cancel="close"
-  >
+  <a-modal :open="modelValue" centered width="960px" class="life-detail-modal" :footer="null" destroy-on-close
+    @cancel="close">
     <template #title>
       <div class="modal-title">
         <span>{{ summary?.name || '生命探针详情' }}</span>
@@ -633,7 +626,8 @@ function emptyBarOption(text: string) {
                 </div>
                 <div>
                   <p>总使用时长</p>
-                  <strong>{{ screenUsageSummary.hours > 0 ? screenUsageSummary.hours.toFixed(1) + ' 小时' : '--' }}</strong>
+                  <strong>{{ screenUsageSummary.hours > 0 ? screenUsageSummary.hours.toFixed(1) + ' 小时' : '--'
+                  }}</strong>
                 </div>
               </div>
               <VChart :option="screenUsageOption" autoresize class="chart" />
@@ -647,8 +641,30 @@ function emptyBarOption(text: string) {
 </template>
 
 <style scoped>
+.life-detail-modal :deep(.ant-modal-content) {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 0;
+  overflow: hidden;
+}
+
+.life-detail-modal :deep(.ant-modal-header) {
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 24px 32px;
+}
+
 .life-detail-modal :deep(.ant-modal-body) {
   padding: 0;
+}
+
+.life-detail-modal :deep(.ant-modal-close) {
+  top: 24px;
+  right: 24px;
 }
 
 .modal-title {
@@ -657,59 +673,85 @@ function emptyBarOption(text: string) {
   gap: 4px;
 }
 
+.modal-title span:first-child {
+  font-size: 20px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 .modal-title .subtitle {
-  font-size: 12px;
+  font-size: 13px;
   color: rgba(0, 0, 0, 0.45);
+  font-family: "SF Mono", Menlo, monospace;
 }
 
 .life-detail-body {
-  padding: 24px;
+  padding: 32px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.5) 100%);
 }
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
 }
 
 .overview-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s;
+}
+
+.overview-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .overview-card .label {
   font-size: 13px;
+  font-weight: 600;
   color: rgba(0, 0, 0, 0.45);
   margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .overview-card h3 {
   margin: 0;
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.85);
+  letter-spacing: -0.5px;
 }
 
 .overview-card small {
   display: block;
-  margin-top: 6px;
+  margin-top: 8px;
   color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
 }
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 24px;
 }
 
 .chart-card {
-  background: #fff;
-  border-radius: 20px;
-  padding: 16px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.6);
 }
 
 .chart-card.full-width {
@@ -717,55 +759,105 @@ function emptyBarOption(text: string) {
 }
 
 .chart-title {
+  font-size: 16px;
   font-weight: 600;
-  margin-bottom: 8px;
-  color: rgba(0, 0, 0, 0.78);
+  margin-bottom: 16px;
+  color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .chart {
   width: 100%;
-  height: 240px;
+  height: 280px;
 }
 
-.sleep-summary {
-  display: flex;
-  gap: 32px;
-  margin-bottom: 8px;
-}
-
-.sleep-summary p {
-  margin: 0;
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-}
-
-.sleep-summary strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 16px;
-}
-
+.sleep-summary,
 .screen-summary {
   display: flex;
-  gap: 32px;
-  margin-bottom: 8px;
+  gap: 48px;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 16px;
 }
 
+.sleep-summary p,
 .screen-summary p {
   margin: 0;
   font-size: 13px;
   color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 4px;
 }
 
+.sleep-summary strong,
 .screen-summary strong {
   display: block;
-  margin-top: 4px;
-  font-size: 16px;
+  font-size: 20px;
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .error-state {
-  padding: 32px;
+  padding: 48px;
   text-align: center;
   color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.05);
+  border-radius: 16px;
+  margin: 24px;
+}
+
+/* Dark Mode Support */
+:global(.dark) .life-detail-modal :deep(.ant-modal-content) {
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:global(.dark) .life-detail-modal :deep(.ant-modal-header) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .modal-title span:first-child {
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:global(.dark) .modal-title .subtitle {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+:global(.dark) .life-detail-body {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.2) 100%);
+}
+
+:global(.dark) .overview-card,
+:global(.dark) .chart-card {
+  background: rgba(40, 40, 40, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .overview-card:hover {
+  background: rgba(50, 50, 50, 0.8);
+}
+
+:global(.dark) .overview-card h3,
+:global(.dark) .sleep-summary strong,
+:global(.dark) .screen-summary strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+:global(.dark) .overview-card .label,
+:global(.dark) .overview-card small,
+:global(.dark) .chart-title,
+:global(.dark) .sleep-summary p,
+:global(.dark) .screen-summary p {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+:global(.dark) .sleep-summary,
+:global(.dark) .screen-summary {
+  background: rgba(255, 255, 255, 0.04);
 }
 </style>
