@@ -451,7 +451,10 @@ func RecordSleepSegments(db *gorm.DB, probeID uint, eventID string, segments []S
 			{Name: "start_time"},
 			{Name: "end_time"},
 		},
-		DoNothing: true,
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"event_id": eventID,
+			"duration": gorm.Expr("excluded.duration"),
+		}),
 	}).Create(&rows).Error
 }
 
@@ -493,13 +496,8 @@ func RecordScreenEvent(db *gorm.DB, probeID uint, eventID string, payload Screen
 // Query helpers ---------------------------------------------------------------
 
 func truncateToDay(t time.Time) time.Time {
-	loc := t.Location()
-	if loc == nil {
-		loc = time.UTC
-	}
-	localTime := t.In(loc)
-	localMidnight := time.Date(localTime.Year(), localTime.Month(), localTime.Day(), 0, 0, 0, 0, loc)
-	return localMidnight.UTC()
+	utc := t.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 type stepDayPart struct {
@@ -680,8 +678,11 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 	}
 
 	day := truncateToDay(referenceTime)
+	nextDay := day.Add(24 * time.Hour)
 	var total LifeStepDailyTotal
-	if err := DB.Where("life_probe_id = ? AND day = ? AND sample_type = ?", probe.ID, day, LifeDataTypeStepsDetailed).
+	if err := DB.Where("life_probe_id = ? AND sample_type = ? AND day >= ? AND day < ?",
+		probe.ID, LifeDataTypeStepsDetailed, day, nextDay).
+		Order("day desc").
 		First(&total).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
@@ -690,11 +691,10 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 		// 如果今日汇总还没写入（例如客户端只上传了 total 而没有样本，或者旧数据未覆盖），
 		// 退而求其次，直接用 step_samples 表中当天的样本累加。
 		var sum float64
-		dayEnd := day.Add(24 * time.Hour)
 		if err := DB.Model(&LifeStepSample{}).
 			Select("COALESCE(SUM(value), 0)").
 			Where("life_probe_id = ? AND sample_type = ? AND start_time >= ? AND start_time < ?",
-				probe.ID, LifeDataTypeStepsDetailed, day, dayEnd).
+				probe.ID, LifeDataTypeStepsDetailed, day, nextDay).
 			Scan(&sum).Error; err == nil {
 			summary.StepsToday = sum
 		}
