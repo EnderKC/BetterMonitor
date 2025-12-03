@@ -11,7 +11,8 @@ import {
   DownOutlined,
   AppstoreOutlined,
   SettingOutlined,
-  BellOutlined
+  BellOutlined,
+  HeartOutlined
 } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import { clearLoginInfo, getUser } from '../utils/auth';
@@ -56,6 +57,7 @@ const selectedKeys = computed(() => {
 const openKeys = ref(['servers', 'alerts']);
 
 const goToServers = () => router.push('/admin/servers');
+const goToLifeProbes = () => router.push('/admin/life-probes');
 const goToDashboard = () => router.push('/dashboard');
 const goToProfile = () => router.push('/admin/profile');
 const goToSettings = () => router.push('/admin/settings');
@@ -96,6 +98,12 @@ onMounted(() => {
             <DesktopOutlined />
           </template>
           <span>服务器管理</span>
+        </a-menu-item>
+        <a-menu-item key="/admin/life-probes" @click="goToLifeProbes">
+          <template #icon>
+            <HeartOutlined />
+          </template>
+          <span>生命探针</span>
         </a-menu-item>
 
         <a-sub-menu key="alerts">

@@ -56,6 +56,14 @@ func InitDB() error {
 		&AlertRecord{},
 		&CertificateAccount{},
 		&ManagedCertificate{},
+		&LifeProbe{},
+		&LifeLoggerEvent{},
+		&LifeHeartRate{},
+		&LifeStepSample{},
+		&LifeStepDailyTotal{},
+		&LifeSleepSegment{},
+		&LifeFocusEvent{},
+		&LifeScreenEvent{},
 	); err != nil {
 		return err
 	}
@@ -83,16 +91,21 @@ func InitDB() error {
 	if settingsCount == 0 {
 		// 创建默认系统设置
 		settings := SystemSettings{
-			HeartbeatInterval: "10s",
-			MonitorInterval:   "30s",
-			UIRefreshInterval: "10s",
-			DataRetentionDays: 7,
+			HeartbeatInterval:     "10s",
+			MonitorInterval:       "30s",
+			UIRefreshInterval:     "10s",
+			DataRetentionDays:     7,
+			LifeDataRetentionDays: 7,
 		}
 		if err := DB.Create(&settings).Error; err != nil {
 			log.Printf("创建默认系统设置失败: %v", err)
 		} else {
 			log.Println("已创建默认系统设置")
 		}
+	}
+
+	if err := NormalizeLifeStepDailyTotals(); err != nil {
+		log.Printf("规范化生命探针每日汇总时间失败: %v", err)
 	}
 
 	return nil

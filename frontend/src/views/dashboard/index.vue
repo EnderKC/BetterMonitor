@@ -4,6 +4,8 @@ import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
 import { useSettingsStore } from '../../stores/settingsStore';
+import LifeProbeDetailModal from '../../components/LifeProbeDetailModal.vue';
+import type { LifeProbeSummary } from '@/types/life';
 import {
   DesktopOutlined,
   GlobalOutlined,
@@ -24,7 +26,9 @@ import {
   CodeOutlined,
   AppleOutlined,
   WindowsOutlined,
-  AndroidOutlined
+  AndroidOutlined,
+  HeartFilled,
+  MobileOutlined
 } from '@ant-design/icons-vue';
 
 // 添加router
@@ -54,6 +58,16 @@ const reconnectCounts = ref<{ [key: string]: number }>({});
 const serverListWS = ref<WebSocket | null>(null);
 const serverListHeartbeatTimer = ref<number | null>(null);
 const serverListReconnectTimer = ref<number | null>(null);
+
+// 生命探针数据
+const lifeProbes = ref<LifeProbeSummary[]>([]);
+const lifeLoading = ref(true);
+const lifeDetailVisible = ref(false);
+const selectedLifeProbeId = ref<number | null>(null);
+const LIFE_STEP_GOAL = 10000;
+const lifeProbesWS = ref<WebSocket | null>(null);
+const lifeHeartbeatTimer = ref<number | null>(null);
+const lifeReconnectTimer = ref<number | null>(null);
 
 // 获取所有服务器的状态（通过公开WebSocket）
 const fetchServers = () => {
@@ -225,6 +239,90 @@ const fetchServers = () => {
     }
     console.log('公开服务器WebSocket连接已关闭，准备重连');
     scheduleReconnect();
+  };
+};
+
+const clearLifeHeartbeat = () => {
+  if (lifeHeartbeatTimer.value !== null) {
+    clearInterval(lifeHeartbeatTimer.value);
+    lifeHeartbeatTimer.value = null;
+  }
+};
+
+const scheduleLifeReconnect = () => {
+  if (lifeReconnectTimer.value !== null) {
+    clearTimeout(lifeReconnectTimer.value);
+  }
+  lifeReconnectTimer.value = window.setTimeout(() => {
+    lifeReconnectTimer.value = null;
+    connectLifeProbesWS();
+  }, 5000);
+};
+
+const connectLifeProbesWS = () => {
+  if (
+    lifeProbesWS.value &&
+    (lifeProbesWS.value.readyState === WebSocket.OPEN ||
+      lifeProbesWS.value.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+
+  if (lifeReconnectTimer.value !== null) {
+    clearTimeout(lifeReconnectTimer.value);
+    lifeReconnectTimer.value = null;
+  }
+
+  lifeLoading.value = true;
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let wsUrl = `${protocol}//${window.location.host}/api/life-probes/public/ws`;
+  const token = getToken();
+  if (token) {
+    wsUrl += `?token=${encodeURIComponent(token)}`;
+  }
+
+  const ws = new WebSocket(wsUrl);
+  lifeProbesWS.value = ws;
+
+  ws.onopen = () => {
+    clearLifeHeartbeat();
+    lifeHeartbeatTimer.value = window.setInterval(() => {
+      if (lifeProbesWS.value && lifeProbesWS.value.readyState === WebSocket.OPEN) {
+        try {
+          lifeProbesWS.value.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
+        } catch (error) {
+          console.error('生命探针WebSocket心跳发送失败:', error);
+        }
+      } else {
+        clearLifeHeartbeat();
+      }
+    }, 25000);
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'life_probe_list' && Array.isArray(data.life_probes)) {
+        lifeProbes.value = data.life_probes;
+        lifeLoading.value = false;
+      }
+    } catch (error) {
+      console.error('解析生命探针数据失败:', error);
+    }
+  };
+
+  ws.onerror = (error) => {
+    console.error('生命探针WebSocket错误:', error);
+    if (!lifeProbes.value.length) {
+      message.error('生命探针数据连接失败');
+    }
+  };
+
+  ws.onclose = () => {
+    clearLifeHeartbeat();
+    lifeProbesWS.value = null;
+    scheduleLifeReconnect();
   };
 };
 
@@ -429,12 +527,16 @@ const resetRefreshTimer = () => {
   }
 
   const refreshInterval = settingsStore.getUiRefreshIntervalMs();
-  timer = window.setInterval(fetchServers, refreshInterval);
+  timer = window.setInterval(() => {
+    fetchServers();
+    connectLifeProbesWS();
+  }, refreshInterval);
 };
 
 onMounted(async () => {
   await settingsStore.loadPublicSettings();
   fetchServers();
+  connectLifeProbesWS();
   resetRefreshTimer();
 });
 
@@ -463,6 +565,17 @@ onUnmounted(() => {
     serverListWS.value.onclose = null;
     serverListWS.value.close();
     serverListWS.value = null;
+  }
+
+  clearLifeHeartbeat();
+  if (lifeReconnectTimer.value !== null) {
+    clearTimeout(lifeReconnectTimer.value);
+    lifeReconnectTimer.value = null;
+  }
+  if (lifeProbesWS.value) {
+    lifeProbesWS.value.onclose = null;
+    lifeProbesWS.value.close();
+    lifeProbesWS.value = null;
   }
 });
 
@@ -570,6 +683,35 @@ const formatBandwidth = (bytesPerSec: number) => {
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
   const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
   return (bytesPerSec / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+};
+const getLifeHeartRate = (probe: LifeProbeSummary) => {
+  if (!probe.latest_heart_rate) return '--';
+  return Math.round(probe.latest_heart_rate.value);
+};
+
+const getLifeFocusLabel = (probe: LifeProbeSummary) => {
+  if (!probe.focus_event) return '未上报';
+  return probe.focus_event.is_focused ? '专注模式' : '普通模式';
+};
+
+const formatLifeTime = (value?: string) => {
+  if (!value) return '尚未同步';
+  return new Date(value).toLocaleString();
+};
+
+const getBatteryLevel = (probe: LifeProbeSummary) => {
+  if (probe.battery_level === undefined || probe.battery_level === null) return '--';
+  return `${Math.round(probe.battery_level * 100)}%`;
+};
+
+const getStepsProgress = (probe: LifeProbeSummary) => {
+  if (!probe.steps_today) return 0;
+  return Math.min(100, Math.round((probe.steps_today / LIFE_STEP_GOAL) * 100));
+};
+
+const openLifeDetail = (probeId: number) => {
+  selectedLifeProbeId.value = probeId;
+  lifeDetailVisible.value = true;
 };
 // 获取简短的CPU型号
 const getShortCpuModel = (model: string) => {
@@ -813,7 +955,78 @@ const formatCompactConfig = (server: any) => {
           </div>
         </div>
       </a-spin>
+
+      <div class="life-section">
+        <div class="section-header">
+          <div>
+            <h2>生命探针</h2>
+            <p>实时关注健康探针状态</p>
+          </div>
+          <span class="life-count">{{ lifeProbes.length }} 台在线</span>
+        </div>
+        <a-spin :spinning="lifeLoading" tip="加载生命探针...">
+          <div v-if="!lifeLoading && lifeProbes.length === 0" class="empty-wrapper">
+            <a-empty description="暂无生命探针" />
+          </div>
+          <div v-else class="life-grid">
+            <div v-for="probe in lifeProbes" :key="probe.id" class="life-card glass-card"
+              @click="openLifeDetail(probe.id)">
+              <div class="life-card-header">
+                <div>
+                  <h3>{{ probe.name }}</h3>
+                  <p>{{ probe.device_id }}</p>
+                </div>
+                <a-tag :color="probe.focus_event?.is_focused ? 'green' : 'blue'">{{ getLifeFocusLabel(probe) }}</a-tag>
+              </div>
+              <div class="life-metrics">
+                <div class="life-metric">
+                  <div class="life-metric-icon heart">
+                    <HeartFilled />
+                  </div>
+                  <div>
+                    <p>心率</p>
+                    <h4>{{ getLifeHeartRate(probe) }} <span v-if="probe.latest_heart_rate">BPM</span></h4>
+                  </div>
+                </div>
+                <div class="life-metric">
+                  <div class="life-metric-icon steps">
+                    <ThunderboltOutlined />
+                  </div>
+                  <div>
+                    <p>今日步数</p>
+                    <h4>{{ Math.round(probe.steps_today).toLocaleString() }}</h4>
+                  </div>
+                </div>
+                <div class="life-metric">
+                  <div class="life-metric-icon focus">
+                    <MobileOutlined />
+                  </div>
+                  <div>
+                    <p>电量</p>
+                    <h4>{{ getBatteryLevel(probe) }}</h4>
+                  </div>
+                </div>
+              </div>
+              <div class="life-progress">
+                <div class="progress-label">
+                  <span>目标 {{ LIFE_STEP_GOAL.toLocaleString() }} 步</span>
+                  <span>{{ getStepsProgress(probe) }}%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" :style="{ width: getStepsProgress(probe) + '%' }"></div>
+                </div>
+              </div>
+              <div class="life-meta">
+                <span>最后同步: {{ formatLifeTime(probe.last_sync_at) }}</span>
+                <span>点击查看详情</span>
+              </div>
+            </div>
+          </div>
+        </a-spin>
+      </div>
     </div>
+
+    <LifeProbeDetailModal v-model="lifeDetailVisible" :probe-id="selectedLifeProbeId" public-mode />
 
     <div class="dashboard-footer">
       <span>Better Monitor</span> &copy; {{ new Date().getFullYear() }}
@@ -1317,5 +1530,103 @@ const formatCompactConfig = (server: any) => {
 :global(.dark) .stat-card:hover {
   background: rgba(40, 40, 40, 0.8);
   border-color: rgba(255, 255, 255, 0.15);
+}
+
+.life-section {
+  margin-top: 48px;
+}
+
+.life-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.life-card {
+  padding: 20px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.life-card:hover {
+  transform: translateY(-4px);
+}
+
+.life-count {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.life-card-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.life-card-header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.life-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.life-metric {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.life-metric p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.life-metric h4 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.life-metric-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #fff;
+}
+
+.life-metric-icon.heart {
+  background: linear-gradient(135deg, #ff4d4f, #ff7875);
+}
+
+.life-metric-icon.steps {
+  background: linear-gradient(135deg, #1677ff, #69c0ff);
+}
+
+.life-metric-icon.focus {
+  background: linear-gradient(135deg, #722ed1, #b37feb);
+}
+
+.life-progress .progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.life-meta {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 </style>

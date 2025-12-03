@@ -20,7 +20,8 @@ type SystemSettings struct {
 	ChartHistoryHours int    `json:"chart_history_hours" gorm:"default:24"`    // 图表显示的历史数据小时数
 
 	// 监控数据保留策略
-	DataRetentionDays int `json:"data_retention_days" gorm:"default:7"` // 监控数据保留天数
+	DataRetentionDays     int `json:"data_retention_days" gorm:"default:7"`      // 服务器监控数据保留天数
+	LifeDataRetentionDays int `json:"life_data_retention_days" gorm:"default:7"` // 生命探针数据保留天数
 
 	// Agent升级设置
 	AgentReleaseRepo    string `json:"agent_release_repo" gorm:"default:'EnderKC/BetterMonitor'"` // GitHub仓库
@@ -30,14 +31,15 @@ type SystemSettings struct {
 
 // 默认设置值
 var defaultSettings = SystemSettings{
-	HeartbeatInterval:   "10s",
-	MonitorInterval:     "30s",
-	UIRefreshInterval:   "10s",
-	ChartHistoryHours:   24,
-	DataRetentionDays:   7,
-	AgentReleaseRepo:    "EnderKC/BetterMonitor",
-	AgentReleaseChannel: "stable",
-	AgentReleaseMirror:  "",
+	HeartbeatInterval:     "10s",
+	MonitorInterval:       "30s",
+	UIRefreshInterval:     "10s",
+	ChartHistoryHours:     24,
+	DataRetentionDays:     7,
+	LifeDataRetentionDays: 7,
+	AgentReleaseRepo:      "EnderKC/BetterMonitor",
+	AgentReleaseChannel:   "stable",
+	AgentReleaseMirror:    "",
 }
 
 // GetSettings 获取系统设置

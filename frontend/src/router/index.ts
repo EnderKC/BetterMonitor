@@ -123,6 +123,15 @@ const routes: Array<RouteRecordRaw> = [
         },
       },
       {
+        path: 'life-probes',
+        name: 'LifeProbeList',
+        component: () => import('../views/life/LifeProbeList.vue'),
+        meta: {
+          title: '生命探针',
+          requiresAuth: true,
+        },
+      },
+      {
         path: 'servers/:id/nginx',
         name: 'ServerNginx',
         component: () => import('../views/server/ServerNginx.vue'),
