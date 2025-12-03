@@ -196,11 +196,23 @@ const stepSegmentOption = computed(() => {
     return emptyBarOption('暂无步数数据');
   }
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      formatter(params: any) {
+        const first = Array.isArray(params) ? params[0] : params;
+        const sample = samples[first?.dataIndex ?? 0];
+        if (!sample) {
+          return '';
+        }
+        const range = `${formatTimePrecise(sample.start)} - ${formatTimePrecise(sample.end)}`;
+        const value = Number(sample.value.toFixed(0));
+        return `${range}<br/>步数：${value}`;
+      },
+    },
     grid: { left: 40, right: 16, top: 32, bottom: 30 },
     xAxis: {
       type: 'category',
-      data: samples.map((sample) => `${formatTime(sample.start)}-${formatTime(sample.end)}`),
+      data: samples.map((sample) => formatTimePrecise(sample.start)),
       axisLabel: { rotate: 45 },
     },
     yAxis: { type: 'value', name: '步数' },
@@ -436,6 +448,11 @@ function formatDate(value?: string | null) {
 function formatTime(value: string) {
   const date = new Date(value);
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatTimePrecise(value: string) {
+  const date = new Date(value);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function formatDay(value: string) {

@@ -51,9 +51,9 @@ type LifeLoggerEvent struct {
 // LifeHeartRate stores parsed heart rate metrics
 type LifeHeartRate struct {
 	gorm.Model
-	LifeProbeID uint      `json:"life_probe_id" gorm:"index"`
+	LifeProbeID uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_heart_probe_time"`
 	EventID     string    `json:"event_id" gorm:"index"`
-	MeasureTime time.Time `json:"measure_time" gorm:"index"`
+	MeasureTime time.Time `json:"measure_time" gorm:"index;uniqueIndex:idx_heart_probe_time"`
 	Value       float64   `json:"value"`
 	Unit        string    `json:"unit"`
 }
@@ -61,11 +61,11 @@ type LifeHeartRate struct {
 // LifeStepSample stores each segmented step/energy value
 type LifeStepSample struct {
 	gorm.Model
-	LifeProbeID uint      `json:"life_probe_id" gorm:"index"`
+	LifeProbeID uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_step_unique"`
 	EventID     string    `json:"event_id" gorm:"index"`
-	SampleType  string    `json:"sample_type" gorm:"index"`
-	StartTime   time.Time `json:"start_time" gorm:"index"`
-	EndTime     time.Time `json:"end_time" gorm:"index"`
+	SampleType  string    `json:"sample_type" gorm:"index;uniqueIndex:idx_step_unique"`
+	StartTime   time.Time `json:"start_time" gorm:"index;uniqueIndex:idx_step_unique"`
+	EndTime     time.Time `json:"end_time" gorm:"index;uniqueIndex:idx_step_unique"`
 	Value       float64   `json:"value"`
 }
 
@@ -81,31 +81,31 @@ type LifeStepDailyTotal struct {
 // LifeSleepSegment stores sleep session segments
 type LifeSleepSegment struct {
 	gorm.Model
-	LifeProbeID uint      `json:"life_probe_id" gorm:"index"`
+	LifeProbeID uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_sleep_unique"`
 	EventID     string    `json:"event_id" gorm:"index"`
-	Stage       string    `json:"stage"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time"`
+	Stage       string    `json:"stage" gorm:"uniqueIndex:idx_sleep_unique"`
+	StartTime   time.Time `json:"start_time" gorm:"uniqueIndex:idx_sleep_unique"`
+	EndTime     time.Time `json:"end_time" gorm:"uniqueIndex:idx_sleep_unique"`
 	Duration    float64   `json:"duration"`
 }
 
 // LifeFocusEvent stores focus mode toggles
 type LifeFocusEvent struct {
 	gorm.Model
-	LifeProbeID  uint      `json:"life_probe_id" gorm:"index"`
+	LifeProbeID  uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_focus_unique"`
 	EventID      string    `json:"event_id" gorm:"index"`
-	IsFocused    bool      `json:"is_focused"`
+	IsFocused    bool      `json:"is_focused" gorm:"uniqueIndex:idx_focus_unique"`
 	ChangeReason string    `json:"change_reason"`
-	EventTime    time.Time `json:"event_time"`
+	EventTime    time.Time `json:"event_time" gorm:"uniqueIndex:idx_focus_unique"`
 }
 
 // LifeScreenEvent stores lock/unlock events
 type LifeScreenEvent struct {
 	gorm.Model
-	LifeProbeID uint      `json:"life_probe_id" gorm:"index"`
+	LifeProbeID uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_screen_unique"`
 	EventID     string    `json:"event_id" gorm:"index"`
-	Action      string    `json:"action"`
-	EventTime   time.Time `json:"event_time"`
+	Action      string    `json:"action" gorm:"uniqueIndex:idx_screen_unique"`
+	EventTime   time.Time `json:"event_time" gorm:"uniqueIndex:idx_screen_unique"`
 }
 
 // Payload definitions --------------------------------------------------------
@@ -308,7 +308,9 @@ func UpdateProbeSyncInfo(db *gorm.DB, probeID uint, eventTime time.Time, battery
 	if battery != nil {
 		updates["battery_level"] = battery
 	}
-	return db.Model(&LifeProbe{}).Where("id = ?", probeID).Updates(updates).Error
+	return db.Model(&LifeProbe{}).
+		Where("id = ? AND (last_sync_at IS NULL OR last_sync_at <= ?)", probeID, eventTime).
+		Updates(updates).Error
 }
 
 func UpdateProbeHeartRate(db *gorm.DB, probeID uint, value float64, measureTime time.Time) error {
@@ -316,15 +318,19 @@ func UpdateProbeHeartRate(db *gorm.DB, probeID uint, value float64, measureTime 
 		"latest_heart_rate":    normalizeHeartRate(value),
 		"latest_heart_rate_at": measureTime,
 	}
-	return db.Model(&LifeProbe{}).Where("id = ?", probeID).Updates(updates).Error
+	return db.Model(&LifeProbe{}).
+		Where("id = ? AND (latest_heart_rate_at IS NULL OR latest_heart_rate_at <= ?)", probeID, measureTime).
+		Updates(updates).Error
 }
 
 func UpdateProbeFocusStatus(db *gorm.DB, probeID uint, isFocused bool, reason string, eventTime time.Time) error {
-	return db.Model(&LifeProbe{}).Where("id = ?", probeID).Updates(map[string]interface{}{
-		"latest_focus_status": &isFocused,
-		"latest_focus_reason": reason,
-		"focus_updated_at":    eventTime,
-	}).Error
+	return db.Model(&LifeProbe{}).
+		Where("id = ? AND (focus_updated_at IS NULL OR focus_updated_at <= ?)", probeID, eventTime).
+		Updates(map[string]interface{}{
+			"latest_focus_status": &isFocused,
+			"latest_focus_reason": reason,
+			"focus_updated_at":    eventTime,
+		}).Error
 }
 
 func normalizeHeartRate(value float64) float64 {
@@ -342,7 +348,10 @@ func RecordHeartRate(db *gorm.DB, probeID uint, eventID string, payload HeartRat
 		Value:       normalizeHeartRate(payload.Value),
 		Unit:        payload.Unit,
 	}
-	return db.Create(&record).Error
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "life_probe_id"}, {Name: "measure_time"}},
+		DoNothing: true,
+	}).Create(&record).Error
 }
 
 func RecordStepSamples(db *gorm.DB, probeID uint, eventID, sampleType string, samples []StepSamplePayload) error {
@@ -361,7 +370,15 @@ func RecordStepSamples(db *gorm.DB, probeID uint, eventID, sampleType string, sa
 			Value:       sample.Value,
 		})
 	}
-	return db.Create(&records).Error
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "life_probe_id"},
+			{Name: "sample_type"},
+			{Name: "start_time"},
+			{Name: "end_time"},
+		},
+		DoNothing: true,
+	}).Create(&records).Error
 }
 
 func incrementDailyTotal(db *gorm.DB, probeID uint, day time.Time, sampleType string, delta float64) error {
@@ -371,7 +388,7 @@ func incrementDailyTotal(db *gorm.DB, probeID uint, day time.Time, sampleType st
 
 	record := LifeStepDailyTotal{
 		LifeProbeID: probeID,
-		Day:         day.UTC(),
+		Day:         truncateToDay(day),
 		SampleType:  sampleType,
 		Total:       delta,
 	}
@@ -379,6 +396,20 @@ func incrementDailyTotal(db *gorm.DB, probeID uint, day time.Time, sampleType st
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "life_probe_id"}, {Name: "day"}, {Name: "sample_type"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{"total": gorm.Expr("total + ?", delta)}),
+	}).Create(&record).Error
+}
+
+func setDailyTotal(db *gorm.DB, probeID uint, day time.Time, sampleType string, total float64) error {
+	record := LifeStepDailyTotal{
+		LifeProbeID: probeID,
+		Day:         truncateToDay(day),
+		SampleType:  sampleType,
+		Total:       total,
+	}
+
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "life_probe_id"}, {Name: "day"}, {Name: "sample_type"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{"total": total}),
 	}).Create(&record).Error
 }
 
@@ -391,6 +422,10 @@ func RecordDailyTotals(db *gorm.DB, probeID uint, sampleType string, samples []S
 		}
 	}
 	return nil
+}
+
+func OverrideDailyTotal(db *gorm.DB, probeID uint, sampleType string, reference time.Time, total float64) error {
+	return setDailyTotal(db, probeID, reference, sampleType, total)
 }
 
 func RecordSleepSegments(db *gorm.DB, probeID uint, eventID string, segments []SleepSegmentPayload) error {
@@ -409,7 +444,15 @@ func RecordSleepSegments(db *gorm.DB, probeID uint, eventID string, segments []S
 			Duration:    seg.Duration,
 		})
 	}
-	return db.Create(&rows).Error
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "life_probe_id"},
+			{Name: "stage"},
+			{Name: "start_time"},
+			{Name: "end_time"},
+		},
+		DoNothing: true,
+	}).Create(&rows).Error
 }
 
 func RecordFocusEvent(db *gorm.DB, probeID uint, eventID string, payload FocusStatusPayload, eventTime time.Time) error {
@@ -420,7 +463,14 @@ func RecordFocusEvent(db *gorm.DB, probeID uint, eventID string, payload FocusSt
 		ChangeReason: payload.ChangeReason,
 		EventTime:    eventTime,
 	}
-	return db.Create(&record).Error
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "life_probe_id"},
+			{Name: "event_time"},
+			{Name: "is_focused"},
+		},
+		DoNothing: true,
+	}).Create(&record).Error
 }
 
 func RecordScreenEvent(db *gorm.DB, probeID uint, eventID string, payload ScreenEventPayload) error {
@@ -430,7 +480,14 @@ func RecordScreenEvent(db *gorm.DB, probeID uint, eventID string, payload Screen
 		Action:      payload.Action,
 		EventTime:   payload.EventTime,
 	}
-	return db.Create(&record).Error
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "life_probe_id"},
+			{Name: "action"},
+			{Name: "event_time"},
+		},
+		DoNothing: true,
+	}).Create(&record).Error
 }
 
 // Query helpers ---------------------------------------------------------------
@@ -503,6 +560,7 @@ func getDailyTotals(probeID uint, days int, reference time.Time) ([]DailyStepPoi
 	if reference.IsZero() {
 		reference = time.Now()
 	}
+	reference = reference.UTC()
 	startDay := truncateToDay(reference.AddDate(0, 0, -(days - 1)))
 	var rows []LifeStepDailyTotal
 	if err := DB.Where("life_probe_id = ? AND day >= ?", probeID, startDay).
@@ -535,8 +593,6 @@ func buildSleepOverview(segments []LifeSleepSegment) SleepOverview {
 	var total float64
 
 	for _, seg := range segments {
-		stageDurations[seg.Stage] += seg.Duration
-		total += seg.Duration
 		if start == nil || seg.StartTime.Before(*start) {
 			tmp := seg.StartTime
 			start = &tmp
@@ -545,6 +601,16 @@ func buildSleepOverview(segments []LifeSleepSegment) SleepOverview {
 			tmp := seg.EndTime
 			end = &tmp
 		}
+
+		// `in_bed` 表示“在床但未入睡”的阶段。如果把它和睡眠阶段一起累加，
+		// 总时长会比真实睡眠时间长很多（示例中达到 17 小时）。因此统计时忽略
+		// 该阶段，只累计浅睡/深睡/REM/清醒等数据。
+		if seg.Stage == "in_bed" {
+			continue
+		}
+
+		stageDurations[seg.Stage] += seg.Duration
+		total += seg.Duration
 	}
 
 	return SleepOverview{
@@ -594,6 +660,7 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 	if probe.LastSyncAt != nil {
 		referenceTime = *probe.LastSyncAt
 	}
+	referenceTime = referenceTime.UTC()
 
 	if probe.LatestHeartRateAt != nil {
 		cpy := *probe.LatestHeartRateAt
@@ -618,6 +685,18 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 		First(&total).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
+		}
+
+		// 如果今日汇总还没写入（例如客户端只上传了 total 而没有样本，或者旧数据未覆盖），
+		// 退而求其次，直接用 step_samples 表中当天的样本累加。
+		var sum float64
+		dayEnd := day.Add(24 * time.Hour)
+		if err := DB.Model(&LifeStepSample{}).
+			Select("COALESCE(SUM(value), 0)").
+			Where("life_probe_id = ? AND sample_type = ? AND start_time >= ? AND start_time < ?",
+				probe.ID, LifeDataTypeStepsDetailed, day, dayEnd).
+			Scan(&sum).Error; err == nil {
+			summary.StepsToday = sum
 		}
 	} else {
 		summary.StepsToday = total.Total

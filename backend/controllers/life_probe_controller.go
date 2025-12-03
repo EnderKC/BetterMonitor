@@ -453,6 +453,15 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			if err := models.RecordDailyTotals(tx, probe.ID, req.DataType, stepsPayload.Samples); err != nil {
 				return err
 			}
+			if req.DataType == models.LifeDataTypeStepsDetailed && stepsPayload.TodayTotalSteps != nil {
+				reference := stepsPayload.EndPeriod
+				if reference.IsZero() {
+					reference = eventTime
+				}
+				if err := models.OverrideDailyTotal(tx, probe.ID, req.DataType, reference, *stepsPayload.TodayTotalSteps); err != nil {
+					return err
+				}
+			}
 		case models.LifeDataTypeSleepDetailed:
 			if sleepPayload == nil {
 				return errors.New("睡眠数据为空")
