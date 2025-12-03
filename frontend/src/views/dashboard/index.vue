@@ -824,9 +824,9 @@ const getSyncLatency = (lastSync?: string) => {
         </div>
       </div>
 
-      <a-spin :spinning="loading" tip="加载中...">
-        <div v-if="servers.length === 0 && !loading" class="empty-wrapper">
-          <a-empty description="暂无监控服务器" />
+      <a-spin :spinning="loading && lifeLoading" tip="加载中...">
+        <div v-if="servers.length === 0 && lifeProbes.length === 0 && !loading && !lifeLoading" class="empty-wrapper">
+          <a-empty description="暂无监控设备" />
         </div>
 
         <div v-else class="servers-grid">
