@@ -210,6 +210,7 @@ type LifeProbeSummary struct {
 	LatestHeartRate *HeartRatePoint  `json:"latest_heart_rate"`
 	FocusEvent      *FocusEventPoint `json:"focus_event"`
 	StepsToday      float64          `json:"steps_today"`
+	SleepDuration   *float64         `json:"sleep_duration"`
 	DailyTotals     []DailyStepPoint `json:"daily_totals"`
 }
 
@@ -700,6 +701,11 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 		}
 	} else {
 		summary.StepsToday = total.Total
+	}
+
+	if segments, err := getLatestSleepSegments(probe.ID); err == nil && len(segments) > 0 {
+		overview := buildSleepOverview(segments)
+		summary.SleepDuration = &overview.TotalDuration
 	}
 
 	if includeDailyTotals {

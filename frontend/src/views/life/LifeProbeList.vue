@@ -252,11 +252,15 @@ const focusBadge = (probe: LifeProbeSummary) => {
       </div>
       <div class="actions">
         <a-button @click="handleRefresh">
-          <template #icon><ReloadOutlined /></template>
+          <template #icon>
+            <ReloadOutlined />
+          </template>
           刷新
         </a-button>
         <a-button type="primary" @click="openCreateModal">
-          <template #icon><PlusOutlined /></template>
+          <template #icon>
+            <PlusOutlined />
+          </template>
           添加生命探针
         </a-button>
       </div>
@@ -273,13 +277,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
       </div>
     </div>
 
-    <a-table
-      :data-source="probes"
-      :loading="loading"
-      :columns="columns"
-      row-key="id"
-      class="life-table"
-    >
+    <a-table :data-source="probes" :loading="loading" :columns="columns" row-key="id" class="life-table">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'latest_heart_rate'">
           {{ record.latest_heart_rate ? record.latest_heart_rate.value : '--' }}
@@ -315,13 +313,8 @@ const focusBadge = (probe: LifeProbeSummary) => {
       </template>
     </a-table>
 
-    <a-modal
-      :open="modalVisible"
-      :title="editingId ? '编辑生命探针' : '添加生命探针'"
-      :confirm-loading="submitting"
-      @cancel="modalVisible = false"
-      @ok="handleSubmit"
-    >
+    <a-modal :open="modalVisible" :title="editingId ? '编辑生命探针' : '添加生命探针'" :confirm-loading="submitting"
+      @cancel="modalVisible = false" @ok="handleSubmit">
       <a-form layout="vertical">
         <a-form-item label="探针名称" required>
           <a-input v-model:value="form.name" placeholder="例如：王小明 · iPhone" />
@@ -360,6 +353,8 @@ const focusBadge = (probe: LifeProbeSummary) => {
 .page-header h1 {
   margin: 0;
   font-size: 26px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .page-header p {
@@ -380,29 +375,137 @@ const focusBadge = (probe: LifeProbeSummary) => {
 
 .stat-item {
   flex: 1;
-  background: #fff;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  transition: all 0.3s ease;
+}
+
+.stat-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.15);
 }
 
 .stat-item p {
   margin: 0 0 6px;
   color: rgba(0, 0, 0, 0.45);
+  font-size: 14px;
 }
 
 .stat-item h3 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
+  font-weight: 600;
   color: rgba(0, 0, 0, 0.85);
 }
 
+/* Table Styling */
+.life-table {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.life-table :deep(.ant-table) {
+  background: transparent;
+}
+
 .life-table :deep(.ant-table-thead > tr > th) {
+  background: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   font-weight: 600;
+}
+
+.life-table :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.life-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: rgba(255, 255, 255, 0.4) !important;
+}
+
+.life-table :deep(.ant-pagination-item-active) {
+  background: transparent;
+  border-color: #1890ff;
+}
+
+.life-table :deep(.ant-pagination-item a) {
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .switch-label {
   margin-left: 8px;
   color: rgba(0, 0, 0, 0.45);
+}
+
+
+</style>
+
+<style>
+.dark .page-header h1 {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .page-header p {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.dark .stat-item {
+  background: rgba(30, 30, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
+.dark .stat-item:hover {
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.3);
+}
+
+.dark .stat-item p {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.dark .stat-item h3 {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .life-table {
+  background: rgba(30, 30, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
+.dark .life-table .ant-table-thead > tr > th {
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .life-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .life-table .ant-table-tbody > tr:hover > td {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.dark .life-table .ant-pagination-item-active {
+  border-color: #177ddc;
+}
+
+.dark .life-table .ant-pagination-item a {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .switch-label {
+  color: rgba(255, 255, 255, 0.45);
 }
 </style>

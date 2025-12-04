@@ -53,6 +53,7 @@ export interface LifeProbeSummary {
   latest_heart_rate?: HeartRatePoint | null;
   focus_event?: FocusEventPoint | null;
   steps_today: number;
+  sleep_duration?: number;
   daily_totals?: DailyStepPoint[];
 }
 

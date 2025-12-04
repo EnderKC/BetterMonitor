@@ -28,7 +28,8 @@ import {
   WindowsOutlined,
   AndroidOutlined,
   HeartFilled,
-  MobileOutlined
+  MobileOutlined,
+  RestOutlined
 } from '@ant-design/icons-vue';
 
 // 添加router
@@ -775,7 +776,27 @@ const getSyncLatency = (lastSync?: string) => {
   const diff = Date.now() - new Date(lastSync).getTime();
   if (diff < 60000) return '刚刚';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
   return `${Math.floor(diff / 3600000)}小时前`;
+};
+
+const isProbeOffline = (probe: LifeProbeSummary) => {
+  if (!probe.last_sync_at) return true;
+  const diff = Date.now() - new Date(probe.last_sync_at).getTime();
+  return diff > 6 * 60 * 60 * 1000; // 6 hours
+};
+
+const getSleepDurationLabel = (probe: LifeProbeSummary) => {
+  if (!probe.sleep_duration) return '--';
+  const hours = Math.floor(probe.sleep_duration / 3600);
+  const minutes = Math.floor((probe.sleep_duration % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+};
+
+const getSleepProgress = (probe: LifeProbeSummary) => {
+  if (!probe.sleep_duration) return 0;
+  // Assuming 10 hours is the goal (36000 seconds)
+  return Math.min(100, (probe.sleep_duration / 36000) * 100);
 };
 </script>
 
@@ -842,7 +863,7 @@ const getSyncLatency = (lastSync?: string) => {
                 </div>
               </div>
               <div class="header-right">
-                <div class="status-dot online"></div>
+                <div class="status-dot" :class="{ online: !isProbeOffline(probe) }"></div>
               </div>
             </div>
 
@@ -902,6 +923,21 @@ const getSyncLatency = (lastSync?: string) => {
                     :style="{ width: (probe.battery_level || 0) * 100 + '%', background: '#52c41a' }"></div>
                 </div>
               </div>
+
+              <!-- 睡眠 -->
+              <div class="metric-compact">
+                <div class="metric-row">
+                  <span class="metric-icon" style="color: #722ed1">
+                    <RestOutlined />
+                  </span>
+                  <span class="metric-name">睡眠</span>
+                  <span class="metric-val">{{ getSleepDurationLabel(probe) }}</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill"
+                    :style="{ width: getSleepProgress(probe) + '%', background: '#722ed1' }"></div>
+                </div>
+              </div>
             </div>
 
             <!-- 活动数据 (模仿网络部分) -->
@@ -950,7 +986,8 @@ const getSyncLatency = (lastSync?: string) => {
             <!-- 底部信息 -->
             <div class="card-footer-compact">
               <div class="footer-item">
-                <span>{{ probe.device_id ? '已连接' : '未连接' }}</span>
+                <span v-if="isProbeOffline(probe)" style="color: var(--error-color); font-weight: bold;">可能似了</span>
+                <span v-else>{{ probe.device_id ? '已连接' : '未连接' }}</span>
               </div>
               <div class="footer-item">
                 <SyncOutlined :spin="false" />
@@ -993,7 +1030,7 @@ const getSyncLatency = (lastSync?: string) => {
             <!-- 服务器信息条 (CPU型号 + 配置) -->
             <div class="server-info-bar">
               <span class="info-cpu" v-if="server.cpu_model" :title="server.cpu_model">
-                <CpuIcon /> {{ getShortCpuModel(server.cpu_model) }}
+                <DesktopOutlined /> {{ getShortCpuModel(server.cpu_model) }}
               </span>
               <span class="info-divider" v-if="server.cpu_model">|</span>
               <span class="info-config">{{ formatCompactConfig(server) }}</span>
@@ -1233,9 +1270,6 @@ const getSyncLatency = (lastSync?: string) => {
   font-family: "SF Mono", Menlo, monospace;
 }
 
-:global(.dark) .server-ip-tag {
-  background: rgba(255, 255, 255, 0.08);
-}
 
 .server-link {
   color: var(--text-secondary);
@@ -1302,10 +1336,6 @@ const getSyncLatency = (lastSync?: string) => {
   color: var(--text-secondary);
 }
 
-:global(.dark) .server-info-bar {
-  background: rgba(255, 255, 255, 0.04);
-}
-
 .info-cpu {
   display: flex;
   align-items: center;
@@ -1342,10 +1372,6 @@ const getSyncLatency = (lastSync?: string) => {
   white-space: nowrap;
 }
 
-:global(.dark) .cpu-model-tag {
-  background: rgba(255, 255, 255, 0.08);
-}
-
 .config-compact-row {
   display: flex;
 }
@@ -1362,9 +1388,7 @@ const getSyncLatency = (lastSync?: string) => {
   text-align: center;
 }
 
-:global(.dark) .config-value {
-  background: rgba(255, 255, 255, 0.08);
-}
+
 
 .metric-row {
   display: flex;
@@ -1610,18 +1634,7 @@ const getSyncLatency = (lastSync?: string) => {
   gap: 6px;
 }
 
-/* Dark mode specific adjustments */
-:global(.dark) .server-card,
-:global(.dark) .stat-card {
-  background: rgba(30, 30, 30, 0.6);
-  border-color: rgba(255, 255, 255, 0.08);
-}
 
-:global(.dark) .server-card:hover,
-:global(.dark) .stat-card:hover {
-  background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(255, 255, 255, 0.15);
-}
 
 .life-section {
   margin-top: 48px;
@@ -1779,4 +1792,36 @@ const getSyncLatency = (lastSync?: string) => {
   font-size: 12px;
   color: var(--text-secondary);
 }
+</style>
+
+<style>
+.dark .server-ip-tag {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dark .cpu-model-tag {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dark .server-info-bar {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dark .config-value {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Dark mode specific adjustments */
+.dark .server-card,
+.dark .stat-card {
+  background: rgba(30, 30, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .server-card:hover,
+.dark .stat-card:hover {
+  background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
 </style>

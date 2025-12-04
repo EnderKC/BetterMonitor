@@ -3,13 +3,16 @@ import { ref, watch, computed, onUnmounted } from 'vue';
 import { message } from 'ant-design-vue';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import { LineChart, BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components';
+import { LineChart, BarChart, PieChart, CustomChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, LegendComponent, TitleComponent, DataZoomComponent } from 'echarts/components';
 import VChart from 'vue-echarts';
 import { getToken } from '@/utils/auth';
 import type { LifeProbeDetails, SleepSegmentPoint } from '@/types/life';
+import * as echarts from 'echarts/core';
+import { useThemeStore } from '@/stores/theme';
+import { storeToRefs } from 'pinia';
 
-use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent]);
+use([CanvasRenderer, LineChart, BarChart, PieChart, CustomChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, DataZoomComponent]);
 
 const props = defineProps<{
   modelValue: boolean;
@@ -18,6 +21,9 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['update:modelValue']);
+
+const themeStore = useThemeStore();
+const { isDark } = storeToRefs(themeStore);
 
 const loading = ref(false);
 const details = ref<LifeProbeDetails | null>(null);
@@ -161,25 +167,48 @@ const heartRateOption = computed(() => {
   if (!data.length) {
     return emptyLineOption('暂无心率数据');
   }
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+  const splitLineColor = isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee';
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
+    grid: { left: 50, right: 20, top: 30, bottom: 30, containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: false,
       data: data.map((point) => formatTime(point.time)),
+      axisLabel: {
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } }
     },
     yAxis: {
       type: 'value',
       name: 'BPM',
-      min: (value: any) => Math.max(50, Math.floor(value.min - 5)),
+      min: (value: any) => Math.max(40, Math.floor(value.min - 5)),
+      nameTextStyle: { color: axisColor },
+      axisLabel: { color: axisColor },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: splitLineColor
+        }
+      }
     },
     series: [
       {
         type: 'line',
         data: data.map((point) => point.value),
         smooth: true,
-        areaStyle: { opacity: 0.2 },
+        areaStyle: {
+          opacity: 0.2,
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(255, 77, 79, 0.5)' },
+            { offset: 1, color: 'rgba(255, 77, 79, 0.01)' }
+          ])
+        },
         showSymbol: false,
         lineStyle: { width: 2 },
         color: '#ff4d4f',
@@ -195,6 +224,9 @@ const stepSegmentOption = computed(() => {
   if (!samples.length) {
     return emptyBarOption('暂无步数数据');
   }
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+  const splitLineColor = isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee';
+
   return {
     tooltip: {
       trigger: 'axis',
@@ -209,21 +241,39 @@ const stepSegmentOption = computed(() => {
         return `${range}<br/>步数：${value}`;
       },
     },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
+    grid: { left: 40, right: 16, top: 32, bottom: 30, containLabel: true },
     xAxis: {
       type: 'category',
       data: samples.map((sample) => formatTimePrecise(sample.start)),
-      axisLabel: { rotate: 45 },
+      axisLabel: {
+        rotate: 0,
+        hideOverlap: true,
+        formatter: (value: string) => value.substring(0, 5), // HH:mm
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } }
     },
-    yAxis: { type: 'value', name: '步数' },
+    yAxis: {
+      type: 'value',
+      name: '步数',
+      nameTextStyle: { color: axisColor },
+      axisLabel: { color: axisColor },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: splitLineColor
+        }
+      }
+    },
     series: [
       {
         type: 'bar',
-        barWidth: 16,
+        barMaxWidth: 30,
         data: samples.map((sample) => Number(sample.value.toFixed(0))),
         itemStyle: {
           color: '#1677ff',
-          borderRadius: [6, 6, 0, 0],
+          borderRadius: [4, 4, 0, 0],
         },
       },
     ],
@@ -235,6 +285,9 @@ const focusOption = computed(() => {
   if (!events.length) {
     return emptyLineOption('暂无专注模式历史');
   }
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+  const splitLineColor = isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee';
+
   return {
     tooltip: {
       trigger: 'axis',
@@ -243,8 +296,16 @@ const focusOption = computed(() => {
         return `${point.axisValue}<br/>${point.value === 1 ? '专注模式' : '普通模式'}`;
       },
     },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
-    xAxis: { type: 'category', data: events.map((evt) => formatTime(evt.time)) },
+    grid: { left: 40, right: 16, top: 32, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: events.map((evt) => formatTime(evt.time)),
+      axisLabel: {
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } }
+    },
     yAxis: {
       type: 'value',
       min: 0,
@@ -252,7 +313,15 @@ const focusOption = computed(() => {
       interval: 1,
       axisLabel: {
         formatter: (value: number) => (value === 1 ? '专注' : '普通'),
+        color: axisColor
       },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: splitLineColor
+        }
+      }
     },
     series: [
       {
@@ -260,9 +329,11 @@ const focusOption = computed(() => {
         step: 'end',
         data: events.map((evt) => (evt.is_focused ? 1 : 0)),
         lineStyle: { color: '#722ed1', width: 2 },
-        areaStyle: { opacity: 0.15 },
-        symbol: 'circle',
-        symbolSize: 8,
+        areaStyle: {
+          opacity: 0.15,
+          color: '#722ed1'
+        },
+        symbol: 'none',
       },
     ],
   };
@@ -276,14 +347,33 @@ const dailyStepsOption = computed(() => {
     return emptyBarOption('暂无每日步数');
   }
   const sorted = [...totals].sort((a, b) => new Date(a.day).getTime() - new Date(b.day).getTime());
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
+    grid: { left: 40, right: 16, top: 32, bottom: 30, containLabel: true },
     xAxis: {
       type: 'category',
       data: sorted.map((item) => formatDay(item.day)),
+      axisLabel: {
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } }
     },
-    yAxis: { type: 'value', name: '步数' },
+    yAxis: {
+      type: 'value',
+      name: '步数',
+      nameTextStyle: { color: axisColor },
+      axisLabel: { color: axisColor },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee'
+        }
+      }
+    },
     series: [
       {
         type: 'bar',
@@ -296,37 +386,130 @@ const dailyStepsOption = computed(() => {
 });
 
 const sleepOption = computed(() => {
-  const overview = details.value?.sleep_overview;
-  if (!overview || !overview.stage_durations) {
+  const segments = details.value?.sleep_segments || [];
+  if (!segments.length) {
     return {
       title: { text: '暂无睡眠数据', left: 'center', top: 'middle', textStyle: { color: '#999' } },
       series: [],
     };
   }
-  const entries = Object.entries(overview.stage_durations || {}).map(([stage, seconds]) => ({
-    name: translateStage(stage),
-    value: Number((seconds / 3600).toFixed(2)),
-  }));
 
-  if (!entries.length) {
+  // Define categories and colors
+  const categories = ['深睡', '浅睡', 'REM', '清醒'];
+  const colors = ['#722ed1', '#1677ff', '#52c41a', '#faad14']; // Deep, Core, REM, Awake
+
+  // Map stage codes to indices
+  const getStageIndex = (stage: string) => {
+    switch (stage) {
+      case 'deep': return 0;
+      case 'core': return 1;
+      case 'rem': return 2;
+      case 'awake': return 3;
+      default: return -1;
+    }
+  };
+
+  const data = segments.map(seg => {
+    const idx = getStageIndex(seg.stage);
+    if (idx === -1) return null;
     return {
-      title: { text: '暂无睡眠数据', left: 'center', top: 'middle', textStyle: { color: '#999' } },
-      series: [],
+      value: [
+        idx,
+        new Date(seg.start_time).getTime(),
+        new Date(seg.end_time).getTime(),
+        seg.duration
+      ],
+      itemStyle: {
+        color: colors[idx]
+      }
     };
-  }
+  }).filter(Boolean);
+
+  const startTime = data.length > 0 ? data[0]!.value[1] : null;
+  const endTime = data.length > 0 ? data[data.length - 1]!.value[2] : null;
+
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+  const splitLineColor = isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee';
 
   return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c}h ({d}%)' },
-    legend: { orient: 'vertical', left: 'left' },
+    tooltip: {
+      formatter: (params: any) => {
+        const v = params.value;
+        const stage = categories[v[0]];
+        const start = new Date(v[1]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const end = new Date(v[2]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const duration = Math.round(v[3] / 60);
+        return `${stage}<br/>${start} - ${end}<br/>${duration} 分钟`;
+      }
+    },
+    grid: { left: 60, right: 20, top: 30, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'time',
+      min: startTime,
+      max: endTime,
+      axisLabel: {
+        formatter: (val: number) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } },
+      splitLine: { show: false }
+    },
+    yAxis: {
+      type: 'category',
+      data: categories,
+      axisLabel: { color: axisColor },
+      splitLine: {
+        show: true,
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: splitLineColor
+        }
+      }
+    },
     series: [
       {
-        type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: false,
-        label: { show: true, formatter: '{b}\n{c}h' },
-        data: entries,
-      },
-    ],
+        type: 'custom',
+        renderItem: (params: any, api: any) => {
+          const categoryIndex = api.value(0);
+          const start = api.coord([api.value(1), categoryIndex]);
+          const end = api.coord([api.value(2), categoryIndex]);
+          const height = api.size([0, 1])[1] * 0.6;
+
+          const rectShape = echarts.graphic.clipRectByRect({
+            x: start[0],
+            y: start[1] - height / 2,
+            width: end[0] - start[0],
+            height: height
+          }, {
+            x: params.coordSys.x,
+            y: params.coordSys.y,
+            width: params.coordSys.width,
+            height: params.coordSys.height
+          });
+
+          return rectShape && {
+            type: 'rect',
+            transition: ['shape'],
+            shape: rectShape,
+            style: {
+              fill: api.style().fill,
+              opacity: 0.8
+            }
+          };
+        },
+        itemStyle: {
+          opacity: 0.8,
+          borderRadius: 4
+        },
+        encode: {
+          x: [1, 2],
+          y: 0
+        },
+        data: data
+      }
+    ]
   };
 });
 
@@ -335,11 +518,33 @@ const sleepDailyOption = computed(() => {
   if (!grouped.length) {
     return emptyBarOption('暂无睡眠记录');
   }
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
-    xAxis: { type: 'category', data: grouped.map((item) => item.label) },
-    yAxis: { type: 'value', name: '小时' },
+    grid: { left: 40, right: 16, top: 32, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: grouped.map((item) => item.label),
+      axisLabel: {
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: '小时',
+      nameTextStyle: { color: axisColor },
+      axisLabel: { color: axisColor },
+      splitLine: {
+        lineStyle: {
+          type: 'dashed',
+          opacity: 0.3,
+          color: isDark.value ? 'rgba(255, 255, 255, 0.1)' : '#eee'
+        }
+      }
+    },
     series: [
       {
         type: 'bar',
@@ -359,43 +564,107 @@ const screenUsageOption = computed(() => {
     return emptyLineOption('暂无屏幕事件');
   }
 
-  const data: [number, number][] = [];
-  let state = 0;
-  events.forEach((evt, index) => {
-    const timeValue = new Date(evt.time).getTime();
-    if (index === 0) {
-      data.push([timeValue, state]);
+  // Transform events into segments
+  const segments = [];
+  let lastTime = new Date(events[0].time).getTime();
+  let isUnlocked = events[0].action === 'unlock';
+
+  for (let i = 1; i < events.length; i++) {
+    const currentTime = new Date(events[i].time).getTime();
+    if (isUnlocked) {
+      segments.push({
+        start: lastTime,
+        end: currentTime,
+        state: 'Unlocked'
+      });
+    } else {
+      segments.push({
+        start: lastTime,
+        end: currentTime,
+        state: 'Locked'
+      });
     }
-    state = evt.action === 'unlock' ? 1 : 0;
-    data.push([timeValue, state]);
-  });
+    lastTime = currentTime;
+    isUnlocked = events[i].action === 'unlock';
+  }
+
+  const data = segments.map(seg => ({
+    value: [
+      0, // Only one category row
+      seg.start,
+      seg.end,
+      seg.state
+    ],
+    itemStyle: {
+      color: seg.state === 'Unlocked' ? '#fa8c16' : '#f0f0f0'
+    }
+  }));
+
+  const axisColor = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#333';
 
   return {
     tooltip: {
-      trigger: 'axis',
       formatter: (params: any) => {
-        const point = params[0];
-        return `${new Date(point.data[0]).toLocaleString()}<br/>${point.data[1] === 1 ? '正在使用' : '锁屏'}`;
-      },
+        const v = params.value;
+        const state = v[3];
+        const start = new Date(v[1]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const end = new Date(v[2]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const duration = Math.round((v[2] - v[1]) / 60000);
+        return `${state}<br/>${start} - ${end}<br/>${duration} 分钟`;
+      }
     },
-    grid: { left: 40, right: 16, top: 32, bottom: 30 },
-    xAxis: { type: 'time' },
+    grid: { left: 20, right: 20, top: 30, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'time',
+      axisLabel: {
+        hideOverlap: true,
+        color: axisColor
+      },
+      axisLine: { lineStyle: { color: isDark.value ? 'rgba(255, 255, 255, 0.2)' : '#333' } },
+      splitLine: { show: false }
+    },
     yAxis: {
-      type: 'value',
-      min: 0,
-      max: 1,
-      axisLabel: { formatter: (val: number) => (val === 1 ? '使用中' : '锁屏') },
+      type: 'category',
+      data: ['状态'],
+      show: false
     },
     series: [
       {
-        type: 'line',
-        step: 'end',
-        data,
-        lineStyle: { color: '#fa8c16', width: 2 },
-        areaStyle: { opacity: 0.2 },
-        symbol: 'none',
-      },
-    ],
+        type: 'custom',
+        renderItem: (params: any, api: any) => {
+          const categoryIndex = api.value(0);
+          const start = api.coord([api.value(1), categoryIndex]);
+          const end = api.coord([api.value(2), categoryIndex]);
+          const height = api.size([0, 1])[1] * 0.4;
+
+          const rectShape = echarts.graphic.clipRectByRect({
+            x: start[0],
+            y: start[1] - height / 2,
+            width: end[0] - start[0],
+            height: height
+          }, {
+            x: params.coordSys.x,
+            y: params.coordSys.y,
+            width: params.coordSys.width,
+            height: params.coordSys.height
+          });
+
+          return rectShape && {
+            type: 'rect',
+            transition: ['shape'],
+            shape: rectShape,
+            style: {
+              fill: api.style().fill
+            }
+          };
+        },
+        encode: {
+          x: [1, 2],
+          y: 0
+        },
+        data: data
+      }
+    ]
   };
 });
 
@@ -527,8 +796,9 @@ function splitIntervalByDay(start: Date, end: Date) {
 }
 
 function emptyLineOption(text: string) {
+  const color = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#999';
   return {
-    title: { text, left: 'center', top: 'middle', textStyle: { color: '#999', fontSize: 13 } },
+    title: { text, left: 'center', top: 'middle', textStyle: { color, fontSize: 13 } },
     xAxis: { show: false },
     yAxis: { show: false },
     series: [],
@@ -536,8 +806,9 @@ function emptyLineOption(text: string) {
 }
 
 function emptyBarOption(text: string) {
+  const color = isDark.value ? 'rgba(255, 255, 255, 0.45)' : '#999';
   return {
-    title: { text, left: 'center', top: 'middle', textStyle: { color: '#999', fontSize: 13 } },
+    title: { text, left: 'center', top: 'middle', textStyle: { color, fontSize: 13 } },
     xAxis: { show: false },
     yAxis: { show: false },
     series: [],
@@ -546,8 +817,7 @@ function emptyBarOption(text: string) {
 </script>
 
 <template>
-  <a-modal :open="modelValue" centered width="960px" class="life-detail-modal" :footer="null" destroy-on-close
-    @cancel="close">
+  <a-modal :open="modelValue" width="80%" class="life-detail-modal" :footer="null" destroy-on-close @cancel="close">
     <template #title>
       <div class="modal-title">
         <span>{{ summary?.name || '生命探针详情' }}</span>
@@ -627,7 +897,7 @@ function emptyBarOption(text: string) {
                 <div>
                   <p>总使用时长</p>
                   <strong>{{ screenUsageSummary.hours > 0 ? screenUsageSummary.hours.toFixed(1) + ' 小时' : '--'
-                  }}</strong>
+                    }}</strong>
                 </div>
               </div>
               <VChart :option="screenUsageOption" autoresize class="chart" />
@@ -641,25 +911,37 @@ function emptyBarOption(text: string) {
 </template>
 
 <style scoped>
+.life-detail-modal :deep(.ant-modal) {
+  padding-bottom: 0;
+  top: 0;
+  margin: 10vh auto;
+}
+
 .life-detail-modal :deep(.ant-modal-content) {
   background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border-radius: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 0 0 20px rgba(66, 153, 225, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.5);
   padding: 0;
   overflow: hidden;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .life-detail-modal :deep(.ant-modal-header) {
   background: transparent;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   padding: 24px 32px;
+  flex-shrink: 0;
 }
 
 .life-detail-modal :deep(.ant-modal-body) {
   padding: 0;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .life-detail-modal :deep(.ant-modal-close) {
@@ -691,28 +973,30 @@ function emptyBarOption(text: string) {
 .life-detail-body {
   padding: 32px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.5) 100%);
+  min-height: 100%;
 }
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
   margin-bottom: 32px;
 }
 
 .overview-card {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-radius: 20px;
-  padding: 20px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  padding: 24px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.5);
   transition: transform 0.2s;
 }
 
 .overview-card:hover {
   transform: translateY(-2px);
-  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.15);
 }
 
 .overview-card .label {
@@ -726,7 +1010,7 @@ function emptyBarOption(text: string) {
 
 .overview-card h3 {
   margin: 0;
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: rgba(0, 0, 0, 0.85);
   letter-spacing: -0.5px;
@@ -741,17 +1025,18 @@ function emptyBarOption(text: string) {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
   gap: 24px;
 }
 
 .chart-card {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-radius: 24px;
   padding: 24px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.5);
 }
 
 .chart-card.full-width {
@@ -759,9 +1044,9 @@ function emptyBarOption(text: string) {
 }
 
 .chart-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
   color: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
@@ -770,15 +1055,15 @@ function emptyBarOption(text: string) {
 
 .chart {
   width: 100%;
-  height: 280px;
+  height: 320px;
 }
 
 .sleep-summary,
 .screen-summary {
   display: flex;
   gap: 48px;
-  margin-bottom: 16px;
-  padding: 16px;
+  margin-bottom: 20px;
+  padding: 20px;
   background: rgba(0, 0, 0, 0.02);
   border-radius: 16px;
 }
@@ -794,7 +1079,7 @@ function emptyBarOption(text: string) {
 .sleep-summary strong,
 .screen-summary strong {
   display: block;
-  font-size: 20px;
+  font-size: 24px;
   color: rgba(0, 0, 0, 0.85);
 }
 
@@ -806,58 +1091,79 @@ function emptyBarOption(text: string) {
   border-radius: 16px;
   margin: 24px;
 }
+</style>
 
-/* Dark Mode Support */
-:global(.dark) .life-detail-modal :deep(.ant-modal-content) {
-  background: rgba(30, 30, 30, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+<style>
+.dark .life-detail-modal .ant-modal-content {
+  background: rgba(20, 20, 20, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 20px rgba(66, 153, 225, 0.1) !important;
 }
 
-:global(.dark) .life-detail-modal :deep(.ant-modal-header) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+.dark .life-detail-modal .ant-modal-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-:global(.dark) .modal-title span:first-child {
-  background: linear-gradient(135deg, #60a5fa, #a78bfa);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+.dark .life-detail-modal .ant-modal-close {
+  color: rgba(255, 255, 255, 0.65) !important;
 }
 
-:global(.dark) .modal-title .subtitle {
-  color: rgba(255, 255, 255, 0.45);
+.dark .life-detail-modal .ant-modal-close:hover {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 
-:global(.dark) .life-detail-body {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.2) 100%);
+.dark .modal-title .subtitle {
+  color: rgba(255, 255, 255, 0.45) !important;
 }
 
-:global(.dark) .overview-card,
-:global(.dark) .chart-card {
-  background: rgba(40, 40, 40, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.dark .life-detail-body {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.2) 100%) !important;
 }
 
-:global(.dark) .overview-card:hover {
-  background: rgba(50, 50, 50, 0.8);
+.dark .overview-card {
+  background: rgba(30, 30, 30, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2) !important;
 }
 
-:global(.dark) .overview-card h3,
-:global(.dark) .sleep-summary strong,
-:global(.dark) .screen-summary strong {
-  color: rgba(255, 255, 255, 0.9);
+.dark .overview-card:hover {
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.3) !important;
 }
 
-:global(.dark) .overview-card .label,
-:global(.dark) .overview-card small,
-:global(.dark) .chart-title,
-:global(.dark) .sleep-summary p,
-:global(.dark) .screen-summary p {
-  color: rgba(255, 255, 255, 0.5);
+.dark .overview-card .label {
+  color: rgba(255, 255, 255, 0.45) !important;
 }
 
-:global(.dark) .sleep-summary,
-:global(.dark) .screen-summary {
-  background: rgba(255, 255, 255, 0.04);
+.dark .overview-card h3 {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.dark .overview-card small {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.dark .chart-card {
+  background: rgba(30, 30, 30, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2) !important;
+}
+
+.dark .chart-title {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.dark .sleep-summary,
+.dark .screen-summary {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .sleep-summary p,
+.dark .screen-summary p {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.dark .sleep-summary strong,
+.dark .screen-summary strong {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 </style>
