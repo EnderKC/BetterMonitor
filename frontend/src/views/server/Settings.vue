@@ -43,6 +43,7 @@ const form = reactive({
   ui_refresh_interval: '10s',
   chart_history_hours: 24,
   data_retention_days: 7,
+  life_data_retention_days: 7,
   agent_release_repo: '',
   agent_release_channel: 'stable',
   agent_release_mirror: ''
@@ -96,6 +97,7 @@ const loadSettings = async () => {
       ui_refresh_interval?: string;
       chart_history_hours?: number;
       data_retention_days?: number;
+      life_data_retention_days?: number;
       agent_release_repo?: string;
       agent_release_channel?: string;
       agent_release_mirror?: string;
@@ -120,6 +122,10 @@ const loadSettings = async () => {
 
     if (settings.data_retention_days !== undefined) {
       form.data_retention_days = settings.data_retention_days;
+    }
+
+    if (settings.life_data_retention_days !== undefined) {
+      form.life_data_retention_days = settings.life_data_retention_days;
     }
 
     if (settings.agent_release_repo !== undefined) {
@@ -166,6 +172,11 @@ const validateForm = () => {
   // 检查数据保留天数
   if (form.data_retention_days === undefined || form.data_retention_days < 1) {
     message.error('数据保留天数必须大于等于1');
+    return false;
+  }
+
+  if (form.life_data_retention_days === undefined || form.life_data_retention_days < 1) {
+    message.error('生命探针数据保留天数必须大于等于1');
     return false;
   }
 
@@ -224,6 +235,7 @@ onMounted(async () => {
     form.ui_refresh_interval = settingsStore.uiRefreshInterval;
     form.chart_history_hours = settingsStore.chartHistoryHours;
     form.data_retention_days = settingsStore.dataRetentionDays;
+    form.life_data_retention_days = settingsStore.lifeDataRetentionDays;
     form.agent_release_repo = settingsStore.agentReleaseRepo || form.agent_release_repo;
     form.agent_release_channel = settingsStore.agentReleaseChannel || form.agent_release_channel;
     form.agent_release_mirror = settingsStore.agentReleaseMirror || form.agent_release_mirror;
@@ -345,6 +357,12 @@ onMounted(async () => {
                     <a-input-number v-model:value="form.data_retention_days" :min="1" :max="90"
                       class="ios-input-number" />
                     <div class="form-help">历史监控数据的保留天数，超出将被自动清理</div>
+                  </a-form-item>
+
+                  <a-form-item label="生命探针数据保留天数">
+                    <a-input-number v-model:value="form.life_data_retention_days" :min="1" :max="180"
+                      class="ios-input-number" />
+                    <div class="form-help">生命探针上报的健康数据保留天数</div>
                   </a-form-item>
                 </div>
 

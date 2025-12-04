@@ -24,7 +24,6 @@ func SetupRoutes(r *gin.Engine) {
 	r.GET("/", controllers.HealthCheck)
 	r.HEAD("/", controllers.HealthCheck)
 
-
 	// 添加不带前缀的WebSocket路由，便于客户端连接
 	r.GET("/servers/:id/ws", controllers.WebSocketHandler)
 	// 添加前端当前使用的WebSocket路由路径
@@ -49,6 +48,12 @@ func SetupRoutes(r *gin.Engine) {
 		// 公开的前端设置API (探针页面使用)
 		api.GET("/public/settings", controllers.GetPublicSettings)
 
+		// 生命探针公开接口
+		api.GET("/life-probes/public", controllers.GetPublicLifeProbes)
+		api.GET("/life-probes/public/:id/details", controllers.GetPublicLifeProbeDetails)
+		api.GET("/life-probes/public/ws", controllers.LifeProbeListWebSocketHandler)
+		api.GET("/life-probes/public/:id/ws", controllers.LifeProbeDetailWebSocketHandler)
+
 		// 版本信息API (公开，无需认证)
 		api.GET("/version", controllers.GetDashboardVersion)
 		api.GET("/health", controllers.HealthCheck)
@@ -60,6 +65,9 @@ func SetupRoutes(r *gin.Engine) {
 		api.GET("/servers/:id/ws", controllers.WebSocketHandler)
 		api.GET("/servers/:id/monitor-ws", controllers.WebSocketHandler)
 		api.GET("/ws/:id/server", controllers.WebSocketHandler)
+
+		// LifeLogger数据采集接口
+		api.POST("/life-logger/events", controllers.IngestLifeLoggerEvent)
 
 		// 需要JWT认证的路由
 		auth := api.Group("/")
@@ -78,6 +86,14 @@ func SetupRoutes(r *gin.Engine) {
 
 			// 监控数据
 			auth.GET("/servers/:id/monitor", controllers.GetServerMonitor)
+
+			// 生命探针管理
+			auth.GET("/life-probes", controllers.ListLifeProbes)
+			auth.GET("/life-probes/:id", controllers.GetLifeProbe)
+			auth.POST("/life-probes", controllers.CreateLifeProbe)
+			auth.PUT("/life-probes/:id", controllers.UpdateLifeProbe)
+			auth.DELETE("/life-probes/:id", controllers.DeleteLifeProbe)
+			auth.GET("/life-probes/:id/details", controllers.GetLifeProbeDetails)
 
 			// 版本管理
 			auth.GET("/system/info", controllers.GetSystemInfo)

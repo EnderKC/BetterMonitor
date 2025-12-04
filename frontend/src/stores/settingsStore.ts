@@ -8,6 +8,7 @@ interface SystemSettings {
   heartbeat_interval?: string;
   monitor_interval?: string;
   data_retention_days?: number;
+  life_data_retention_days?: number;
   chart_history_hours?: number;
   agent_release_repo?: string;
   agent_release_channel?: string;
@@ -20,6 +21,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const heartbeatInterval = ref('10s');
   const monitorInterval = ref('30s');
   const dataRetentionDays = ref(7);
+  const lifeDataRetentionDays = ref(7);
   const chartHistoryHours = ref(24);
   const agentReleaseRepo = ref('');
   const agentReleaseChannel = ref('stable');
@@ -74,6 +76,10 @@ export const useSettingsStore = defineStore('settings', () => {
         
         if (settings.data_retention_days !== undefined) {
           dataRetentionDays.value = settings.data_retention_days;
+        }
+
+        if (settings.life_data_retention_days !== undefined) {
+          lifeDataRetentionDays.value = settings.life_data_retention_days;
         }
         
         if (settings.chart_history_hours !== undefined) {
@@ -143,6 +149,10 @@ export const useSettingsStore = defineStore('settings', () => {
     if (settings.data_retention_days !== undefined) {
       dataRetentionDays.value = settings.data_retention_days;
     }
+
+    if (settings.life_data_retention_days !== undefined) {
+      lifeDataRetentionDays.value = settings.life_data_retention_days;
+    }
     
     if (settings.chart_history_hours !== undefined) {
       chartHistoryHours.value = settings.chart_history_hours;
@@ -171,6 +181,7 @@ export const useSettingsStore = defineStore('settings', () => {
     heartbeatInterval,
     monitorInterval,
     dataRetentionDays,
+    lifeDataRetentionDays,
     chartHistoryHours,
     agentReleaseRepo,
     agentReleaseChannel,

@@ -87,6 +87,18 @@ func cleanupOldData() {
 	} else {
 		log.Printf("成功清理 %s 之前的过期监控数据", cutoff.Format("2006-01-02 15:04:05"))
 	}
+
+	lifeRetention := settings.LifeDataRetentionDays
+	if lifeRetention <= 0 {
+		lifeRetention = retention
+	}
+	lifeCutoff := time.Now().AddDate(0, 0, -lifeRetention)
+	log.Printf("清理 %s 之前的生命探针数据（保留%d天）", lifeCutoff.Format("2006-01-02 15:04:05"), lifeRetention)
+	if err := models.DeleteLifeDataBefore(lifeCutoff); err != nil {
+		log.Printf("清理生命探针数据失败: %v", err)
+	} else {
+		log.Printf("成功清理 %s 之前的生命探针数据", lifeCutoff.Format("2006-01-02 15:04:05"))
+	}
 }
 
 func main() {
