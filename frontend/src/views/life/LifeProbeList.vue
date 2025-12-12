@@ -266,7 +266,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
       </div>
     </div>
 
-    <div class="stats-bar">
+    <div class="stats-bar ">
       <div class="stat-item">
         <p>探针数量</p>
         <h3>{{ probes.length }}</h3>
@@ -277,7 +277,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
       </div>
     </div>
 
-    <a-table :data-source="probes" :loading="loading" :columns="columns" row-key="id" class="life-table">
+    <a-table :data-source="probes" :loading="loading" :columns="columns" row-key="id" class="life-table glass-card">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'latest_heart_rate'">
           {{ record.latest_heart_rate ? record.latest_heart_rate.value : '--' }}
@@ -375,7 +375,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
 
 .stat-item {
   flex: 1;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--card-bg) !important;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.5);
@@ -405,7 +405,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
 
 /* Table Styling */
 .life-table {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--card-bg) !important;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-radius: 20px;
@@ -459,7 +459,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
 }
 
 .dark .stat-item {
-  background: rgba(30, 30, 30, 0.6);
+  background: var(--card-bg) !important;
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
 }
@@ -477,7 +477,7 @@ const focusBadge = (probe: LifeProbeSummary) => {
 }
 
 .dark .life-table {
-  background: rgba(30, 30, 30, 0.6);
+  background: var(--card-bg) !important;
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
 }

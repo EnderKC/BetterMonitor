@@ -82,7 +82,7 @@ const rules = {
   <div class="login-container">
     <div class="login-card glass-card">
       <div class="login-title">
-        <h2 class="gradient-text">服务器运维系统</h2>
+        <h2 class="gradient-text">Better Monitor</h2>
         <p>登录账号</p>
       </div>
 
@@ -144,7 +144,7 @@ const rules = {
   position: relative;
   z-index: 1;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.7) !important;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 24px;
@@ -320,7 +320,63 @@ const rules = {
 </style>
 
 <style>
-.dark .login-form-item .ant-form-item-label > label {
-  color: #4d4f54b8 !important;
+/* Dark Mode Adaptation */
+.dark .login-container {
+  background-color: #0f0f12;
+  background-image:
+    radial-gradient(at 30% 20%, rgba(0, 122, 255, 0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 40%, rgba(52, 199, 89, 0.1) 0px, transparent 50%),
+    radial-gradient(at 10% 70%, rgba(255, 149, 0, 0.08) 0px, transparent 50%);
+}
+
+.dark .login-card {
+  background: rgba(30, 30, 35, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.dark .login-card::before {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+}
+
+.dark .login-title p {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.dark .login-form-item .ant-form-item-label>label {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.dark .ant-input-affix-wrapper {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.dark .ant-input-affix-wrapper .ant-input {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.dark .ant-input-affix-wrapper .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.dark .ant-input-prefix {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.dark .ant-input-affix-wrapper:hover,
+.dark .ant-input-affix-wrapper:focus,
+.dark .ant-input-affix-wrapper-focused {
+  background: rgba(0, 0, 0, 0.5) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.dark .login-tips {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dark .decoration-circle {
+  opacity: 0.2;
 }
 </style>

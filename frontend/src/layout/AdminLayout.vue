@@ -160,7 +160,7 @@ onMounted(() => {
     <!-- 内容区 -->
     <a-layout>
       <!-- 头部 -->
-      <a-layout-header class="modern-header glass-card">
+      <a-layout-header class="modern-header">
         <div class="header-content">
           <div class="header-title">
             <AppstoreOutlined />
@@ -214,7 +214,8 @@ onMounted(() => {
             面板 {{ dashboardVersion ? 'v' + dashboardVersion : '版本未知' }}
           </span>
         </div>
-        <span>&copy; {{ currentYear }}</span>
+        <span class="footer-right">&copy; {{ currentYear }}</span>
+        <span class="author-text">Designed by EnderKC</span>
       </a-layout-footer>
     </a-layout>
   </a-layout>
@@ -354,7 +355,7 @@ onMounted(() => {
   padding: 0 12px;
   border-radius: 12px;
   transition: all 0.3s;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--header-bg) !important;
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
@@ -390,6 +391,7 @@ onMounted(() => {
 
 /* Footer */
 .modern-footer {
+  line-height: 1.1; /* 这样可以和左侧选择栏下面的线对齐 */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -399,9 +401,9 @@ onMounted(() => {
   padding: 16px 24px;
   color: var(--text-hint);
   font-size: 12px;
-  background: var(--body-bg);
+  background: var(--footer-bg) !important;
   border-top: 1px solid rgba(0, 0, 0, 0.04);
-  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.06);
+  /* box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.06); */
   transition: background 0.3s ease, border-color 0.3s ease;
 }
 
@@ -478,9 +480,8 @@ onMounted(() => {
 
 <style>
 .dark .modern-footer {
-  background: linear-gradient(180deg, rgba(24, 27, 37, 0.98), rgba(12, 14, 20, 0.98));
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.5);
+  background: var(--footer-bg) !important;
+
   color: var(--text-hint);
 }
 
@@ -515,13 +516,13 @@ onMounted(() => {
 }
 
 .dark .user-avatar {
-  background: rgba(33, 37, 43, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--header-bg) !important;
   color: var(--text-primary);
 }
 
 .dark .user-avatar:hover {
   background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
 }
 
 .dark .username {
@@ -546,8 +547,16 @@ onMounted(() => {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+.dark .footer-right{
+  color: var(--text-primary);
+}
+
 .dark .version-badge {
   background: rgba(255, 255, 255, 0.15);
   color: var(--text-primary);
+}
+
+.author-text {
+  color: #9ab5ca68;
 }
 </style>

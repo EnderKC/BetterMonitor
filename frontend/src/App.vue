@@ -82,9 +82,10 @@ const themeConfig = computed(() => ({
   --transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
 
   /* Component Backgrounds */
-  --sidebar-bg: rgba(255, 255, 255, 0.6);
+  --sidebar-bg: rgba(255, 255, 255, 0.5);
   --dropdown-bg: rgba(255, 255, 255, 0.9);
-  --header-bg: rgba(255, 255, 255, 0.6);
+  --footer-bg: rgba(255, 255, 255, 0.5);
+  --header-bg: rgba(255, 255, 255, 0.5);
 }
 
 /* Dark Mode (One Dark Style) */
@@ -117,9 +118,10 @@ const themeConfig = computed(() => ({
   --shadow-glow: 0 0 20px rgba(97, 175, 239, 0.2);
 
   /* Component Backgrounds */
-  --sidebar-bg: rgba(33, 37, 43, 0.9);
+  --sidebar-bg: rgba(33, 37, 43, 0.5);
   --dropdown-bg: #2c313c;
-  --header-bg: rgba(33, 37, 43, 0.8);
+  --footer-bg: rgba(33, 37, 43, 0.5);
+  --header-bg: rgba(33, 37, 43, 0.5);
 }
 
 /* Global Reset & Typography */
@@ -239,7 +241,7 @@ body {
 .ant-input,
 .ant-input-number,
 .ant-select-selector {
-  border-radius: var(--radius-md) !important;
+  border-radius: var(--radius-sm) !important;
   border-color: rgba(0, 0, 0, 0.1) !important;
   background: rgba(255, 255, 255, 0.6) !important;
   backdrop-filter: blur(10px);
@@ -290,6 +292,16 @@ body {
 
 :root.dark .ant-card-head {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 菜单内部 */
+.ant-menu-sub {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+:root.dark .ant-menu-sub {
+  background: rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Tables */
@@ -677,7 +689,6 @@ body {
 
 /* Dark Mode - Layout Footer */
 :root.dark .ant-layout-footer {
-  background: transparent !important;
   color: var(--text-hint) !important;
 }
 </style>
