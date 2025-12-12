@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,9 +20,10 @@ var lifeProbePrivateListConns = &publicConnSet{}
 var lifeProbeDetailConns sync.Map // map[uint]*lifeDetailConnSet
 
 type lifeDetailConn struct {
-	conn      *SafeConn
-	hours     int
-	dailyDays int
+	conn       *SafeConn
+	hours      int
+	dailyDays  int
+	maskDevice bool // 是否需要脱敏设备ID（公开访问时为true）
 }
 
 type lifeDetailConnSet struct {
@@ -82,6 +84,10 @@ func buildLifeProbeSummaries(includeAll bool) ([]*models.LifeProbeSummary, error
 		if err != nil {
 			return nil, err
 		}
+		// 公开访问时对设备ID进行脱敏
+		if !includeAll {
+			summary.DeviceID = maskDeviceID(summary.DeviceID)
+		}
 		summaries = append(summaries, summary)
 	}
 	return summaries, nil
@@ -100,13 +106,26 @@ func lifeProbeListPayload(includeAll bool) (map[string]interface{}, error) {
 
 // LifeProbeListWebSocketHandler 推送生命探针列表
 func LifeProbeListWebSocketHandler(c *gin.Context) {
-	token := c.Query("token")
+	token := strings.TrimSpace(c.Query("token"))
+	// 标准化token格式：不区分大小写移除Bearer前缀
+	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+
 	includeAll := false
 	if token != "" {
 		if claims, err := verifyJWTFromQuery(token); err == nil && claims != nil {
 			includeAll = true
+			log.Printf("[生命探针WS] Token验证成功，用户: %q，将返回完整设备ID", claims.Username)
+		} else {
+			log.Printf("[生命探针WS] Token验证失败(类型: %T)，将脱敏设备ID", err)
 		}
+	} else {
+		log.Printf("[生命探针WS] 未提供token，将脱敏设备ID")
 	}
+
+	// 列表接口始终允许访问（不受系统开关限制）
+	// 系统开关 AllowPublicLifeProbeAccess 只控制详情接口的公开访问
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -177,7 +196,7 @@ func parseLifeDetailRequestedRange(c *gin.Context) (int, int) {
 	return hours, dailyDays
 }
 
-func getLifeProbeDetailsPayload(probeID uint, hours, dailyDays int) (map[string]interface{}, error) {
+func getLifeProbeDetailsPayload(probeID uint, hours, dailyDays int, maskDevice bool) (map[string]interface{}, error) {
 	if hours <= 0 {
 		hours = 24
 	}
@@ -187,6 +206,11 @@ func getLifeProbeDetailsPayload(probeID uint, hours, dailyDays int) (map[string]
 	details, err := models.GetLifeProbeDetails(probeID, start, end, dailyDays)
 	if err != nil {
 		return nil, err
+	}
+
+	// 公开访问时对设备ID进行脱敏
+	if maskDevice && details.Summary.DeviceID != "" {
+		details.Summary.DeviceID = maskDeviceID(details.Summary.DeviceID)
 	}
 
 	return map[string]interface{}{
@@ -237,11 +261,30 @@ func LifeProbeDetailWebSocketHandler(c *gin.Context) {
 	}
 	probeID := uint(probeID64)
 
-	token := c.Query("token")
+	token := strings.TrimSpace(c.Query("token"))
+	// 标准化token格式：不区分大小写移除Bearer前缀
+	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+
 	includeAll := false
 	if token != "" {
 		if claims, err := verifyJWTFromQuery(token); err == nil && claims != nil {
 			includeAll = true
+		}
+	}
+
+	// 公开访问时检查系统设置（fail-closed: 读取失败时拒绝访问）
+	if !includeAll {
+		settings, err := models.GetSettings()
+		if err != nil {
+			log.Printf("[生命探针WS] GetSettings失败(拒绝匿名详情访问): %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "系统设置读取失败"})
+			return
+		}
+		if !settings.AllowPublicLifeProbeAccess {
+			c.JSON(http.StatusForbidden, gin.H{"error": "系统未开启公开访问生命探针详情功能"})
+			return
 		}
 	}
 
@@ -271,15 +314,16 @@ func LifeProbeDetailWebSocketHandler(c *gin.Context) {
 	defer safeConn.Close()
 
 	connInfo := &lifeDetailConn{
-		conn:      safeConn,
-		hours:     hours,
-		dailyDays: dailyDays,
+		conn:       safeConn,
+		hours:      hours,
+		dailyDays:  dailyDays,
+		maskDevice: !includeAll, // 公开访问时需要脱敏
 	}
 	registerLifeProbeDetailConn(probeID, connInfo)
 	defer unregisterLifeProbeDetailConn(probeID, connInfo)
 
 	sendDetail := func() error {
-		payload, err := getLifeProbeDetailsPayload(probeID, connInfo.hours, connInfo.dailyDays)
+		payload, err := getLifeProbeDetailsPayload(probeID, connInfo.hours, connInfo.dailyDays, connInfo.maskDevice)
 		if err != nil {
 			return err
 		}
@@ -350,7 +394,7 @@ func broadcastLifeProbeDetail(probeID uint) {
 
 	conns := set.snapshot()
 	for _, connInfo := range conns {
-		payload, err := getLifeProbeDetailsPayload(probeID, connInfo.hours, connInfo.dailyDays)
+		payload, err := getLifeProbeDetailsPayload(probeID, connInfo.hours, connInfo.dailyDays, connInfo.maskDevice)
 		if err != nil {
 			log.Printf("构建生命探针详情失败: %v", err)
 			continue

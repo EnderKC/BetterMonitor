@@ -7,6 +7,7 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/config"
+	"github.com/user/server-ops-backend/jobs"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/routes"
 	"github.com/user/server-ops-backend/services"
@@ -71,6 +72,7 @@ func cleanupOldData() {
 		settings = &models.SystemSettings{DataRetentionDays: 7}
 	}
 
+	// 1. 清理服务器监控数据
 	retention := settings.DataRetentionDays
 	if retention <= 0 {
 		retention = 7 // 默认保留7天
@@ -79,7 +81,7 @@ func cleanupOldData() {
 	// 计算截止时间
 	cutoff := time.Now().AddDate(0, 0, -retention)
 
-	log.Printf("清理 %s 之前的监控数据（保留%d天）", cutoff.Format("2006-01-02 15:04:05"), retention)
+	log.Printf("清理 %s 之前的服务器监控数据（保留%d天）", cutoff.Format("2006-01-02 15:04:05"), retention)
 
 	// 执行清理
 	if err := models.DeleteServerMonitorDataBefore(cutoff); err != nil {
@@ -88,17 +90,14 @@ func cleanupOldData() {
 		log.Printf("成功清理 %s 之前的过期监控数据", cutoff.Format("2006-01-02 15:04:05"))
 	}
 
-	lifeRetention := settings.LifeDataRetentionDays
-	if lifeRetention <= 0 {
-		lifeRetention = retention
-	}
-	lifeCutoff := time.Now().AddDate(0, 0, -lifeRetention)
-	log.Printf("清理 %s 之前的生命探针数据（保留%d天）", lifeCutoff.Format("2006-01-02 15:04:05"), lifeRetention)
-	if err := models.DeleteLifeDataBefore(lifeCutoff); err != nil {
-		log.Printf("清理生命探针数据失败: %v", err)
-	} else {
-		log.Printf("成功清理 %s 之前的生命探针数据", lifeCutoff.Format("2006-01-02 15:04:05"))
-	}
+	// 2. 清理生命探针数据（使用新的分类保留策略）
+	jobs.CleanupLifeProbeData()
+
+	// 3. 清理生命探针事件日志（保留30天）
+	jobs.CleanupLifeLoggerEvents()
+
+	// 4. 检查长时间未同步的探针
+	jobs.CleanupStaleLifeProbes()
 }
 
 func main() {

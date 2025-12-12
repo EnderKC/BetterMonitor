@@ -10,13 +10,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// 生命探针支持的数据类型
 const (
 	LifeDataTypeHeartRate     = "heart_rate"
 	LifeDataTypeStepsDetailed = "steps_detailed"
-	LifeDataTypeEnergy        = "energy_detailed"
 	LifeDataTypeSleepDetailed = "sleep_detailed"
-	LifeDataTypeFocusStatus   = "focus_status"
-	LifeDataTypeScreenEvent   = "screen_event"
+	// 已废弃的数据类型（不再接受新数据）：
+	// - "energy_detailed": 能量消耗
+	// - "focus_status": 专注模式
+	// - "screen_event": 屏幕事件
 )
 
 // LifeProbe represents a wearable/phone probe device
@@ -31,9 +33,6 @@ type LifeProbe struct {
 	BatteryLevel      *float64   `json:"battery_level"`
 	LatestHeartRate   float64    `json:"latest_heart_rate"`
 	LatestHeartRateAt *time.Time `json:"latest_heart_rate_at"`
-	LatestFocusStatus *bool      `json:"latest_focus_status"`
-	LatestFocusReason string     `json:"latest_focus_reason"`
-	FocusUpdatedAt    *time.Time `json:"focus_updated_at"`
 }
 
 // LifeLoggerEvent stores raw incoming payloads for auditing
@@ -89,25 +88,6 @@ type LifeSleepSegment struct {
 	Duration    float64   `json:"duration"`
 }
 
-// LifeFocusEvent stores focus mode toggles
-type LifeFocusEvent struct {
-	gorm.Model
-	LifeProbeID  uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_focus_unique"`
-	EventID      string    `json:"event_id" gorm:"index"`
-	IsFocused    bool      `json:"is_focused" gorm:"uniqueIndex:idx_focus_unique"`
-	ChangeReason string    `json:"change_reason"`
-	EventTime    time.Time `json:"event_time" gorm:"uniqueIndex:idx_focus_unique"`
-}
-
-// LifeScreenEvent stores lock/unlock events
-type LifeScreenEvent struct {
-	gorm.Model
-	LifeProbeID uint      `json:"life_probe_id" gorm:"index;uniqueIndex:idx_screen_unique"`
-	EventID     string    `json:"event_id" gorm:"index"`
-	Action      string    `json:"action" gorm:"uniqueIndex:idx_screen_unique"`
-	EventTime   time.Time `json:"event_time" gorm:"uniqueIndex:idx_screen_unique"`
-}
-
 // Payload definitions --------------------------------------------------------
 
 type HeartRatePayload struct {
@@ -137,20 +117,11 @@ type SleepSegmentPayload struct {
 	Duration  float64   `json:"duration"`
 }
 
+// SleepDetailedPayload represents sleep session data from client
 type SleepDetailedPayload struct {
 	IsSleepSessionFinished bool                  `json:"is_sleep_session_finished"`
-	Segments               []SleepSegmentPayload `json:"segments"`
+	Segments               []SleepSegmentPayload `json:"segments"` // 可能为空，需正确处理
 	TodayTotalSleepHours   *float64              `json:"today_total_sleep_hours"`
-}
-
-type FocusStatusPayload struct {
-	IsFocused    bool   `json:"is_focused"`
-	ChangeReason string `json:"change_reason"`
-}
-
-type ScreenEventPayload struct {
-	Action    string    `json:"action"`
-	EventTime time.Time `json:"event_time"`
 }
 
 // Summary & detail DTOs ------------------------------------------------------
@@ -160,6 +131,7 @@ type HeartRatePoint struct {
 	Value float64   `json:"value"`
 }
 
+// StepSamplePoint represents a step/energy sample with time range
 type StepSamplePoint struct {
 	StartTime  time.Time `json:"start"`
 	EndTime    time.Time `json:"end"`
@@ -167,17 +139,7 @@ type StepSamplePoint struct {
 	SampleType string    `json:"sample_type"`
 }
 
-type FocusEventPoint struct {
-	Time         time.Time `json:"time"`
-	IsFocused    bool      `json:"is_focused"`
-	ChangeReason string    `json:"change_reason"`
-}
-
-type ScreenEventPoint struct {
-	Time   time.Time `json:"time"`
-	Action string    `json:"action"`
-}
-
+// SleepSegmentPoint represents a sleep stage segment
 type SleepSegmentPoint struct {
 	Stage     string    `json:"stage"`
 	StartTime time.Time `json:"start_time"`
@@ -198,6 +160,7 @@ type DailyStepPoint struct {
 	SampleType string    `json:"sample_type"`
 }
 
+// LifeProbeSummary contains probe info with latest metrics
 type LifeProbeSummary struct {
 	ID              uint             `json:"id"`
 	Name            string           `json:"name"`
@@ -208,20 +171,18 @@ type LifeProbeSummary struct {
 	BatteryLevel    *float64         `json:"battery_level"`
 	LastSyncAt      *time.Time       `json:"last_sync_at"`
 	LatestHeartRate *HeartRatePoint  `json:"latest_heart_rate"`
-	FocusEvent      *FocusEventPoint `json:"focus_event"`
 	StepsToday      float64          `json:"steps_today"`
 	SleepDuration   *float64         `json:"sleep_duration"`
 	DailyTotals     []DailyStepPoint `json:"daily_totals"`
 }
 
+// LifeProbeDetails contains all time-series data for a probe
 type LifeProbeDetails struct {
-	Summary      *LifeProbeSummary   `json:"summary"`
-	HeartRates   []HeartRatePoint    `json:"heart_rates"`
-	StepSamples  []StepSamplePoint   `json:"step_samples"`
-	FocusEvents  []FocusEventPoint   `json:"focus_events"`
-	ScreenEvents []ScreenEventPoint  `json:"screen_events"`
-	Sleep        []SleepSegmentPoint `json:"sleep_segments"`
-	SleepStats   SleepOverview       `json:"sleep_overview"`
+	Summary     *LifeProbeSummary   `json:"summary"`
+	HeartRates  []HeartRatePoint    `json:"heart_rates"`
+	StepSamples []StepSamplePoint   `json:"step_samples"`
+	Sleep       []SleepSegmentPoint `json:"sleep_segments"`
+	SleepStats  SleepOverview       `json:"sleep_overview"`
 }
 
 // CRUD helpers ----------------------------------------------------------------
@@ -234,8 +195,10 @@ func UpdateLifeProbe(probe *LifeProbe) error {
 	return DB.Save(probe).Error
 }
 
+// DeleteLifeProbe removes probe and all associated data
 func DeleteLifeProbe(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		// 删除所有关联的数据
 		if err := tx.Where("life_probe_id = ?", id).Delete(&LifeHeartRate{}).Error; err != nil {
 			return err
 		}
@@ -248,15 +211,10 @@ func DeleteLifeProbe(id uint) error {
 		if err := tx.Where("life_probe_id = ?", id).Delete(&LifeSleepSegment{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("life_probe_id = ?", id).Delete(&LifeFocusEvent{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("life_probe_id = ?", id).Delete(&LifeScreenEvent{}).Error; err != nil {
-			return err
-		}
 		if err := tx.Where("life_probe_id = ?", id).Delete(&LifeLoggerEvent{}).Error; err != nil {
 			return err
 		}
+		// 最后删除探针本身
 		return tx.Delete(&LifeProbe{}, id).Error
 	})
 }
@@ -314,6 +272,7 @@ func UpdateProbeSyncInfo(db *gorm.DB, probeID uint, eventTime time.Time, battery
 		Updates(updates).Error
 }
 
+// UpdateProbeHeartRate updates latest heart rate in probe record
 func UpdateProbeHeartRate(db *gorm.DB, probeID uint, value float64, measureTime time.Time) error {
 	updates := map[string]interface{}{
 		"latest_heart_rate":    normalizeHeartRate(value),
@@ -324,16 +283,7 @@ func UpdateProbeHeartRate(db *gorm.DB, probeID uint, value float64, measureTime 
 		Updates(updates).Error
 }
 
-func UpdateProbeFocusStatus(db *gorm.DB, probeID uint, isFocused bool, reason string, eventTime time.Time) error {
-	return db.Model(&LifeProbe{}).
-		Where("id = ? AND (focus_updated_at IS NULL OR focus_updated_at <= ?)", probeID, eventTime).
-		Updates(map[string]interface{}{
-			"latest_focus_status": &isFocused,
-			"latest_focus_reason": reason,
-			"focus_updated_at":    eventTime,
-		}).Error
-}
-
+// normalizeHeartRate cleans up invalid heart rate values
 func normalizeHeartRate(value float64) float64 {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0
@@ -429,8 +379,10 @@ func OverrideDailyTotal(db *gorm.DB, probeID uint, sampleType string, reference 
 	return setDailyTotal(db, probeID, reference, sampleType, total)
 }
 
+// RecordSleepSegments inserts sleep segments, handling empty segments gracefully
 func RecordSleepSegments(db *gorm.DB, probeID uint, eventID string, segments []SleepSegmentPayload) error {
 	if len(segments) == 0 {
+		// 客户端可能无法获取睡眠阶段数据，这是合法的
 		return nil
 	}
 
@@ -457,41 +409,6 @@ func RecordSleepSegments(db *gorm.DB, probeID uint, eventID string, segments []S
 			"duration": gorm.Expr("excluded.duration"),
 		}),
 	}).Create(&rows).Error
-}
-
-func RecordFocusEvent(db *gorm.DB, probeID uint, eventID string, payload FocusStatusPayload, eventTime time.Time) error {
-	record := LifeFocusEvent{
-		LifeProbeID:  probeID,
-		EventID:      eventID,
-		IsFocused:    payload.IsFocused,
-		ChangeReason: payload.ChangeReason,
-		EventTime:    eventTime,
-	}
-	return db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "life_probe_id"},
-			{Name: "event_time"},
-			{Name: "is_focused"},
-		},
-		DoNothing: true,
-	}).Create(&record).Error
-}
-
-func RecordScreenEvent(db *gorm.DB, probeID uint, eventID string, payload ScreenEventPayload) error {
-	record := LifeScreenEvent{
-		LifeProbeID: probeID,
-		EventID:     eventID,
-		Action:      payload.Action,
-		EventTime:   payload.EventTime,
-	}
-	return db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "life_probe_id"},
-			{Name: "action"},
-			{Name: "event_time"},
-		},
-		DoNothing: true,
-	}).Create(&record).Error
 }
 
 // Query helpers ---------------------------------------------------------------
@@ -643,6 +560,7 @@ func getLatestSleepSegments(probeID uint) ([]LifeSleepSegment, error) {
 	return segments, nil
 }
 
+// BuildLifeProbeSummary constructs summary with latest metrics
 func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals bool) (*LifeProbeSummary, error) {
 	summary := &LifeProbeSummary{
 		ID:              probe.ID,
@@ -661,6 +579,7 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 	}
 	referenceTime = referenceTime.UTC()
 
+	// 最新心率
 	if probe.LatestHeartRateAt != nil {
 		cpy := *probe.LatestHeartRateAt
 		summary.LatestHeartRate = &HeartRatePoint{
@@ -669,15 +588,7 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 		}
 	}
 
-	if probe.LatestFocusStatus != nil && probe.FocusUpdatedAt != nil {
-		cpy := *probe.FocusUpdatedAt
-		summary.FocusEvent = &FocusEventPoint{
-			Time:         cpy,
-			IsFocused:    *probe.LatestFocusStatus,
-			ChangeReason: probe.LatestFocusReason,
-		}
-	}
-
+	// 今日步数
 	day := truncateToDay(referenceTime)
 	nextDay := day.Add(24 * time.Hour)
 	var total LifeStepDailyTotal
@@ -689,8 +600,7 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 			return nil, err
 		}
 
-		// 如果今日汇总还没写入（例如客户端只上传了 total 而没有样本，或者旧数据未覆盖），
-		// 退而求其次，直接用 step_samples 表中当天的样本累加。
+		// 退而求其次：从样本表累加今日步数
 		var sum float64
 		if err := DB.Model(&LifeStepSample{}).
 			Select("COALESCE(SUM(value), 0)").
@@ -703,11 +613,13 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 		summary.StepsToday = total.Total
 	}
 
+	// 最新睡眠时长
 	if segments, err := getLatestSleepSegments(probe.ID); err == nil && len(segments) > 0 {
 		overview := buildSleepOverview(segments)
 		summary.SleepDuration = &overview.TotalDuration
 	}
 
+	// 可选：包含每日汇总数据
 	if includeDailyTotals {
 		totals, err := getDailyTotals(probe.ID, 7, referenceTime)
 		if err != nil {
@@ -719,6 +631,7 @@ func BuildLifeProbeSummary(probe *LifeProbe, now time.Time, includeDailyTotals b
 	return summary, nil
 }
 
+// GetLifeProbeDetails retrieves all time-series data for a probe within time range
 func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*LifeProbeDetails, error) {
 	probe, err := GetLifeProbeByID(probeID)
 	if err != nil {
@@ -738,6 +651,7 @@ func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*Li
 		Summary: summary,
 	}
 
+	// 心率数据
 	var heartRows []LifeHeartRate
 	if err := DB.Where("life_probe_id = ? AND measure_time BETWEEN ? AND ?", probeID, start, end).
 		Order("measure_time asc").
@@ -751,6 +665,7 @@ func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*Li
 		})
 	}
 
+	// 步数样本
 	var stepRows []LifeStepSample
 	if err := DB.Where("life_probe_id = ? AND start_time BETWEEN ? AND ?", probeID, start, end).
 		Order("start_time asc").
@@ -766,33 +681,7 @@ func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*Li
 		})
 	}
 
-	var focusRows []LifeFocusEvent
-	if err := DB.Where("life_probe_id = ? AND event_time BETWEEN ? AND ?", probeID, start, end).
-		Order("event_time asc").
-		Find(&focusRows).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	for _, row := range focusRows {
-		details.FocusEvents = append(details.FocusEvents, FocusEventPoint{
-			Time:         row.EventTime,
-			IsFocused:    row.IsFocused,
-			ChangeReason: row.ChangeReason,
-		})
-	}
-
-	var screenRows []LifeScreenEvent
-	if err := DB.Where("life_probe_id = ? AND event_time BETWEEN ? AND ?", probeID, start, end).
-		Order("event_time asc").
-		Find(&screenRows).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	for _, row := range screenRows {
-		details.ScreenEvents = append(details.ScreenEvents, ScreenEventPoint{
-			Time:   row.EventTime,
-			Action: row.Action,
-		})
-	}
-
+	// 最新睡眠数据
 	segments, err := getLatestSleepSegments(probeID)
 	if err != nil {
 		return nil, err
@@ -807,6 +696,7 @@ func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*Li
 	}
 	details.SleepStats = buildSleepOverview(segments)
 
+	// 每日汇总
 	if dailyDays <= 0 {
 		dailyDays = 7
 	}
@@ -823,6 +713,7 @@ func GetLifeProbeDetails(probeID uint, start, end time.Time, dailyDays int) (*Li
 
 // Cleanup --------------------------------------------------------------------
 
+// DeleteLifeDataBefore removes old life probe data (for retention policies)
 func DeleteLifeDataBefore(before time.Time) error {
 	cutoffDay := truncateToDay(before)
 
@@ -835,8 +726,6 @@ func DeleteLifeDataBefore(before time.Time) error {
 		{&LifeStepSample{}, "end_time < ?", []interface{}{before}},
 		{&LifeStepDailyTotal{}, "day < ?", []interface{}{cutoffDay}},
 		{&LifeSleepSegment{}, "end_time < ?", []interface{}{before}},
-		{&LifeFocusEvent{}, "event_time < ?", []interface{}{before}},
-		{&LifeScreenEvent{}, "event_time < ?", []interface{}{before}},
 		{&LifeLoggerEvent{}, "timestamp < ?", []interface{}{before}},
 	}
 

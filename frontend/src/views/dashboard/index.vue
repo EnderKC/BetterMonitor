@@ -4,7 +4,6 @@ import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
 import { useSettingsStore } from '../../stores/settingsStore';
-import LifeProbeDetailModal from '../../components/LifeProbeDetailModal.vue';
 import type { LifeProbeSummary } from '@/types/life';
 import {
   DesktopOutlined,
@@ -63,8 +62,6 @@ const serverListReconnectTimer = ref<number | null>(null);
 // 生命探针数据
 const lifeProbes = ref<LifeProbeSummary[]>([]);
 const lifeLoading = ref(true);
-const lifeDetailVisible = ref(false);
-const selectedLifeProbeId = ref<number | null>(null);
 const LIFE_STEP_GOAL = 10000;
 const lifeProbesWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
@@ -690,11 +687,6 @@ const getLifeHeartRate = (probe: LifeProbeSummary) => {
   return Math.round(probe.latest_heart_rate.value);
 };
 
-const getLifeFocusLabel = (probe: LifeProbeSummary) => {
-  if (!probe.focus_event) return '未上报';
-  return probe.focus_event.is_focused ? '专注模式' : '普通模式';
-};
-
 const formatLifeTime = (value?: string) => {
   if (!value) return '尚未同步';
   return new Date(value).toLocaleString();
@@ -711,8 +703,7 @@ const getStepsProgress = (probe: LifeProbeSummary) => {
 };
 
 const openLifeDetail = (probeId: number) => {
-  selectedLifeProbeId.value = probeId;
-  lifeDetailVisible.value = true;
+  router.push({ name: 'LifeProbeDetail', params: { id: probeId } });
 };
 // 获取简短的CPU型号
 const getShortCpuModel = (model: string) => {
@@ -867,13 +858,11 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
               </div>
             </div>
 
-            <!-- 信息条 (Device ID + Focus) -->
+            <!-- 信息条 (Device ID only) -->
             <div class="server-info-bar">
               <span class="info-cpu" :title="probe.device_id">
                 <MobileOutlined /> {{ getShortDeviceId(probe.device_id) }}
               </span>
-              <span class="info-divider">|</span>
-              <span class="info-config">{{ getLifeFocusLabel(probe) }}</span>
             </div>
 
             <!-- 核心指标网格 -->
@@ -1153,8 +1142,6 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
       <!-- Life Section Removed and Merged into Grid -->
     </div>
-
-    <LifeProbeDetailModal v-model="lifeDetailVisible" :probe-id="selectedLifeProbeId" public-mode />
 
     <div class="dashboard-footer">
       <span>Better Monitor</span> &copy; {{ new Date().getFullYear() }}

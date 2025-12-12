@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
 import {
   PlusOutlined,
@@ -9,18 +10,16 @@ import {
   ReloadOutlined
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
-import LifeProbeDetailModal from '@/components/LifeProbeDetailModal.vue';
 import type { LifeProbeSummary } from '@/types/life';
 import { getToken } from '@/utils/auth';
 
+const router = useRouter();
 const loading = ref(true);
 const probes = ref<LifeProbeSummary[]>([]);
 
 const modalVisible = ref(false);
 const submitting = ref(false);
 const editingId = ref<number | null>(null);
-const detailVisible = ref(false);
-const selectedProbeId = ref<number | null>(null);
 const lifeWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
 const lifeReconnectTimer = ref<number | null>(null);
@@ -38,7 +37,6 @@ const columns = [
   { title: '设备ID', dataIndex: 'device_id', key: 'device_id' },
   { title: '今日步数', dataIndex: 'steps_today', key: 'steps_today' },
   { title: '当前心率', dataIndex: 'latest_heart_rate', key: 'latest_heart_rate' },
-  { title: '专注状态', dataIndex: 'focus_event', key: 'focus_event' },
   { title: '最后同步', dataIndex: 'last_sync_at', key: 'last_sync_at' },
   { title: '操作', key: 'action' }
 ];
@@ -229,18 +227,12 @@ const handleRefresh = () => {
 };
 
 const openDetail = (probeId: number) => {
-  selectedProbeId.value = probeId;
-  detailVisible.value = true;
+  router.push({ name: 'AdminLifeProbeDetail', params: { id: probeId } });
 };
 
 const totalSteps = computed(() =>
   probes.value.reduce((sum, probe) => sum + (probe.steps_today || 0), 0)
 );
-
-const focusBadge = (probe: LifeProbeSummary) => {
-  if (!probe.focus_event) return '未上报';
-  return probe.focus_event.is_focused ? '专注中' : '普通模式';
-};
 </script>
 
 <template>
@@ -281,9 +273,6 @@ const focusBadge = (probe: LifeProbeSummary) => {
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'latest_heart_rate'">
           {{ record.latest_heart_rate ? record.latest_heart_rate.value : '--' }}
-        </template>
-        <template v-else-if="column.key === 'focus_event'">
-          <a-tag :color="record.focus_event?.is_focused ? 'green' : 'blue'">{{ focusBadge(record) }}</a-tag>
         </template>
         <template v-else-if="column.key === 'last_sync_at'">
           {{ record.last_sync_at ? new Date(record.last_sync_at).toLocaleString() : '--' }}
@@ -333,8 +322,6 @@ const focusBadge = (probe: LifeProbeSummary) => {
         </a-form-item>
       </a-form>
     </a-modal>
-
-    <LifeProbeDetailModal v-model="detailVisible" :probe-id="selectedProbeId" />
   </div>
 </template>
 

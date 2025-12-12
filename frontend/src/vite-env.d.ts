@@ -6,7 +6,22 @@ declare module '*.vue' {
   export default component
 }
 
-// 全局变量声明
-interface Window {
-  ethereum?: any;
+// 扩展 vue-router 的 RouteMeta 类型
+import 'vue-router';
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    title?: string;
+    requiresAuth?: boolean;
+    admin?: boolean;
+  }
 }
+
+// 全局类型扩展
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}
+
+export {};

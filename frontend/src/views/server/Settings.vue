@@ -22,17 +22,28 @@ const router = useRouter();
 const settingsStore = useSettingsStore();
 
 const ensureAdminAccess = async () => {
+  console.log('[Settings] 开始检查管理员权限');
+  console.log('[Settings] 当前管理员状态:', userStore.isAdmin);
+  console.log('[Settings] 当前用户信息:', userStore.userInfo);
+  console.log('[Settings] 当前token:', userStore.token ? '已设置' : '未设置');
+
   // 如果当前状态不是管理员，尝试刷新一次用户信息
   if (!userStore.isAdmin) {
-    await userStore.getUserInfo(true);
+    console.log('[Settings] 不是管理员，尝试刷新用户信息');
+    const success = await userStore.getUserInfo(true);
+    console.log('[Settings] 刷新用户信息结果:', success);
+    console.log('[Settings] 刷新后的管理员状态:', userStore.isAdmin);
+    console.log('[Settings] 刷新后的用户信息:', userStore.userInfo);
   }
 
   if (!userStore.isAdmin) {
+    console.error('[Settings] 验证失败：不是管理员');
     message.error('只有管理员才能访问此页面');
     router.push('/');
     return false;
   }
 
+  console.log('[Settings] 管理员权限验证通过');
   return true;
 };
 
@@ -44,6 +55,7 @@ const form = reactive({
   chart_history_hours: 24,
   data_retention_days: 7,
   life_data_retention_days: 7,
+  allow_public_life_probe_access: true,
   agent_release_repo: '',
   agent_release_channel: 'stable',
   agent_release_mirror: ''
@@ -98,6 +110,7 @@ const loadSettings = async () => {
       chart_history_hours?: number;
       data_retention_days?: number;
       life_data_retention_days?: number;
+      allow_public_life_probe_access?: boolean;
       agent_release_repo?: string;
       agent_release_channel?: string;
       agent_release_mirror?: string;
@@ -126,6 +139,10 @@ const loadSettings = async () => {
 
     if (settings.life_data_retention_days !== undefined) {
       form.life_data_retention_days = settings.life_data_retention_days;
+    }
+
+    if (settings.allow_public_life_probe_access !== undefined) {
+      form.allow_public_life_probe_access = settings.allow_public_life_probe_access;
     }
 
     if (settings.agent_release_repo !== undefined) {
@@ -363,6 +380,13 @@ onMounted(async () => {
                     <a-input-number v-model:value="form.life_data_retention_days" :min="1" :max="180"
                       class="ios-input-number" />
                     <div class="form-help">生命探针上报的健康数据保留天数</div>
+                  </a-form-item>
+
+                  <a-form-item label="允许公开访问生命探针">
+                    <a-switch v-model:checked="form.allow_public_life_probe_access"
+                      checked-children="开启"
+                      un-checked-children="关闭" />
+                    <div class="form-help">是否允许未登录用户通过公开链接访问生命探针详情页面（需要探针本身也开启公开）</div>
                   </a-form-item>
                 </div>
 

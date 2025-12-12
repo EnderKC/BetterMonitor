@@ -62,8 +62,6 @@ func InitDB() error {
 		&LifeStepSample{},
 		&LifeStepDailyTotal{},
 		&LifeSleepSegment{},
-		&LifeFocusEvent{},
-		&LifeScreenEvent{},
 	); err != nil {
 		return err
 	}
@@ -91,11 +89,10 @@ func InitDB() error {
 	if settingsCount == 0 {
 		// 创建默认系统设置
 		settings := SystemSettings{
-			HeartbeatInterval:     "10s",
-			MonitorInterval:       "30s",
-			UIRefreshInterval:     "10s",
-			DataRetentionDays:     7,
-			LifeDataRetentionDays: 7,
+			HeartbeatInterval: "10s",
+			MonitorInterval:   "30s",
+			UIRefreshInterval: "10s",
+			DataRetentionDays: 7,
 		}
 		if err := DB.Create(&settings).Error; err != nil {
 			log.Printf("创建默认系统设置失败: %v", err)

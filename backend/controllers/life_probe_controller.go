@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -170,7 +171,37 @@ func GetLifeProbeDetails(c *gin.Context) {
 
 // GetPublicLifeProbeDetails returns detailed metrics for public probes.
 func GetPublicLifeProbeDetails(c *gin.Context) {
-	handleLifeProbeDetailsRequest(c, true)
+	// 检查是否为认证用户（authenticated override）
+	token := strings.TrimSpace(c.Query("token"))
+	if token == "" {
+		// 尝试从Authorization header获取
+		token = strings.TrimSpace(c.GetHeader("Authorization"))
+		if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
+			token = strings.TrimSpace(token[7:])
+		}
+	}
+
+	isAuthenticated := false
+	if token != "" {
+		if _, err := verifyJWTFromQuery(token); err == nil {
+			isAuthenticated = true
+		}
+	}
+
+	// 匿名用户需要检查系统设置（fail-closed: 读取失败时拒绝访问）
+	if !isAuthenticated {
+		settings, err := models.GetSettings()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "系统设置读取失败"})
+			return
+		}
+		if !settings.AllowPublicLifeProbeAccess {
+			c.JSON(http.StatusForbidden, gin.H{"error": "系统未开启公开访问生命探针详情功能"})
+			return
+		}
+	}
+
+	handleLifeProbeDetailsRequest(c, !isAuthenticated)
 }
 
 func handleLifeProbeDetailsRequest(c *gin.Context, public bool) {
@@ -202,6 +233,11 @@ func handleLifeProbeDetailsRequest(c *gin.Context, public bool) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取生命探针详情失败: " + err.Error()})
 		return
+	}
+
+	// 公开访问时对设备ID进行脱敏
+	if public && details.Summary.DeviceID != "" {
+		details.Summary.DeviceID = maskDeviceID(details.Summary.DeviceID)
 	}
 
 	c.JSON(http.StatusOK, details)
@@ -250,6 +286,9 @@ func parseIntDefault(c *gin.Context, key string, defaultVal int) int {
 
 // GetPublicLifeProbes returns summaries for probes marked as public.
 func GetPublicLifeProbes(c *gin.Context) {
+	// 列表接口始终允许访问（不受系统开关限制）
+	// 系统开关 AllowPublicLifeProbeAccess 只控制详情接口的公开访问
+
 	probes, err := models.ListPublicLifeProbes()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取生命探针列表失败: " + err.Error()})
@@ -264,6 +303,8 @@ func GetPublicLifeProbes(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "构建生命探针摘要失败: " + err.Error()})
 			return
 		}
+		// 公开访问时对设备ID进行脱敏
+		summary.DeviceID = maskDeviceID(summary.DeviceID)
 		summaries = append(summaries, summary)
 	}
 
@@ -358,11 +399,9 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 	}
 
 	var (
-		heartPayload  *models.HeartRatePayload
-		stepsPayload  *models.StepsDetailedPayload
-		sleepPayload  *models.SleepDetailedPayload
-		focusPayload  *models.FocusStatusPayload
-		screenPayload *models.ScreenEventPayload
+		heartPayload *models.HeartRatePayload
+		stepsPayload *models.StepsDetailedPayload
+		sleepPayload *models.SleepDetailedPayload
 	)
 
 	switch req.DataType {
@@ -373,7 +412,7 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			return
 		}
 		heartPayload = &payload
-	case models.LifeDataTypeStepsDetailed, models.LifeDataTypeEnergy:
+	case models.LifeDataTypeStepsDetailed:
 		var payload models.StepsDetailedPayload
 		if err := json.Unmarshal(req.Payload, &payload); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "步数数据格式错误"})
@@ -387,23 +426,10 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			return
 		}
 		sleepPayload = &payload
-	case models.LifeDataTypeFocusStatus:
-		var payload models.FocusStatusPayload
-		if err := json.Unmarshal(req.Payload, &payload); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "专注模式数据格式错误"})
-			return
-		}
-		focusPayload = &payload
-	case models.LifeDataTypeScreenEvent:
-		var payload models.ScreenEventPayload
-		if err := json.Unmarshal(req.Payload, &payload); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "屏幕事件数据格式错误"})
-			return
-		}
-		if payload.EventTime.IsZero() {
-			payload.EventTime = eventTime
-		}
-		screenPayload = &payload
+	default:
+		// 废弃的数据类型（不再接受）
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的数据类型，该类型已废弃"})
+		return
 	}
 
 	if err := models.DB.Transaction(func(tx *gorm.DB) error {
@@ -443,7 +469,7 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			if err := models.UpdateProbeHeartRate(tx, probe.ID, heartPayload.Value, heartPayload.MeasureTime); err != nil {
 				return err
 			}
-		case models.LifeDataTypeStepsDetailed, models.LifeDataTypeEnergy:
+		case models.LifeDataTypeStepsDetailed:
 			if stepsPayload == nil {
 				return errors.New("步数数据为空")
 			}
@@ -453,7 +479,8 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			if err := models.RecordDailyTotals(tx, probe.ID, req.DataType, stepsPayload.Samples); err != nil {
 				return err
 			}
-			if req.DataType == models.LifeDataTypeStepsDetailed && stepsPayload.TodayTotalSteps != nil {
+			// 如果客户端提供了今日总步数，则覆盖汇总
+			if stepsPayload.TodayTotalSteps != nil {
 				reference := stepsPayload.EndPeriod
 				if reference.IsZero() {
 					reference = eventTime
@@ -466,24 +493,8 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 			if sleepPayload == nil {
 				return errors.New("睡眠数据为空")
 			}
+			// 睡眠阶段可能为空，RecordSleepSegments 会优雅处理
 			if err := models.RecordSleepSegments(tx, probe.ID, req.EventID, sleepPayload.Segments); err != nil {
-				return err
-			}
-		case models.LifeDataTypeFocusStatus:
-			if focusPayload == nil {
-				return errors.New("专注模式数据为空")
-			}
-			if err := models.RecordFocusEvent(tx, probe.ID, req.EventID, *focusPayload, eventTime); err != nil {
-				return err
-			}
-			if err := models.UpdateProbeFocusStatus(tx, probe.ID, focusPayload.IsFocused, focusPayload.ChangeReason, eventTime); err != nil {
-				return err
-			}
-		case models.LifeDataTypeScreenEvent:
-			if screenPayload == nil {
-				return errors.New("屏幕事件数据为空")
-			}
-			if err := models.RecordScreenEvent(tx, probe.ID, req.EventID, *screenPayload); err != nil {
 				return err
 			}
 		}
@@ -499,16 +510,34 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// isSupportedLifeDataType checks if a data type is currently supported
 func isSupportedLifeDataType(dataType string) bool {
 	switch dataType {
 	case models.LifeDataTypeHeartRate,
 		models.LifeDataTypeStepsDetailed,
-		models.LifeDataTypeEnergy,
-		models.LifeDataTypeSleepDetailed,
-		models.LifeDataTypeFocusStatus,
-		models.LifeDataTypeScreenEvent:
+		models.LifeDataTypeSleepDetailed:
 		return true
 	default:
 		return false
 	}
+}
+
+// maskDeviceID masks device ID for privacy protection in public access
+// 对设备ID进行脱敏处理，用于公开访问时保护隐私
+func maskDeviceID(deviceID string) string {
+	if deviceID == "" {
+		return ""
+	}
+
+	length := len(deviceID)
+	if length <= 8 {
+		// 短ID：显示前3后2
+		if length <= 5 {
+			return deviceID[:1] + "***" + deviceID[length-1:]
+		}
+		return deviceID[:3] + "***" + deviceID[length-2:]
+	}
+
+	// 长ID：显示前4后4
+	return deviceID[:4] + "****" + deviceID[length-4:]
 }
