@@ -12,7 +12,7 @@ type Server struct {
 	gorm.Model
 	Name            string    `json:"name" gorm:"not null"`                   // 服务器名称
 	IP              string    `json:"ip"`                                     // 服务器IP
-	PublicIP        string    `json:"public_ip" gorm:"type:varchar(45)"`      // 公网IP
+	PublicIP        string    `json:"public_ip" gorm:"type:varchar(100)"`     // 公网IP
 	OS              string    `json:"os"`                                     // 操作系统
 	Arch            string    `json:"arch"`                                   // 架构
 	CPUCores        int       `json:"cpu_cores"`                              // CPU核心数

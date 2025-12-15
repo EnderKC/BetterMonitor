@@ -26,7 +26,7 @@ func HealthCheck(c *gin.Context) {
 var startTime = time.Now()
 
 var agentUpgradeSender = func(conn *SafeConn, payload map[string]interface{}) error {
-	if conn == nil {
+	if conn == nil || conn.Conn == nil {
 		return fmt.Errorf("连接不存在")
 	}
 	return conn.WriteJSON(payload)
@@ -227,7 +227,7 @@ func ForceAgentUpgrade(c *gin.Context) {
 			},
 		}
 
-		if err := conn.WriteJSON(command); err != nil {
+		if err := agentUpgradeSender(conn, command); err != nil {
 			result.Failure = append(result.Failure, id)
 		} else {
 			result.Success = append(result.Success, id)

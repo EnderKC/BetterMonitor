@@ -1091,6 +1091,15 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				}
 			}
 			clientIP = strings.TrimSpace(clientIP)
+
+			// 如果clientIP是本地回环地址（127.0.0.1或::1），尝试从systemInfoData的public_ip获取
+			if clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "localhost" {
+				if publicIPFromData, ok := systemInfoData["public_ip"].(string); ok && strings.TrimSpace(publicIPFromData) != "" {
+					clientIP = strings.TrimSpace(publicIPFromData)
+					log.Printf("检测到本地回环连接，使用Agent上报的公网IP作为连接IP: %s", clientIP)
+				}
+			}
+
 			clientIPChanged := clientIP != "" && server.IP != clientIP
 			if clientIPChanged {
 				server.IP = clientIP

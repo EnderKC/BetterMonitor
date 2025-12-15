@@ -10,6 +10,7 @@ interface ServerState {
   secretKey?: string;
   name?: string;
   ip?: string;
+  public_ip?: string;
   port?: number;
   os?: string;
   arch?: string;
@@ -116,6 +117,8 @@ export const useServerStore = defineStore('serverStore', {
       // 更新服务器基本信息
       if (data.name !== undefined) this.servers[serverId].name = data.name;
       if (data.ip !== undefined) this.servers[serverId].ip = data.ip;
+      if (data.public_ip !== undefined) this.servers[serverId].public_ip = data.public_ip;
+      if (data.PublicIP !== undefined) this.servers[serverId].public_ip = data.PublicIP;
       if (data.os !== undefined) this.servers[serverId].os = data.os;
       if (data.arch !== undefined) this.servers[serverId].arch = data.arch;
       if (data.cpu_cores !== undefined) this.servers[serverId].cpu_cores = data.cpu_cores;
@@ -199,6 +202,7 @@ export const useServerStore = defineStore('serverStore', {
               name: server.Name || server.name,
               status: server.Status || server.status || 'unknown',
               ip: server.IP || server.ip,
+              public_ip: server.PublicIP || server.public_ip || existingServer?.public_ip,
               os: server.OS || server.os,
               arch: server.Arch || server.arch,
               cpu_cores: server.CPUCores || server.cpu_cores,

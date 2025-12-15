@@ -12,6 +12,27 @@ import (
 
 // HandleCommand 处理来自面板端的命令
 func HandleCommand(c *websocket.Conn, serverID uint, secretKey string, message []byte) {
+	// 兼容面板端新消息格式：
+	// {
+	//   "type": "agent_upgrade",
+	//   "request_id": "...",
+	//   "payload": { ... }
+	// }
+	var typedReq struct {
+		Type      string          `json:"type"`
+		RequestID string          `json:"request_id"`
+		Payload   json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(message, &typedReq); err == nil && strings.TrimSpace(typedReq.Type) != "" {
+		switch typedReq.Type {
+		case "agent_upgrade":
+			HandleAgentUpgradeMessage(c, serverID, secretKey, typedReq.RequestID, typedReq.Payload)
+		default:
+			SendErrorResponse(c, fmt.Sprintf("未知的消息类型: %s", typedReq.Type))
+		}
+		return
+	}
+
 	// 解析命令
 	var req struct {
 		Action string                 `json:"action"`
@@ -32,36 +53,36 @@ func HandleCommand(c *websocket.Conn, serverID uint, secretKey string, message [
 	// 文件管理相关命令
 	case strings.HasPrefix(req.Action, "file_"):
 		response, err = monitor.HandleFileCommand(req.Action, req.Params)
-		
+
 	// 进程管理相关命令
 	case strings.HasPrefix(req.Action, "process_"):
 		response, err = monitor.HandleProcessCommand(req.Action, req.Params)
-		
+
 	// Docker管理相关命令
 	case strings.HasPrefix(req.Action, "docker_"):
 		response, err = monitor.HandleDockerCommand(req.Action, req.Params)
-		
+
 	// Nginx管理相关命令
 	case strings.HasPrefix(req.Action, "nginx_"):
 		response, err = monitor.HandleNginxCommand(req.Action, req.Params)
-		
+
 	// 终端相关命令
 	case req.Action == "terminal_create":
 		response, err = monitor.CreateTerminalSession(req.Params)
-		
+
 	case req.Action == "terminal_resize":
 		response, err = monitor.ResizeTerminal(req.Params)
-		
+
 	case req.Action == "terminal_input":
 		response, err = monitor.SendTerminalInput(req.Params)
-		
+
 	case req.Action == "terminal_close":
 		response, err = monitor.CloseTerminalSession(req.Params)
-		
+
 	// 其他命令
 	case req.Action == "ping":
 		response = `{"status":"pong"}`
-		
+
 	default:
 		err = fmt.Errorf("未知的命令: %s", req.Action)
 	}

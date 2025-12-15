@@ -13,6 +13,8 @@ type User struct {
 	gorm.Model
 	Username    string    `gorm:"uniqueIndex;not null" json:"username"`
 	Password    string    `gorm:"not null" json:"-"` // json:"-" 确保密码不会在JSON响应中暴露
+	Email       string    `gorm:"index" json:"email"`
+	Phone       string    `json:"phone"`
 	Role        string    `gorm:"default:user" json:"role"`
 	LastLoginAt time.Time `json:"last_login_at"`
 }

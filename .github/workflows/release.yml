@@ -196,6 +196,19 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      - name: Get build metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          COMMIT_FULL=$(git rev-parse HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "COMMIT_SHORT=${COMMIT_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "COMMIT_FULL=${COMMIT_FULL}" >> "$GITHUB_OUTPUT"
+          echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "Build metadata: VERSION=${{ steps.version.outputs.VERSION }}, COMMIT=${COMMIT_SHORT} (${COMMIT_FULL}), BUILD_DATE=${BUILD_DATE}"
+
       - name: Download backend amd64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -260,8 +273,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.version.outputs.VERSION }}
-            COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            COMMIT_SHORT=${{ steps.meta.outputs.COMMIT_SHORT }}
+            COMMIT_FULL=${{ steps.meta.outputs.COMMIT_FULL }}
+            BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}

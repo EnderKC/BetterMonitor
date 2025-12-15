@@ -1,8 +1,10 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"io"
+	stdnet "net"
 	"net/http"
 	"strings"
 	"time"
@@ -73,29 +75,51 @@ func (m *Monitor) SetServerURL(url string) {
 
 // GetPublicIP 获取出口IP地址
 func (m *Monitor) GetPublicIP() string {
-	// 尝试多个IP查询服务，提高成功率
-	services := []string{
-		"https://api.ip.sb/ip",
+	ipv4 := m.getIP([]string{
+		"https://api.ipify.org",
 		"https://ifconfig.me/ip",
-		"https://icanhazip.com",
-	}
+		"https://api.ip.sb/ip",
+	}, "tcp4")
 
+	ipv6 := m.getIP([]string{
+		"https://api6.ipify.org",
+		"https://icanhazip.com",
+		"https://api.ip.sb/ip",
+	}, "tcp6")
+
+	if ipv4 != "" && ipv6 != "" {
+		return fmt.Sprintf("%s, %s", ipv4, ipv6)
+	}
+	if ipv4 != "" {
+		return ipv4
+	}
+	return ipv6
+}
+
+func (m *Monitor) getIP(services []string, network string) string {
 	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, netw, addr string) (stdnet.Conn, error) {
+				return (&stdnet.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
 		Timeout: 5 * time.Second,
 	}
 
 	for _, service := range services {
 		resp, err := client.Get(service)
 		if err != nil {
-			m.log.Debug("从 %s 获取公网IP失败: %v", service, err)
+			m.log.Debug("从 %s 获取%s失败: %v", service, network, err)
 			continue
 		}
-		defer resp.Body.Close()
+		// 注意：这里不能使用 defer resp.Body.Close()，因为是在循环中
+		// 应该显式关闭
 
 		if resp.StatusCode == 200 {
 			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close() // 显式关闭
 			if err != nil {
-				m.log.Debug("读取公网IP响应失败: %v", err)
+				m.log.Debug("读取%s响应失败: %v", network, err)
 				continue
 			}
 
@@ -104,13 +128,14 @@ func (m *Monitor) GetPublicIP() string {
 			ip = strings.TrimSpace(ip)
 
 			if ip != "" {
-				m.log.Info("成功获取公网IP: %s (来源: %s)", ip, service)
+				m.log.Info("成功获取%s: %s (来源: %s)", network, ip, service)
 				return ip
 			}
+		} else {
+			resp.Body.Close()
 		}
 	}
 
-	m.log.Warn("无法获取公网IP地址")
 	return ""
 }
 
