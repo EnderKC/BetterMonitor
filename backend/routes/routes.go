@@ -196,6 +196,9 @@ func SetupRoutes(r *gin.Engine) {
 				admin.GET("/settings", controllers.GetSystemSettings)
 				admin.PUT("/settings", controllers.UpdateSystemSettings)
 
+				// 数据库统计信息
+				admin.GET("/database/stats", controllers.GetDatabaseStats)
+
 				// 其他管理员功能
 			}
 

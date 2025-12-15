@@ -16,6 +16,17 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 输入重定向处理（支持管道执行）
+INPUT_FD=0
+if ! [ -t 0 ]; then
+    # stdin 不是终端（管道执行），尝试使用 /dev/tty
+    if { exec 9</dev/tty; } 2>/dev/null; then
+        INPUT_FD=9
+    else
+        INPUT_FD=-1
+    fi
+fi
+
 # 配置变量（支持通过环境变量覆盖）
 INSTALL_DIR="${INSTALL_DIR:-/opt/better-monitor}"
 DOCKER_IMAGE="${DOCKER_IMAGE:-enderhkc/better-monitor:latest}"
@@ -34,6 +45,43 @@ ENV_LOADED_PATH=""
 #==============================================================================
 # 工具函数
 #==============================================================================
+
+# 安全读取用户输入（支持管道执行）
+safe_read() {
+    local prompt="$1"
+    local var_name="$2"
+    local value=""
+
+    if [ "$INPUT_FD" -lt 0 ]; then
+        print_error "无法读取用户输入：没有可用的终端 (TTY)"
+        echo "提示：当前环境不支持交互输入，可能的原因：" >&2
+        echo "  - 在 cron、systemd 服务或 CI 环境中执行" >&2
+        echo "  - SSH 连接未分配终端（尝试 ssh -t）" >&2
+        echo "  - 通过管道执行但 /dev/tty 不可用" >&2
+        return 1
+    fi
+
+    if ! IFS= read -r -u "$INPUT_FD" -p "$prompt" value; then
+        return 1
+    fi
+
+    # 去除首尾空格
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    printf -v "$var_name" '%s' "$value"
+    return 0
+}
+
+# 暂停等待用户按回车
+pause() {
+    local dummy
+    if [ "$INPUT_FD" -lt 0 ]; then
+        # 无 TTY 时自动继续
+        return 0
+    fi
+    read -r -u "$INPUT_FD" -p "按回车键继续..." dummy || true
+}
 
 # 打印信息
 print_info() {
@@ -120,9 +168,11 @@ run_compose_cmd() {
 check_port() {
     if netstat -tuln 2>/dev/null | grep -q ":${PORT} " || ss -tuln 2>/dev/null | grep -q ":${PORT} "; then
         print_warning "端口 ${PORT} 已被占用"
-        read -p "是否继续安装？(y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        local reply
+        if ! safe_read "是否继续安装？(y/n): " reply; then
+            exit 1
+        fi
+        if [[ ! $reply =~ ^[Yy]$ ]]; then
             exit 1
         fi
     fi
@@ -247,9 +297,12 @@ install_dashboard() {
     # 检查是否已安装
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         print_warning "检测到已存在的 Better Monitor 容器"
-        read -p "是否删除旧容器并重新安装？(y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        local reply
+        if ! safe_read "是否删除旧容器并重新安装？(y/n): " reply; then
+            print_info "安装已取消"
+            exit 0
+        fi
+        if [[ $reply =~ ^[Yy]$ ]]; then
             print_info "停止并删除旧容器..."
             docker stop "${CONTAINER_NAME}" 2>/dev/null || true
             docker rm "${CONTAINER_NAME}" 2>/dev/null || true
@@ -406,8 +459,12 @@ uninstall_dashboard() {
     echo "  3. 可选择是否删除数据文件"
     echo ""
 
-    read -p "确认要卸载吗？(yes/no): " -r
-    if [[ ! $REPLY == "yes" ]]; then
+    local confirm
+    if ! safe_read "确认要卸载吗？(yes/no): " confirm; then
+        print_info "已取消卸载"
+        exit 0
+    fi
+    if [[ ! $confirm == "yes" ]]; then
         print_info "已取消卸载"
         exit 0
     fi
@@ -423,9 +480,11 @@ uninstall_dashboard() {
     fi
 
     # 删除镜像
-    read -p "是否删除 Docker 镜像？(y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    local reply
+    if ! safe_read "是否删除 Docker 镜像？(y/n): " reply; then
+        reply="n"
+    fi
+    if [[ $reply =~ ^[Yy]$ ]]; then
         print_info "删除 Docker 镜像..."
         docker rmi "${DOCKER_IMAGE}" 2>/dev/null || true
         print_success "镜像已删除"
@@ -433,8 +492,11 @@ uninstall_dashboard() {
 
     # 询问是否删除数据
     echo ""
-    read -p "是否删除所有数据文件（包括数据库、日志、配置）？(yes/no): " -r
-    if [[ $REPLY == "yes" ]]; then
+    local delete_data
+    if ! safe_read "是否删除所有数据文件（包括数据库、日志、配置）？(yes/no): " delete_data; then
+        delete_data="no"
+    fi
+    if [[ $delete_data == "yes" ]]; then
         # 先备份
         print_info "在删除前创建最后一次备份..."
         backup_data "uninstall"
@@ -511,18 +573,26 @@ restore_data() {
     done
 
     echo ""
-    read -p "请选择要恢复的备份 (1-${#backups[@]}): " -r
+    local choice
+    if ! safe_read "请选择要恢复的备份 (1-${#backups[@]}): " choice; then
+        print_error "读取输入失败"
+        exit 1
+    fi
 
-    if [[ ! $REPLY =~ ^[0-9]+$ ]] || [ $REPLY -lt 1 ] || [ $REPLY -gt ${#backups[@]} ]; then
+    if [[ ! $choice =~ ^[0-9]+$ ]] || [ $choice -lt 1 ] || [ $choice -gt ${#backups[@]} ]; then
         print_error "无效的选择"
         exit 1
     fi
 
-    local selected_backup="${backups[$((REPLY-1))]}"
+    local selected_backup="${backups[$((choice-1))]}"
 
     print_warning "恢复数据将覆盖当前数据"
-    read -p "确认要恢复吗？(yes/no): " -r
-    if [[ ! $REPLY == "yes" ]]; then
+    local confirm
+    if ! safe_read "确认要恢复吗？(yes/no): " confirm; then
+        print_info "已取消恢复"
+        exit 0
+    fi
+    if [[ ! $confirm == "yes" ]]; then
         print_info "已取消恢复"
         exit 0
     fi
@@ -565,10 +635,13 @@ migrate_data() {
     echo "  3. 在目标服务器上恢复数据"
     echo ""
 
-    read -p "请选择操作 [1.创建迁移包 2.导入迁移包]: " -n 1 -r
-    echo
+    local operation
+    if ! safe_read "请选择操作 [1.创建迁移包 2.导入迁移包]: " operation; then
+        print_error "读取输入失败"
+        exit 1
+    fi
 
-    case $REPLY in
+    case $operation in
         1)
             # 创建迁移包
             local timestamp=$(date +%Y%m%d_%H%M%S)
@@ -607,7 +680,11 @@ migrate_data() {
             ;;
         2)
             # 导入迁移包
-            read -p "请输入迁移包的完整路径: " -r migration_file
+            local migration_file
+            if ! safe_read "请输入迁移包的完整路径: " migration_file; then
+                print_error "读取输入失败"
+                exit 1
+            fi
 
             if [ ! -f "$migration_file" ]; then
                 print_error "文件不存在: $migration_file"
@@ -615,8 +692,12 @@ migrate_data() {
             fi
 
             print_warning "导入迁移包将覆盖当前数据"
-            read -p "确认要导入吗？(yes/no): " -r
-            if [[ ! $REPLY == "yes" ]]; then
+            local confirm
+            if ! safe_read "确认要导入吗？(yes/no): " confirm; then
+                print_info "已取消导入"
+                exit 0
+            fi
+            if [[ ! $confirm == "yes" ]]; then
                 print_info "已取消导入"
                 exit 0
             fi
@@ -743,8 +824,11 @@ show_menu() {
     echo "7. 查看状态"
     echo "0. 退出"
     echo ""
-    read -p "请选择操作 [0-7]: " -n 1 -r
-    echo
+    local choice
+    if ! safe_read "请选择操作 [0-7]: " choice; then
+        choice=""
+    fi
+    MENU_CHOICE="$choice"
 }
 
 #==============================================================================
@@ -790,34 +874,34 @@ main() {
     while true; do
         load_env_file
         show_menu
-        case $REPLY in
+        case $MENU_CHOICE in
             1)
                 install_dashboard
-                read -p "按回车键继续..."
+                pause
                 ;;
             2)
                 upgrade_dashboard
-                read -p "按回车键继续..."
+                pause
                 ;;
             3)
                 uninstall_dashboard
-                read -p "按回车键继续..."
+                pause
                 ;;
             4)
                 migrate_data
-                read -p "按回车键继续..."
+                pause
                 ;;
             5)
                 backup_data "manual"
-                read -p "按回车键继续..."
+                pause
                 ;;
             6)
                 restore_data
-                read -p "按回车键继续..."
+                pause
                 ;;
             7)
                 show_status
-                read -p "按回车键继续..."
+                pause
                 ;;
             0)
                 print_info "感谢使用 Better Monitor!"
