@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none" role="img" aria-label="BetterMonitor icon">
+  <title>BetterMonitor</title>
+
+  <!-- Outer dark stroke: strong contrast on light backgrounds -->
+  <g stroke="#06182F" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Larger bays (reduced margins) -->
+    <rect x="32" y="44" width="192" height="74" rx="24"/>
+    <rect x="32" y="138" width="192" height="74" rx="24"/>
+
+    <!-- Drive bars -->
+    <path d="M76 81h108"/>
+    <path d="M76 175h108"/>
+
+    <!-- Status lights -->
+    <circle cx="198" cy="81" r="3"/>
+    <circle cx="216" cy="81" r="3"/>
+    <circle cx="198" cy="175" r="3"/>
+    <circle cx="216" cy="175" r="3"/>
+  </g>
+
+  <!-- Inner blue stroke: vivid on dark backgrounds -->
+  <g stroke="#25A6FF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="32" y="44" width="192" height="74" rx="24"/>
+    <rect x="32" y="138" width="192" height="74" rx="24"/>
+
+    <path d="M76 81h108"/>
+    <path d="M76 175h108"/>
+
+    <circle cx="198" cy="81" r="3"/>
+    <circle cx="216" cy="81" r="3"/>
+    <circle cx="198" cy="175" r="3"/>
+    <circle cx="216" cy="175" r="3"/>
+  </g>
+</svg>
