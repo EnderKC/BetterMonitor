@@ -24,19 +24,34 @@ func init() {
 	_ = godotenv.Load("../.env")
 	_ = godotenv.Load(".env")
 
-	// 从环境变量读取版本信息（优先级最高）
-	if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" {
-		Version = envVersion
+	// 从环境变量读取版本信息（仅在编译期未注入时生效）
+	// 生产环境优先使用编译期 -ldflags 注入的值，避免被容器环境变量意外覆盖
+	if Version == "" || strings.EqualFold(Version, "latest") || strings.EqualFold(Version, "unknown") {
+		if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" &&
+			!strings.EqualFold(envVersion, "latest") &&
+			!strings.EqualFold(envVersion, "unknown") {
+			Version = envVersion
+		}
 	}
 
-	// 从环境变量读取 commit hash
-	if envCommit := strings.TrimSpace(os.Getenv("COMMIT")); envCommit != "" {
-		Commit = envCommit
+	// 从环境变量读取 commit hash（仅在编译期未注入时生效）
+	if Commit == "" || strings.EqualFold(Commit, "unknown") {
+		if envCommit := strings.TrimSpace(os.Getenv("COMMIT")); envCommit != "" &&
+			!strings.EqualFold(envCommit, "unknown") {
+			Commit = envCommit
+		}
 	}
 
-	// 从环境变量读取构建时间
-	if envBuildTime := strings.TrimSpace(os.Getenv("BUILD_TIME")); envBuildTime != "" {
-		BuildDate = envBuildTime
+	// 从环境变量读取构建时间（仅在编译期未注入时生效）
+	// 兼容 BUILD_DATE 和 BUILD_TIME 两种环境变量名
+	if BuildDate == "" || strings.EqualFold(BuildDate, "unknown") {
+		if envBuildDate := strings.TrimSpace(os.Getenv("BUILD_DATE")); envBuildDate != "" &&
+			!strings.EqualFold(envBuildDate, "unknown") {
+			BuildDate = envBuildDate
+		} else if envBuildTime := strings.TrimSpace(os.Getenv("BUILD_TIME")); envBuildTime != "" &&
+			!strings.EqualFold(envBuildTime, "unknown") {
+			BuildDate = envBuildTime
+		}
 	}
 
 	// 如果构建时间为空，使用当前时间作为默认值

@@ -343,6 +343,14 @@ sudo ./better-monitor-agent \
 其他架构（arm64/armv7 等）只需要替换下载文件名即可。
 
 #### Windows
+
+**一键安装（推荐）**：
+```powershell
+# 以管理员身份运行 PowerShell，执行以下命令
+irm https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-agent.ps1 | iex -ServerUrl "http://your-dashboard-url:3333" -ServerId 1 -SecretKey "your-secret-key"
+```
+
+**手动安装**：
 1. 从 Releases 页面下载 `better-monitor-agent-windows-amd64.zip`
 2. 解压后以管理员身份运行 PowerShell：
    ```powershell

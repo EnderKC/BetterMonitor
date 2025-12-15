@@ -1,19 +1,29 @@
 # 最终镜像（前后端已在 GitHub Actions 中编译完成）
 FROM debian:bookworm-slim
+
 # 构建参数：版本信息
 ARG VERSION=dev
-ARG COMMIT=unknown
+ARG COMMIT_SHORT=unknown
+ARG COMMIT_FULL=unknown
 ARG BUILD_DATE=unknown
 ARG TARGETARCH
 
 WORKDIR /app
 
-# 环境变量：运行时配置
+# 镜像元数据标签（OCI 标准）
+# 注意：后端二进制在构建时已通过 -ldflags 注入版本信息（使用短 commit hash）
+# 这里仅添加 OCI 标签作为镜像元数据，不设置 ENV 避免覆盖编译期注入的值
+# revision 使用完整 commit hash 以便追溯，revision.short 存储短 hash
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_FULL}" \
+      org.opencontainers.image.revision.short="${COMMIT_SHORT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.title="Better Monitor" \
+      org.opencontainers.image.description="Server Monitoring Dashboard"
+
+# 环境变量：运行时配置（不包含版本信息）
 ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive \
-    VERSION=${VERSION} \
-    COMMIT=${COMMIT} \
-    BUILD_DATE=${BUILD_DATE} \
     GIN_MODE=release
 
 # 创建非root用户

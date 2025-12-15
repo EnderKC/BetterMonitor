@@ -2,14 +2,14 @@
 import { ref, onMounted, h } from 'vue';
 import { Card, Descriptions, Tag, Button, Space, Table, Spin, message, Modal, Select } from 'ant-design-vue';
 import { InfoCircleOutlined, SyncOutlined, DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
-import { 
-  getDashboardVersion, 
-  getSystemInfo, 
-  getServersVersions, 
+import {
+  getDashboardVersion,
+  getSystemInfo,
+  getServersVersions,
   getLatestAgentRelease,
   forceAgentUpgrade,
-  type VersionInfo, 
-  type SystemInfo, 
+  type VersionInfo,
+  type SystemInfo,
   type ServerVersion,
   type AgentReleaseInfo
 } from '../utils/version';
@@ -40,6 +40,15 @@ const columns = [
     title: '主机地址',
     dataIndex: 'host',
     key: 'host',
+    customRender: ({ text }: { text: string }) => {
+      if (!text) return '-';
+      const tags = [];
+      const ips = text.split(/[,\s]+/).filter((ip: string) => ip.trim() !== '');
+      ips.forEach((ip: string) => {
+        tags.push(h(Tag, { color: 'blue' }, () => ip));
+      });
+      return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px;' }, tags);
+    }
   },
   {
     title: 'Agent版本',
@@ -97,28 +106,28 @@ const getVersionColor = (version?: string) => {
 const compareVersions = (v1?: string, v2?: string) => {
   if (!v1 || !v2) return 0;
   if (v1 === v2) return 0;
-  
+
   // 特殊版本处理
   if (v1 === 'dev' && v2 !== 'dev') return -1; // dev版本总是需要更新
   if (v1 !== 'dev' && v2 === 'dev') return 1;
   if (v1 === 'dev' && v2 === 'dev') return 0;
-  
+
   // 未知版本处理
   if (v1 === 'unknown' && v2 !== 'unknown') return -1;
   if (v1 !== 'unknown' && v2 === 'unknown') return 1;
   if (v1 === 'unknown' && v2 === 'unknown') return 0;
-  
+
   const parts1 = v1.split('.').map(Number);
   const parts2 = v2.split('.').map(Number);
-  
+
   for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
     const part1 = parts1[i] || 0;
     const part2 = parts2[i] || 0;
-    
+
     if (part1 < part2) return -1;
     if (part1 > part2) return 1;
   }
-  
+
   return 0;
 };
 
@@ -128,11 +137,11 @@ const latestAgentVersion = ref<string>('');
 // 检查是否需要更新（改进版本）
 const needsUpdate = (serverVersion?: string) => {
   if (!serverVersion) return false;
-  
+
   // 如果有最新Agent版本，使用它作为目标版本
   const targetVersion = latestAgentVersion.value || dashboardVersion.value?.version;
   if (!targetVersion) return false;
-  
+
   return compareVersions(serverVersion, targetVersion) < 0;
 };
 
@@ -147,7 +156,7 @@ const fetchVersions = async () => {
       getServersVersions(),
       getLatestAgentRelease().catch(() => null)
     ]);
-    
+
     dashboardVersion.value = dashVersion;
     systemInfo.value = sysInfo;
     serversVersions.value = serversVer;
@@ -155,7 +164,7 @@ const fetchVersions = async () => {
     if (release && release.version) {
       latestAgentVersion.value = release.version;
     }
-    
+
     message.success('版本信息已更新');
   } catch (error) {
     console.error('获取版本信息失败:', error);
@@ -174,14 +183,14 @@ const showUpdateModal = (serverId: number) => {
 // 执行升级
 const performUpgrade = async () => {
   if (!selectedServerId.value) return;
-  
+
   updating.value = true;
   try {
     const result = await forceAgentUpgrade({
       serverIds: [selectedServerId.value],
-      targetVersion: latestAgentVersion.value || undefined
+      targetVersion: latestAgentVersion.value || dashboardVersion.value?.version || undefined
     });
-    
+
     if (result.success) {
       message.success(result.message || '升级请求已发送');
       updateModalVisible.value = false;
@@ -270,25 +279,15 @@ onMounted(() => {
         <template #title>
           <Space>
             <span>Agent版本信息</span>
-            <Button 
-              type="primary" 
-              size="small" 
-              :loading="loading"
-              @click="fetchVersions"
-            >
+            <Button type="primary" size="small" :loading="loading" @click="fetchVersions">
               <SyncOutlined /> 刷新
             </Button>
           </Space>
         </template>
-        
+
         <Spin :spinning="loading">
-          <Table 
-            :dataSource="serversVersions" 
-            :columns="columns" 
-            :pagination="false"
-            size="small"
-            :rowKey="record => record.id"
-          >
+          <Table :dataSource="serversVersions" :columns="columns" :pagination="false" size="small"
+            :rowKey="record => record.id">
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'agentVersion'">
                 <Space>
@@ -310,12 +309,8 @@ onMounted(() => {
               </template>
               <template v-else-if="column.key === 'action'">
                 <Space>
-                  <Button 
-                    v-if="record.status === 1 && latestAgentVersion && needsUpdate(record.agentVersion)"
-                    type="primary" 
-                    size="small"
-                    @click="showUpdateModal(record.id)"
-                  >
+                  <Button v-if="record.status === 1 && needsUpdate(record.agentVersion)"
+                    type="primary" size="small" @click="showUpdateModal(record.id)">
                     <DownloadOutlined /> 升级
                   </Button>
                   <span v-else-if="record.status !== 1" style="color: #999">
@@ -361,16 +356,13 @@ onMounted(() => {
     </Space>
 
     <!-- OTA更新确认对话框 -->
-    <Modal 
-      v-model:open="updateModalVisible"
-      title="确认升级"
-      :confirmLoading="updating"
-      @ok="performUpgrade"
-      @cancel="cancelUpdate"
-    >
+    <Modal v-model:open="updateModalVisible" title="确认升级" :confirmLoading="updating" @ok="performUpgrade"
+      @cancel="cancelUpdate">
       <p>确定要更新服务器 <strong>{{ getSelectedServer()?.name }}</strong> 的Agent吗？</p>
-      <p>当前版本：<Tag>{{ getSelectedServer()?.agentVersion || '未知' }}</Tag></p>
-      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag></p>
+      <p>当前版本：<Tag>{{ getSelectedServer()?.agentVersion || '未知' }}</Tag>
+      </p>
+      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
+      </p>
       <p style="color: #faad14;">
         <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
       </p>
@@ -399,4 +391,4 @@ code {
   line-height: 1.5;
   white-space: pre-wrap;
 }
-</style> 
+</style>

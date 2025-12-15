@@ -75,6 +75,7 @@ func SetupRoutes(r *gin.Engine) {
 		{
 			// 用户相关
 			auth.GET("/profile", controllers.GetProfile)
+			auth.PUT("/profile", controllers.UpdateProfile)
 			auth.POST("/change-password", controllers.ChangePassword)
 
 			// 服务器管理
