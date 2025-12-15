@@ -302,18 +302,83 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 			PacketLoss      float64 `json:"packet_loss"`
 		}
 
-		maskIP := func(ip string) string {
-			ip = strings.TrimSpace(ip)
-			if ip == "" {
+		// maskIP 对 IP 地址进行脱敏处理，支持 IPv4 和 IPv6
+		var maskIP func(string) string
+		maskIP = func(rawIP string) string {
+			rawIP = strings.TrimSpace(rawIP)
+			if rawIP == "" {
 				return ""
 			}
-			parts := strings.Split(ip, ".")
-			if len(parts) == 4 {
-				parts[2] = "*"
-				parts[3] = "*"
-				return strings.Join(parts, ".")
+
+			// 处理多个IP地址（用逗号、空格或分号分隔）
+			if strings.ContainsAny(rawIP, ",; ") {
+				// 分割多个IP
+				var maskedIPs []string
+				for _, ip := range strings.FieldsFunc(rawIP, func(r rune) bool {
+					return r == ',' || r == ';' || r == ' ' || r == '\t'
+				}) {
+					ip = strings.TrimSpace(ip)
+					if ip != "" {
+						maskedIPs = append(maskedIPs, maskIP(ip))
+					}
+				}
+				return strings.Join(maskedIPs, ", ")
 			}
-			return ip
+
+			// 提取zone id（如 %eth0）
+			zone := ""
+			if idx := strings.Index(rawIP, "%"); idx >= 0 {
+				zone = rawIP[idx:]
+				rawIP = rawIP[:idx]
+			}
+
+			// 检测是 IPv4 还是 IPv6
+			isIPv6 := strings.Contains(rawIP, ":")
+
+			if !isIPv6 {
+				// IPv4 处理：1.2.3.4 -> 1.2.*.*
+				parts := strings.Split(rawIP, ".")
+				if len(parts) == 4 {
+					maskedIP := parts[0] + "." + parts[1] + ".*.*"
+					if zone != "" {
+						maskedIP += zone
+					}
+					return maskedIP
+				}
+				// 如果格式不正确，返回完全隐藏
+				return "****"
+			}
+
+			// IPv6 处理：保留前两个段，其余用 * 隐藏
+			// 支持完整格式（2001:db8:...）和压缩格式（::1, fe80::）
+			segments := strings.Split(rawIP, ":")
+
+			// 收集非空段
+			var nonEmptySegments []string
+			for _, seg := range segments {
+				if seg != "" {
+					nonEmptySegments = append(nonEmptySegments, seg)
+				}
+			}
+
+			// 构建脱敏后的IPv6地址
+			var maskedIP string
+			if len(nonEmptySegments) >= 2 {
+				// 保留前两个段
+				maskedIP = nonEmptySegments[0] + ":" + nonEmptySegments[1] + ":****:****:****:****:****:****"
+			} else if len(nonEmptySegments) == 1 {
+				// 只有一个段（如 ::1）
+				maskedIP = nonEmptySegments[0] + ":****:****:****:****:****:****:****"
+			} else {
+				// 完全压缩（::）
+				maskedIP = "****:****:****:****:****:****:****:****"
+			}
+
+			if zone != "" {
+				maskedIP += zone
+			}
+
+			return maskedIP
 		}
 
 		var list []PublicServer

@@ -21,6 +21,7 @@ interface ServerState {
   description?: string;
   tags?: string;
   system_info?: any;
+  sort_order?: number;
   // 可选：最新的监控数据
   monitorData?: {
     cpu_usage?: number;
@@ -67,7 +68,16 @@ export const useServerStore = defineStore('serverStore', {
 
     // 获取所有服务器列表
     getAllServers: (state) => {
-      return Object.values(state.servers);
+      // 将对象转换为数组，并按 sort_order 排序
+      return Object.values(state.servers).sort((a, b) => {
+        const orderA = a.sort_order || 0;
+        const orderB = b.sort_order || 0;
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+        // sort_order 相同时按 id 排序
+        return a.id - b.id;
+      });
     }
   },
 
@@ -201,6 +211,7 @@ export const useServerStore = defineStore('serverStore', {
               system_info: server.SystemInfo || server.system_info,
               secret_key: server.secret_key || server.SecretKey || existingServer?.secret_key,
               secretKey: server.secret_key || server.SecretKey || existingServer?.secretKey,
+              sort_order: server.SortOrder || server.sort_order || 0,
               lastUpdate: Date.now(),
               // 确保 monitorData 不被覆盖为空
               monitorData: existingServer?.monitorData || {}
@@ -263,6 +274,33 @@ export const useServerStore = defineStore('serverStore', {
         this.servers = {};
         this.lastFetchTime = 0;
         console.log('[Store] 所有服务器状态已清除');
+      }
+    },
+
+    // 批量更新服务器顺序
+    async reorderServers(orderedIds: number[]) {
+      try {
+        console.log('[Store] 正在更新服务器顺序:', orderedIds);
+
+        // 调用API更新顺序
+        await request.put('/servers/reorder', {
+          orderedIds: orderedIds
+        });
+
+        // 更新本地状态中的 sort_order
+        orderedIds.forEach((serverId, index) => {
+          if (this.servers[serverId]) {
+            // TypeScript需要我们先读取再修改
+            const server = this.servers[serverId];
+            // @ts-ignore - 动态添加 sort_order 字段
+            server.sort_order = index + 1;
+          }
+        });
+
+        console.log('[Store] 服务器顺序更新成功');
+      } catch (error) {
+        console.error('[Store] 更新服务器顺序失败:', error);
+        throw error;
       }
     }
   }

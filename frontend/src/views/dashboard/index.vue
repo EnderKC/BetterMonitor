@@ -999,9 +999,11 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
                     target="_blank" class="server-link" @click.stop>
                     <LinkOutlined />
                   </a>
-                  <span class="server-ip-tag"
-                    v-if="server.display_ip && (isLoggedIn || !server.display_ip.includes('*'))">{{ server.display_ip
-                    }}</span>
+                  <div class="server-ip-wrapper" v-if="server.display_ip && (isLoggedIn || !server.display_ip.includes('*'))">
+                    <a-tooltip :title="server.display_ip">
+                      <span class="server-ip-tag">{{ server.display_ip }}</span>
+                    </a-tooltip>
+                  </div>
                 </div>
               </div>
               <div class="header-right">
@@ -1238,14 +1240,33 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   min-width: 0;
 }
 
+/* IP wrapper 承担flex收缩责任 */
+.server-ip-wrapper {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 150px;
+  display: flex;
+}
+
+/* 确保tooltip根节点也能正确收缩 */
+.server-ip-wrapper > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .server-name {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
+  margin: 0;
+  /* 优先显示完整服务器名字 */
+  flex-shrink: 0;
+  min-width: 0;
+  /* 只在极端情况下才压缩名字 */
+  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin: 0;
 }
 
 .server-ip-tag {
@@ -1255,6 +1276,13 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: "SF Mono", Menlo, monospace;
+  /* 空间不足时压缩IP显示 */
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
 }
 
 
@@ -1264,6 +1292,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   align-items: center;
   transition: color 0.2s;
+  flex-shrink: 0;
 }
 
 .server-link:hover {
