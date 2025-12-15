@@ -66,12 +66,14 @@ jobs:
           CGO_ENABLED: 0
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT=$(git rev-parse --short HEAD)
           BINARY_NAME="better-monitor-agent-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}"
           [ "${{ matrix.os }}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
 
           cd agent
           go build -ldflags="-w -s \
             -X 'github.com/user/server-ops-agent/pkg/version.Version=${{ steps.version.outputs.VERSION }}' \
+            -X 'github.com/user/server-ops-agent/pkg/version.Commit=${COMMIT}' \
             -X 'github.com/user/server-ops-agent/pkg/version.BuildDate=${BUILD_DATE}'" \
             -o "../${BINARY_NAME}" cmd/agent/main.go
 
@@ -131,9 +133,11 @@ jobs:
           CC: ${{ matrix.arch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT=$(git rev-parse --short HEAD)
           cd backend
           go build -ldflags="-w -s \
             -X 'github.com/user/server-ops-backend/pkg/version.Version=${{ steps.version.outputs.VERSION }}' \
+            -X 'github.com/user/server-ops-backend/pkg/version.Commit=${COMMIT}' \
             -X 'github.com/user/server-ops-backend/pkg/version.BuildDate=${BUILD_DATE}'" \
             -o better-monitor-backend-${{ matrix.arch }} main.go
 
@@ -256,6 +260,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.version.outputs.VERSION }}
+            COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest

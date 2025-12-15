@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, h, computed } from 'vue';
+import { ref, reactive, onMounted, h, computed, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, KeyOutlined, CopyOutlined } from '@ant-design/icons-vue';
+import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, KeyOutlined, CopyOutlined, HolderOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import Sortable from 'sortablejs';
 // 导入服务器状态Badge组件和store
 import ServerStatusBadge from '../../components/ServerStatusBadge.vue';
 import { useServerStore } from '../../stores/serverStore';
@@ -18,6 +19,13 @@ const serverStore = useServerStore();
 const loading = ref(false);
 // 使用计算属性从store获取服务器列表
 const servers = computed(() => serverStore.getAllServers);
+
+// 排序模式相关状态
+const sortMode = ref(false); // 是否处于排序模式
+const sortableInstance = ref<Sortable | null>(null); // Sortable 实例
+const localServerOrder = ref<any[]>([]); // 本地服务器列表副本（用于拖拽）
+const savingOrder = ref(false); // 保存中状态
+const tableRef = ref<any>(null); // 表格引用
 
 // 表单状态
 const formVisible = ref(false);
@@ -40,8 +48,28 @@ const rules = {
 
 // 定义表格列
 const columns = [
+  { title: '', key: 'dragHandle', width: 50 }, // 拖拽手柄列
   { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: 'IP地址', dataIndex: 'ip', key: 'ip' },
+  {
+    title: 'IP地址',
+    key: 'ip',
+    customRender: ({ record }: { record: any }) => {
+      // 优先显示公网IP（public_ip），如果为空则显示连接IP（ip）并标注
+      if (record.public_ip && record.public_ip.trim() !== '') {
+        // 如果有多个IP（逗号或空格分隔），全部显示
+        const ips = record.public_ip.split(/[,\s]+/).filter((ip: string) => ip.trim() !== '');
+        if (ips.length > 1) {
+          return ips.join(' / ');
+        }
+        return record.public_ip;
+      }
+      // 如果没有公网IP，显示连接IP并标注
+      if (record.ip && record.ip.trim() !== '') {
+        return `${record.ip} (连接IP)`;
+      }
+      return '-';
+    }
+  },
   {
     title: '状态',
     dataIndex: 'status',
@@ -297,6 +325,88 @@ const viewToken = (server: any) => {
   });
 };
 
+// 进入排序模式
+const enterSortMode = () => {
+  sortMode.value = true;
+  // 复制当前服务器列表到本地状态
+  localServerOrder.value = [...servers.value];
+
+  // 在下一个 tick 初始化 Sortable
+  nextTick(() => {
+    const tableBody = document.querySelector('.ant-table-tbody') as HTMLElement;
+    if (tableBody && !sortableInstance.value) {
+      sortableInstance.value = new Sortable(tableBody, {
+        animation: 150,
+        handle: '.drag-handle', // 只能通过拖拽手柄拖动
+        ghostClass: 'sortable-ghost',
+        onEnd: (evt: any) => {
+          // 更新本地顺序
+          const oldIndex = evt.oldIndex;
+          const newIndex = evt.newIndex;
+          if (oldIndex !== undefined && newIndex !== undefined) {
+            const movedItem = localServerOrder.value.splice(oldIndex, 1)[0];
+            localServerOrder.value.splice(newIndex, 0, movedItem);
+          }
+        },
+      });
+    }
+  });
+};
+
+// 退出排序模式
+const exitSortMode = () => {
+  sortMode.value = false;
+  // 销毁 Sortable 实例
+  if (sortableInstance.value) {
+    sortableInstance.value.destroy();
+    sortableInstance.value = null;
+  }
+  // 重置本地服务器列表
+  localServerOrder.value = [];
+};
+
+// 保存排序
+const saveOrder = async () => {
+  savingOrder.value = true;
+  try {
+    // 提取服务器 ID 列表
+    const orderedIds = localServerOrder.value.map((server: any) => server.id);
+
+    // 调用 store 的 reorderServers 方法
+    await serverStore.reorderServers(orderedIds);
+
+    message.success('服务器顺序已更新');
+
+    // 退出排序模式并刷新列表
+    exitSortMode();
+    await fetchServers(true);
+  } catch (error) {
+    console.error('保存服务器顺序失败:', error);
+    message.error('保存服务器顺序失败');
+  } finally {
+    savingOrder.value = false;
+  }
+};
+
+// 取消排序
+const cancelSort = () => {
+  Modal.confirm({
+    title: '确认取消',
+    content: '确定要取消排序吗？所有未保存的更改将丢失。',
+    okText: '确认',
+    cancelText: '取消',
+    onOk: () => {
+      exitSortMode();
+      message.info('已取消排序');
+    },
+  });
+};
+
+// 当前显示的服务器列表（排序模式下使用本地列表，否则使用 store 的列表）
+const displayServers = computed(() => {
+  return sortMode.value ? localServerOrder.value : servers.value;
+});
+
 // 页面加载时获取数据
 onMounted(() => {
   fetchServers();
@@ -312,27 +422,57 @@ onMounted(() => {
       </div>
 
       <div class="header-actions">
-        <a-button @click="handleRefresh" class="glow-effect" style="margin-right: 8px;">
-          <template #icon>
-            <ReloadOutlined />
-          </template>
-          刷新
-        </a-button>
-        <a-button type="primary" @click="showAddForm" class="glow-effect">
-          <template #icon>
-            <PlusOutlined />
-          </template>
-          添加服务器
-        </a-button>
+        <!-- 排序模式控制按钮 -->
+        <template v-if="!sortMode">
+          <a-button @click="handleRefresh" class="glow-effect" style="margin-right: 8px;">
+            <template #icon>
+              <ReloadOutlined />
+            </template>
+            刷新
+          </a-button>
+          <a-button @click="enterSortMode" class="glow-effect" style="margin-right: 8px;" v-if="servers.length > 0">
+            <template #icon>
+              <HolderOutlined />
+            </template>
+            调整顺序
+          </a-button>
+          <a-button type="primary" @click="showAddForm" class="glow-effect">
+            <template #icon>
+              <PlusOutlined />
+            </template>
+            添加服务器
+          </a-button>
+        </template>
+        <template v-else>
+          <a-button type="primary" @click="saveOrder" :loading="savingOrder" class="glow-effect" style="margin-right: 8px;">
+            <template #icon>
+              <SaveOutlined />
+            </template>
+            保存顺序
+          </a-button>
+          <a-button @click="cancelSort" :disabled="savingOrder">
+            <template #icon>
+              <CloseOutlined />
+            </template>
+            取消
+          </a-button>
+        </template>
       </div>
     </div>
 
     <div class="server-list-content glass-card">
-      <a-table :dataSource="servers" :columns="columns" :loading="loading" :pagination="{ pageSize: 10 }" rowKey="id"
-        class="modern-table">
+      <a-table :dataSource="displayServers" :columns="columns" :loading="loading" :pagination="{ pageSize: 10 }" rowKey="id"
+        class="modern-table" ref="tableRef">
         <template #bodyCell="{ column, record }">
+          <!-- 拖拽手柄列 -->
+          <template v-if="column.key === 'dragHandle'">
+            <div class="drag-handle" v-if="sortMode" style="cursor: move;">
+              <HolderOutlined style="font-size: 18px; color: #999;" />
+            </div>
+          </template>
+
           <template v-if="column.key === 'action'">
-            <div class="action-buttons">
+            <div class="action-buttons" v-if="!sortMode">
               <a-button type="primary" size="small" @click="viewServer(record.id)" class="action-btn glow-effect">
                 <template #icon>
                   <EyeOutlined />
@@ -361,6 +501,9 @@ onMounted(() => {
                 </template>
                 删除
               </a-button>
+            </div>
+            <div v-else style="color: #999; font-size: 12px;">
+              拖动行调整顺序
             </div>
           </template>
         </template>
@@ -449,6 +592,23 @@ onMounted(() => {
 
 .empty-content button {
   margin-top: 16px;
+}
+
+/* 排序拖拽相关样式 */
+.sortable-ghost {
+  opacity: 0.4;
+  background: var(--primary-color);
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.drag-handle:hover {
+  color: var(--primary-color);
 }
 
 :deep(.glass-modal .ant-modal-content) {

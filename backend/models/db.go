@@ -66,6 +66,18 @@ func InitDB() error {
 		return err
 	}
 
+	// 回填现有服务器的 sort_order 字段（只处理 sort_order 为 NULL 或 0 的记录）
+	var serversNeedOrder []Server
+	if err := DB.Where("sort_order IS NULL OR sort_order = ?", 0).Order("id ASC").Find(&serversNeedOrder).Error; err == nil && len(serversNeedOrder) > 0 {
+		log.Printf("发现 %d 个服务器需要初始化 sort_order", len(serversNeedOrder))
+		for index, server := range serversNeedOrder {
+			if err := DB.Model(&Server{}).Where("id = ?", server.ID).Update("sort_order", index+1).Error; err != nil {
+				log.Printf("回填服务器 %d 的 sort_order 失败: %v", server.ID, err)
+			}
+		}
+		log.Println("服务器 sort_order 初始化完成")
+	}
+
 	// 检查是否需要创建管理员账户
 	var count int64
 	DB.Model(&User{}).Count(&count)

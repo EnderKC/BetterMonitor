@@ -35,6 +35,7 @@ type Server struct {
 	NetworkOutTotal uint64    `json:"network_out_total" gorm:"default:0"`     // 总出网流量
 	Latency         float64   `json:"latency" gorm:"default:0"`               // 延迟(ms)
 	PacketLoss      float64   `json:"packet_loss" gorm:"default:0"`           // 丢包率(%)
+	SortOrder       int       `json:"sort_order" gorm:"default:0;index"`      // 显示顺序
 	// Monitor 统计信息使用一对多关系
 	Monitors []ServerMonitor `json:"-"`
 }
@@ -96,7 +97,8 @@ func GetAllServers(userID uint) ([]Server, error) {
 		query = query.Where("user_id = ?", userID)
 	}
 
-	if err := query.Find(&servers).Error; err != nil {
+	// 按 sort_order 升序排序，sort_order 相同时按 ID 升序排序
+	if err := query.Order("sort_order ASC, id ASC").Find(&servers).Error; err != nil {
 		return nil, err
 	}
 
@@ -235,6 +237,11 @@ func CheckServerStatus(server *Server) {
 
 // CreateServer 创建服务器
 func CreateServer(server *Server) error {
+	// 自动计算并设置 sort_order 为当前最大值 + 1
+	var maxOrder int
+	DB.Model(&Server{}).Select("COALESCE(MAX(sort_order), 0)").Scan(&maxOrder)
+	server.SortOrder = maxOrder + 1
+
 	return DB.Create(server).Error
 }
 
@@ -337,4 +344,18 @@ func GetLatestMonitorData(serverID uint, limit int) ([]ServerMonitor, error) {
 	var data []ServerMonitor
 	result := DB.Where("server_id = ?", serverID).Order("timestamp desc").Limit(limit).Find(&data)
 	return data, result.Error
+}
+
+// ReorderServers 批量更新服务器顺序
+func ReorderServers(orderedIDs []uint) error {
+	// 在事务中执行批量更新
+	return DB.Transaction(func(tx *gorm.DB) error {
+		for index, serverID := range orderedIDs {
+			// 更新每个服务器的 sort_order 为其在数组中的位置（从1开始）
+			if err := tx.Model(&Server{}).Where("id = ?", serverID).Update("sort_order", index+1).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

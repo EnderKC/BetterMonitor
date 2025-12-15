@@ -83,6 +83,7 @@ func SetupRoutes(r *gin.Engine) {
 			auth.POST("/servers", controllers.CreateServer)
 			auth.PUT("/servers/:id/update", controllers.UpdateServer)
 			auth.DELETE("/servers/:id", controllers.DeleteServer)
+			auth.PUT("/servers/reorder", controllers.ReorderServers)
 
 			// 监控数据
 			auth.GET("/servers/:id/monitor", controllers.GetServerMonitor)

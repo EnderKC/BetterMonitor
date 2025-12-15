@@ -720,3 +720,57 @@ func updateServerCountry(serverID uint, ip string) {
 		}
 	}
 }
+
+// ReorderServers 批量更新服务器顺序
+func ReorderServers(c *gin.Context) {
+	// 解析请求数据
+	var requestData struct {
+		OrderedIDs []uint `json:"orderedIds" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
+		return
+	}
+
+	// 验证数据
+	if len(requestData.OrderedIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "服务器ID列表不能为空"})
+		return
+	}
+
+	// 检查是否有重复的 ID
+	idSet := make(map[uint]bool)
+	for _, id := range requestData.OrderedIDs {
+		if idSet[id] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "服务器ID列表包含重复项"})
+			return
+		}
+		idSet[id] = true
+	}
+
+	// 验证所有 ID 是否都存在于数据库中
+	var count int64
+	if err := models.DB.Model(&models.Server{}).Where("id IN ?", requestData.OrderedIDs).Count(&count).Error; err != nil {
+		log.Printf("验证服务器ID失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "验证服务器ID失败"})
+		return
+	}
+
+	if int(count) != len(requestData.OrderedIDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "部分服务器ID不存在"})
+		return
+	}
+
+	// 调用模型层方法更新顺序
+	if err := models.ReorderServers(requestData.OrderedIDs); err != nil {
+		log.Printf("更新服务器顺序失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新服务器顺序失败"})
+		return
+	}
+
+	// 返回成功响应
+	c.JSON(http.StatusOK, gin.H{
+		"message": "服务器顺序更新成功",
+	})
+}
