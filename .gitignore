@@ -89,7 +89,6 @@ env/
 *.jpg
 *.jpeg
 *.gif
-*.svg
 
 # 忽略数据库文件
 *.sqlite
