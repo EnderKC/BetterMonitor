@@ -324,6 +324,54 @@ docker restart better-monitor
 
 ## 🔧 Agent安装与配置
 
+### 一键安装 / 卸载（推荐）
+
+Agent 支持常见 Linux 发行版（Ubuntu / Debian / CentOS / Alpine 等）以及 macOS 的一键安装，并会根据系统自动注册为服务：
+
+- **systemd**（Ubuntu/Debian/CentOS/RHEL/Fedora…）：`better-monitor-agent.service`
+- **OpenRC**（Alpine/Gentoo…）：`/etc/init.d/better-monitor-agent`
+- **macOS launchd**：`/Library/LaunchDaemons/com.better-monitor.agent.plist`
+
+#### 安装（Linux/macOS）
+
+登录 Dashboard → “服务器管理” 获取 `server_id` / `secret_key`，然后在目标服务器执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/install-agent.sh \
+  | bash -s -- --server-id 10 --secret-key "your-secret-key" --server "https://dash.example.com"
+```
+
+安装完成后默认路径：
+- 二进制：`/opt/better-monitor/bin/better-monitor-agent`
+- 配置：`/etc/better-monitor/agent.yaml`
+- 日志：`/var/log/better-monitor/agent.log`
+
+#### 查看状态/日志
+
+```bash
+# systemd
+sudo systemctl status better-monitor-agent
+sudo journalctl -u better-monitor-agent -f
+
+# OpenRC (Alpine)
+sudo rc-service better-monitor-agent status
+
+# macOS
+sudo launchctl print system/com.better-monitor.agent
+tail -f /var/log/better-monitor/agent.log
+```
+
+#### 卸载（Linux/macOS）
+
+卸载会停止并移除服务定义，同时删除 Agent 二进制与配置（默认也会删除日志）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash
+
+# 跳过确认（用于自动化）
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash -s -- --yes
+```
+
 ### 获取 Agent 二进制
 
 Better Monitor 不再依赖独立的 OTA 服务器。所有 Agent 安装包都通过 GitHub Releases（或你在系统设置中配置的镜像仓库）分发。登录 Dashboard → “服务器管理” → “令牌” 可以看到当前的下载链接和需要填入的 `server_id`/`secret_key`。

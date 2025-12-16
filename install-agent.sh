@@ -19,6 +19,9 @@ SERVICE_NAME="better-monitor-agent"
 CONFIG_DIR="/etc/better-monitor"
 CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
 LOG_DIR="/var/log/better-monitor"
+SERVICE_MANAGER=""
+LAUNCHD_LABEL="com.better-monitor.agent"
+LAUNCHD_PLIST="/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist"
 GITHUB_REPO="EnderKC/BetterMonitor"
 RELEASE_CHANNEL="stable"
 DOWNLOAD_MIRROR=""
@@ -68,6 +71,21 @@ cleanup() {
     if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
         rm -rf "$TMP_DIR"
     fi
+}
+
+create_tmp_dir() {
+    # macOS(BSD mktemp) 需要 template；Linux/GNU mktemp 则可直接 mktemp -d。
+    # 使用多种兼容写法依次尝试，避免在 set -e 下直接退出。
+    TMP_DIR="$(
+        mktemp -d 2>/dev/null \
+            || mktemp -d -t better-monitor-agent 2>/dev/null \
+            || mktemp -d -t better-monitor-agent.XXXXXX 2>/dev/null \
+            || true
+    )"
+    if [[ -z "$TMP_DIR" || ! -d "$TMP_DIR" ]]; then
+        error "无法创建临时目录 (mktemp)，请检查系统环境"
+    fi
+    trap cleanup EXIT
 }
 
 require_cmd() {
@@ -181,6 +199,35 @@ detect_os() {
             error "不支持的操作系统: $kernel"
             ;;
     esac
+}
+
+detect_service_manager() {
+    local os
+    os="$(detect_os)"
+
+    if [[ "$os" == "darwin" ]]; then
+        if command -v launchctl >/dev/null 2>&1; then
+            echo "launchd"
+        else
+            echo "none"
+        fi
+        return
+    fi
+
+    # Linux: 优先识别 systemd（且需系统实际运行 systemd），其次 OpenRC。
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        echo "systemd"
+        return
+    fi
+
+    if command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
+        if [[ -x /sbin/openrc-run || -x /usr/bin/openrc-run ]]; then
+            echo "openrc"
+            return
+        fi
+    fi
+
+    echo "none"
 }
 
 fetch_public_release_config() {
@@ -359,7 +406,10 @@ download_agent() {
     info "检测到系统: ${os}/${arch}"
 
     local releases_json
-    releases_json=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
+    releases_json=$(curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "User-Agent: better-monitor-agent-installer" \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
         || error "无法从 GitHub 获取 Release 信息，请检查仓库 ${GITHUB_REPO}"
 
     asset_info="$(select_release_asset "$os" "$arch" <<<"$releases_json")" \
@@ -378,8 +428,7 @@ download_agent() {
         info "使用镜像下载: ${DOWNLOAD_MIRROR}"
     fi
 
-    TMP_DIR="$(mktemp -d)"
-    trap cleanup EXIT
+    create_tmp_dir
 
     local tmp_bin="${TMP_DIR}/${BINARY_NAME}"
     info "开始下载 Agent..."
@@ -424,11 +473,6 @@ service_exists() {
 }
 
 create_systemd_service() {
-    if ! command -v systemctl >/dev/null 2>&1; then
-        warn "未检测到 systemd，跳过服务安装，请手动管理 ${BIN_DIR}/${BINARY_NAME}"
-        return
-    fi
-
     info "创建 systemd 服务..."
     if service_exists; then
         $SUDO_CMD systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
@@ -457,19 +501,155 @@ EOF
     $SUDO_CMD systemctl enable "${SERVICE_NAME}" >/dev/null
 }
 
-start_service() {
-    if ! command -v systemctl >/dev/null 2>&1; then
+create_openrc_service() {
+    local openrc_run="/sbin/openrc-run"
+    if [[ -x /usr/bin/openrc-run ]]; then
+        openrc_run="/usr/bin/openrc-run"
+    fi
+
+    info "创建 OpenRC 服务..."
+    $SUDO_CMD tee "/etc/init.d/${SERVICE_NAME}" >/dev/null <<EOF
+#!${openrc_run}
+description="Better Monitor Agent"
+
+command="${BIN_DIR}/${BINARY_NAME}"
+command_args="--config ${CONFIG_FILE}"
+command_background=true
+pidfile="/run/${SERVICE_NAME}.pid"
+
+depend() {
+  need net
+}
+EOF
+
+    $SUDO_CMD chmod 0755 "/etc/init.d/${SERVICE_NAME}"
+
+    # rc-update 在某些精简环境/容器里可能不可用或无默认 runlevel，失败不应中断安装。
+    $SUDO_CMD rc-update add "${SERVICE_NAME}" default >/dev/null 2>&1 || true
+}
+
+create_launchd_service() {
+    if ! command -v launchctl >/dev/null 2>&1; then
+        warn "未检测到 launchctl，跳过服务安装，请手动管理 ${BIN_DIR}/${BINARY_NAME}"
         return
     fi
 
+    info "创建 launchd 服务..."
+
+    # 如果服务已加载，先卸载，避免 bootstrap 报重复。
+    if [[ -f "$LAUNCHD_PLIST" ]]; then
+        $SUDO_CMD launchctl bootout system "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+        $SUDO_CMD launchctl unload -w "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+    fi
+
+    $SUDO_CMD mkdir -p "$(dirname "$LAUNCHD_PLIST")"
+    $SUDO_CMD tee "$LAUNCHD_PLIST" >/dev/null <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${BIN_DIR}/${BINARY_NAME}</string>
+    <string>--config</string>
+    <string>${CONFIG_FILE}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${INSTALL_ROOT}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/agent.log</string>
+</dict>
+</plist>
+EOF
+
+    # LaunchDaemon 要求 root 拥有且不可写。
+    $SUDO_CMD chown root:wheel "$LAUNCHD_PLIST" >/dev/null 2>&1 || $SUDO_CMD chown root:admin "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+    $SUDO_CMD chmod 0644 "$LAUNCHD_PLIST"
+
+    # macOS 10.13+ 推荐 bootstrap；旧版本 fallback 到 load。
+    if ! $SUDO_CMD launchctl bootstrap system "$LAUNCHD_PLIST" >/dev/null 2>&1; then
+        $SUDO_CMD launchctl load -w "$LAUNCHD_PLIST" >/dev/null 2>&1 \
+            || warn "launchd 服务加载失败，请手动执行: sudo launchctl load -w ${LAUNCHD_PLIST}"
+    fi
+    $SUDO_CMD launchctl enable "system/${LAUNCHD_LABEL}" >/dev/null 2>&1 || true
+}
+
+install_service() {
+    SERVICE_MANAGER="$(detect_service_manager)"
+    case "$SERVICE_MANAGER" in
+        systemd)
+            create_systemd_service
+            ;;
+        openrc)
+            create_openrc_service
+            ;;
+        launchd)
+            create_launchd_service
+            ;;
+        none)
+            warn "未检测到 systemd/OpenRC/launchd，跳过服务安装，请手动管理 ${BIN_DIR}/${BINARY_NAME}"
+            ;;
+        *)
+            warn "未知服务管理器: ${SERVICE_MANAGER}，跳过服务安装"
+            ;;
+    esac
+}
+
+start_systemd_service() {
     info "启动服务..."
     $SUDO_CMD systemctl restart "${SERVICE_NAME}"
     sleep 2
     if $SUDO_CMD systemctl is-active --quiet "${SERVICE_NAME}"; then
-        info "Agent 服务启动成功"
+        info "Agent 服务启动成功 (systemd)"
     else
         warn "Agent 服务未成功启动，请使用 'systemctl status ${SERVICE_NAME}' 查看详情"
     fi
+}
+
+start_openrc_service() {
+    info "启动服务..."
+    $SUDO_CMD rc-service "${SERVICE_NAME}" restart >/dev/null 2>&1 || $SUDO_CMD rc-service "${SERVICE_NAME}" start >/dev/null 2>&1 || true
+    sleep 2
+    if $SUDO_CMD rc-service "${SERVICE_NAME}" status >/dev/null 2>&1; then
+        info "Agent 服务启动成功 (OpenRC)"
+    else
+        warn "Agent 服务未成功启动，请使用 'rc-service ${SERVICE_NAME} status' 查看详情"
+    fi
+}
+
+start_launchd_service() {
+    info "启动服务..."
+    # RunAtLoad 通常会自动启动，这里 kickstart 一次确保立即生效。
+    if $SUDO_CMD launchctl kickstart -k "system/${LAUNCHD_LABEL}" >/dev/null 2>&1; then
+        info "Agent 服务启动成功 (launchd)"
+        return
+    fi
+    warn "Agent 服务可能未成功启动，请使用 'sudo launchctl print system/${LAUNCHD_LABEL}' 查看详情"
+}
+
+start_service() {
+    case "$SERVICE_MANAGER" in
+        systemd)
+            start_systemd_service
+            ;;
+        openrc)
+            start_openrc_service
+            ;;
+        launchd)
+            start_launchd_service
+            ;;
+        *)
+            return
+            ;;
+    esac
 }
 
 prepare_env() {
@@ -493,16 +673,24 @@ main() {
     fetch_agent_settings
     download_agent
     create_config
-    create_systemd_service
+    install_service
     start_service
 
     info "===================================="
     info "安装完成！"
     info "配置文件: ${CONFIG_FILE}"
     info "日志文件: ${LOG_DIR}/agent.log"
-    if command -v systemctl >/dev/null 2>&1; then
+    if [[ "${SERVICE_MANAGER}" == "systemd" ]]; then
         info "查看状态: sudo systemctl status ${SERVICE_NAME}"
         info "查看日志: sudo journalctl -u ${SERVICE_NAME} -f"
+    elif [[ "${SERVICE_MANAGER}" == "openrc" ]]; then
+        info "查看状态: sudo rc-service ${SERVICE_NAME} status"
+        info "启动服务: sudo rc-service ${SERVICE_NAME} start"
+        info "停止服务: sudo rc-service ${SERVICE_NAME} stop"
+    elif [[ "${SERVICE_MANAGER}" == "launchd" ]]; then
+        info "查看状态: sudo launchctl print system/${LAUNCHD_LABEL}"
+        info "重启服务: sudo launchctl kickstart -k system/${LAUNCHD_LABEL}"
+        info "卸载服务: sudo launchctl bootout system ${LAUNCHD_PLIST}"
     fi
 }
 
