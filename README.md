@@ -372,6 +372,85 @@ curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/ma
 curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash -s -- --yes
 ```
 
+#### 安装（Android）
+
+Android 支持两种安装模式（可用 `--android-mode` 指定）：
+
+- `--android-mode termux`：适用于 Termux（无需 root），可选集成 `termux-services`（runit）和 `Termux:Boot` 实现后台常驻与开机自启
+- `--android-mode root`：适用于已 root 的设备（推荐 Magisk），会尝试写入 `/data/adb/service.d/` 实现开机自启
+
+##### Termux（推荐，无需 root）
+
+前置依赖（在 Termux 内执行）：
+
+```bash
+pkg update
+pkg install -y curl python
+
+# 可选：后台常驻/服务管理（runit）
+pkg install -y termux-services
+```
+
+安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/install-agent.sh \
+  | bash -s -- --android-mode termux --server-id 10 --secret-key "your-secret-key" --server "https://dash.example.com"
+```
+
+默认安装路径（Termux）：
+
+- 二进制：`$PREFIX/opt/better-monitor/bin/better-monitor-agent`
+- 配置：`$PREFIX/opt/better-monitor/etc/agent.yaml`
+- 日志：`$PREFIX/opt/better-monitor/logs/agent.log`
+
+服务管理（需要安装 `termux-services`）：
+
+```bash
+sv status $PREFIX/var/service/better-monitor-agent
+sv up $PREFIX/var/service/better-monitor-agent
+sv down $PREFIX/var/service/better-monitor-agent
+tail -f $PREFIX/opt/better-monitor/logs/agent.log
+```
+
+开机自启（Termux:Boot）：
+
+- 安装 Termux:Boot（建议从 F-Droid），并启动一次以完成授权
+- 安装器会写入启动脚本：`~/.termux/boot/better-monitor-agent.sh`
+- 建议将 Termux 加入电池优化白名单，否则可能被系统杀死
+
+##### Root（Magisk）
+
+推荐在 Termux 中提权执行（脚本依赖 `bash`）：
+
+```bash
+pkg install -y curl python tsu
+tsu
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/install-agent.sh \
+  | bash -s -- --android-mode root --server-id 10 --secret-key "your-secret-key" --server "https://dash.example.com"
+```
+
+默认安装路径（root）：
+
+- 二进制：`/data/adb/better-monitor/bin/better-monitor-agent`（无 Magisk 时可能为 `/data/local/better-monitor/...`）
+- 配置：`/data/adb/better-monitor/etc/agent.yaml`
+- 日志：`/data/adb/better-monitor/logs/agent.log`
+
+开机自启脚本（Magisk）：
+
+- `/data/adb/service.d/better-monitor-agent.sh`
+
+#### 卸载（Android）
+
+```bash
+# Termux
+curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh \
+  | bash -s -- --android-mode termux
+
+# Root（Magisk/tsu，跳过确认）
+tsu -c 'curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash -s -- --android-mode root --yes'
+```
+
 ### 获取 Agent 二进制
 
 Better Monitor 不再依赖独立的 OTA 服务器。所有 Agent 安装包都通过 GitHub Releases（或你在系统设置中配置的镜像仓库）分发。登录 Dashboard → “服务器管理” → “令牌” 可以看到当前的下载链接和需要填入的 `server_id`/`secret_key`。

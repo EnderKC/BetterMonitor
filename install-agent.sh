@@ -22,6 +22,8 @@ LOG_DIR="/var/log/better-monitor"
 SERVICE_MANAGER=""
 LAUNCHD_LABEL="com.better-monitor.agent"
 LAUNCHD_PLIST="/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist"
+ANDROID_MODE="auto"
+PYTHON_CMD=""
 GITHUB_REPO="EnderKC/BetterMonitor"
 RELEASE_CHANNEL="stable"
 DOWNLOAD_MIRROR=""
@@ -50,6 +52,8 @@ usage() {
                           指定 release 通道 (默认: stable)
   --mirror <URL>          GitHub Release 下载镜像地址
   --token <TOKEN>         注册令牌，写入配置文件备用
+  --android-mode <auto|termux|root>
+                          Android 安装模式（默认: auto；Termux/Root 可手动指定）
   -h, --help              显示帮助
 EOF
 }
@@ -94,6 +98,99 @@ require_cmd() {
     fi
 }
 
+require_python() {
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+        return
+    fi
+    if command -v python >/dev/null 2>&1; then
+        PYTHON_CMD="python"
+        return
+    fi
+    error "未找到 python3/python，请先安装后再执行脚本"
+}
+
+is_android() {
+    # Android 常见特征：getprop 命令、ANDROID_* 环境变量、/system 目录结构等。
+    if command -v getprop >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" ]]; then
+        return 0
+    fi
+    if [[ -d "/system" && -d "/system/bin" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+is_termux() {
+    # Termux 典型特征：TERMUX_VERSION、PREFIX 目录、termux-info 等。
+    if [[ -n "${TERMUX_VERSION:-}" ]]; then
+        return 0
+    fi
+    if [[ -n "${PREFIX:-}" && "${PREFIX}" == /data/data/com.termux/* ]]; then
+        return 0
+    fi
+    if command -v termux-info >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+apply_android_defaults() {
+    local mode="${ANDROID_MODE}"
+    if [[ "$mode" == "auto" ]]; then
+        if is_termux; then
+            mode="termux"
+        else
+            mode="root"
+        fi
+    fi
+
+    case "$mode" in
+        termux)
+            if ! is_termux; then
+                error "未检测到 Termux 环境，无法使用 --android-mode termux（可改用 --android-mode root）"
+            fi
+            if [[ -z "${PREFIX:-}" ]]; then
+                # Termux 默认 PREFIX 为 /data/data/com.termux/files/usr；这里作为兜底。
+                PREFIX="/data/data/com.termux/files/usr"
+            fi
+
+            INSTALL_ROOT="${PREFIX}/opt/better-monitor"
+            BIN_DIR="${INSTALL_ROOT}/bin"
+            CONFIG_DIR="${INSTALL_ROOT}/etc"
+            CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+            LOG_DIR="${INSTALL_ROOT}/logs"
+            SUDO_CMD=""
+            ;;
+        root)
+            if [[ "$EUID" -ne 0 ]]; then
+                error "Android root 模式需要 root 权限，请以 root/su 运行，或改用 --android-mode termux（Termux 无需 root）"
+            fi
+
+            local base="/data/adb/better-monitor"
+            if [[ ! -d "/data/adb" ]]; then
+                base="/data/local/better-monitor"
+            fi
+
+            INSTALL_ROOT="$base"
+            BIN_DIR="${INSTALL_ROOT}/bin"
+            CONFIG_DIR="${INSTALL_ROOT}/etc"
+            CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+            LOG_DIR="${INSTALL_ROOT}/logs"
+            SUDO_CMD=""
+            ;;
+        *)
+            error "未知 Android 模式: ${mode}"
+            ;;
+    esac
+
+    ANDROID_MODE="$mode"
+    info "Android 安装模式: ${ANDROID_MODE}"
+}
+
 parse_args() {
     if [[ $# -eq 0 ]]; then
         usage
@@ -130,6 +227,10 @@ parse_args() {
                 REGISTER_TOKEN="$2"
                 shift 2
                 ;;
+            --android-mode|--android)
+                ANDROID_MODE="$2"
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -144,6 +245,14 @@ parse_args() {
         usage
         error "缺少必需参数，请提供 --server-id、--secret-key 和 --server"
     fi
+
+    case "${ANDROID_MODE}" in
+        auto|termux|root)
+            ;;
+        *)
+            error "无效的 --android-mode: ${ANDROID_MODE}（可选: auto|termux|root）"
+            ;;
+    esac
 }
 
 normalize_server_url() {
@@ -187,7 +296,11 @@ detect_os() {
     kernel="$(uname -s)"
     case "$kernel" in
         Linux*)
-            echo "linux"
+            if is_android; then
+                echo "android"
+            else
+                echo "linux"
+            fi
             ;;
         Darwin*)
             echo "darwin"
@@ -211,6 +324,26 @@ detect_service_manager() {
         else
             echo "none"
         fi
+        return
+    fi
+
+    if [[ "$os" == "android" ]]; then
+        local mode="${ANDROID_MODE}"
+        if [[ "$mode" == "auto" ]]; then
+            if is_termux; then
+                mode="termux"
+            else
+                mode="root"
+            fi
+        fi
+
+        if [[ "$mode" == "termux" ]]; then
+            echo "termux"
+            return
+        fi
+
+        # Root Android：优先采用 Magisk 的 service.d；若未安装 Magisk，仍会尝试后台启动并给出提示。
+        echo "magisk"
         return
     fi
 
@@ -247,6 +380,29 @@ stop_existing_service() {
                 $SUDO_CMD systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
             fi
             ;;
+        termux)
+            # Termux: 优先通过 runit(sv) 停止；否则尝试 pkill。
+            local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+            local service_dir="${prefix}/var/service/${SERVICE_NAME}"
+            if command -v sv >/dev/null 2>&1 && [[ -d "$service_dir" ]]; then
+                sv down "$service_dir" >/dev/null 2>&1 || true
+                sv kill "$service_dir" >/dev/null 2>&1 || true
+            fi
+            if command -v pkill >/dev/null 2>&1; then
+                pkill -f "${BIN_DIR}/${BINARY_NAME}" >/dev/null 2>&1 || true
+                pkill -f "${BINARY_NAME} --config ${CONFIG_FILE}" >/dev/null 2>&1 || true
+            fi
+            ;;
+        magisk)
+            # Root Android: best-effort 关闭进程，避免覆盖二进制时触发 text file busy。
+            if command -v pkill >/dev/null 2>&1; then
+                pkill -f "${BIN_DIR}/${BINARY_NAME}" >/dev/null 2>&1 || true
+                pkill -f "${BINARY_NAME} --config ${CONFIG_FILE}" >/dev/null 2>&1 || true
+            fi
+            if command -v killall >/dev/null 2>&1; then
+                killall "${BINARY_NAME}" >/dev/null 2>&1 || true
+            fi
+            ;;
         openrc)
             if [[ -x "/etc/init.d/${SERVICE_NAME}" ]]; then
                 $SUDO_CMD rc-service "${SERVICE_NAME}" stop >/dev/null 2>&1 || true
@@ -274,7 +430,7 @@ fetch_public_release_config() {
 
     local parsed
     if ! parsed=$(
-        BM_JSON="$response" python3 <<'PY' 2>/dev/null
+        BM_JSON="$response" "$PYTHON_CMD" <<'PY' 2>/dev/null
 import json, os
 data=json.loads(os.environ.get("BM_JSON") or "{}")
 repo=data.get("agent_release_repo") or ""
@@ -312,7 +468,7 @@ fetch_agent_settings() {
 
     local parsed
     if ! parsed=$(
-        BM_JSON="$response" python3 <<'PY' 2>/dev/null
+        BM_JSON="$response" "$PYTHON_CMD" <<'PY' 2>/dev/null
 import json, os
 data=json.loads(os.environ.get("BM_JSON") or "{}")
 if isinstance(data, dict) and data.get("success") is False:
@@ -354,7 +510,7 @@ select_release_asset() {
     # 注意：不要把完整 Release JSON 放进环境变量里（可能触发 "Argument list too long"）。
     # 直接从 stdin 读取更稳妥。
     BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" \
-        python3 -c '
+        "$PYTHON_CMD" -c '
 import json, os, sys
 
 channel=os.environ.get("BM_RELEASE_CHANNEL","stable").lower()
@@ -433,6 +589,20 @@ print("|".join([
 '
 }
 
+install_binary() {
+    local src="$1"
+    local dst="$2"
+
+    if command -v install >/dev/null 2>&1; then
+        if $SUDO_CMD install -m 0755 "$src" "$dst" >/dev/null 2>&1; then
+            return
+        fi
+    fi
+
+    $SUDO_CMD cp "$src" "$dst"
+    $SUDO_CMD chmod 0755 "$dst" || true
+}
+
 download_agent() {
     local os arch asset_info tag asset_name asset_url download_url
     os="$(detect_os)"
@@ -476,7 +646,7 @@ download_agent() {
 
     info "安装 Agent 到 ${BIN_DIR}"
     $SUDO_CMD mkdir -p "$BIN_DIR"
-    $SUDO_CMD install -m 0755 "$tmp_bin" "${BIN_DIR}/${BINARY_NAME}"
+    install_binary "$tmp_bin" "${BIN_DIR}/${BINARY_NAME}"
 }
 
 create_config() {
@@ -600,9 +770,9 @@ create_launchd_service() {
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${LOG_DIR}/agent.log</string>
+  <string>${LOG_DIR}/agent.stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/agent.log</string>
+  <string>${LOG_DIR}/agent.stderr.log</string>
 </dict>
 </plist>
 EOF
@@ -619,6 +789,132 @@ EOF
     $SUDO_CMD launchctl enable "system/${LAUNCHD_LABEL}" >/dev/null 2>&1 || true
 }
 
+create_termux_boot_script() {
+    if [[ -z "${HOME:-}" ]]; then
+        warn "HOME 未设置，无法创建 Termux:Boot 启动脚本（将跳过开机自启）"
+        return
+    fi
+
+    local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+    local boot_dir="${HOME}/.termux/boot"
+    local boot_script="${boot_dir}/${SERVICE_NAME}.sh"
+
+    mkdir -p "$boot_dir"
+    tee "$boot_script" >/dev/null <<EOF
+#!${prefix}/bin/sh
+set -eu
+
+export PREFIX="${prefix}"
+export PATH="${prefix}/bin:\$PATH"
+
+# 建议安装 Termux:Boot 并将 Termux 加入电池优化白名单，否则可能被系统杀死。
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1 || true
+
+SV_DIR="${prefix}/var/service"
+SERVICE_DIR="\$SV_DIR/${SERVICE_NAME}"
+AGENT="${BIN_DIR}/${BINARY_NAME}"
+CONFIG="${CONFIG_FILE}"
+
+  if command -v runsvdir >/dev/null 2>&1 && command -v sv >/dev/null 2>&1 && [ -d "\$SERVICE_DIR" ]; then
+  # 若 runsvdir 未启动，则拉起一次（best-effort）。
+  if command -v pgrep >/dev/null 2>&1; then
+    if ! pgrep -f "runsvdir .*\\$SV_DIR" >/dev/null 2>&1; then
+      if command -v nohup >/dev/null 2>&1; then
+        nohup runsvdir "\$SV_DIR" >/dev/null 2>&1 &
+      else
+        (runsvdir "\$SV_DIR" >/dev/null 2>&1 &)
+      fi
+    fi
+  else
+    if command -v nohup >/dev/null 2>&1; then
+      nohup runsvdir "\$SV_DIR" >/dev/null 2>&1 &
+    else
+      (runsvdir "\$SV_DIR" >/dev/null 2>&1 &)
+    fi
+  fi
+  sleep 1
+  sv up "\$SERVICE_DIR" >/dev/null 2>&1 || true
+else
+  # 未安装 termux-services 时的兜底启动方式（不保证常驻/自动重启）。
+  if command -v nohup >/dev/null 2>&1; then
+    nohup "\$AGENT" --config "\$CONFIG" >/dev/null 2>&1 &
+  else
+    "\$AGENT" --config "\$CONFIG" >/dev/null 2>&1 &
+  fi
+fi
+EOF
+
+    chmod 700 "$boot_script" || true
+    info "已创建 Termux:Boot 启动脚本: ${boot_script}"
+}
+
+create_termux_service() {
+    info "创建 Termux (runit) 服务..."
+
+    create_termux_boot_script
+
+    local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+    local svdir="${prefix}/var/service"
+    local service_dir="${svdir}/${SERVICE_NAME}"
+
+    if ! command -v sv >/dev/null 2>&1 || ! command -v runsvdir >/dev/null 2>&1; then
+        warn "未检测到 termux-services（缺少 sv/runsvdir），将仅创建 Termux:Boot 启动脚本"
+        return
+    fi
+
+    mkdir -p "$service_dir"
+    tee "${service_dir}/run" >/dev/null <<EOF
+#!${prefix}/bin/sh
+exec "${BIN_DIR}/${BINARY_NAME}" --config "${CONFIG_FILE}"
+EOF
+    chmod 700 "${service_dir}/run" || true
+}
+
+create_magisk_service() {
+    info "创建 Android (Magisk) 开机自启脚本..."
+
+    if [[ "$EUID" -ne 0 ]]; then
+        error "Magisk 服务安装需要 root 权限"
+    fi
+
+    if [[ ! -d "/data/adb" ]]; then
+        warn "未检测到 /data/adb，可能未安装 Magisk，跳过开机自启安装"
+        return
+    fi
+
+    local service_dir="/data/adb/service.d"
+    local script_path="${service_dir}/${SERVICE_NAME}.sh"
+
+    mkdir -p "$service_dir"
+    tee "$script_path" >/dev/null <<EOF
+#!/system/bin/sh
+# Better Monitor Agent autostart (Magisk service.d)
+
+AGENT="${BIN_DIR}/${BINARY_NAME}"
+CONFIG="${CONFIG_FILE}"
+
+# wait for boot completed (best-effort)
+while [ "\$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
+  sleep 2
+done
+sleep 5
+
+# avoid duplicates
+if command -v pidof >/dev/null 2>&1; then
+  pidof "${BINARY_NAME}" >/dev/null 2>&1 && exit 0
+fi
+
+if command -v nohup >/dev/null 2>&1; then
+  nohup "\$AGENT" --config "\$CONFIG" >/dev/null 2>&1 &
+else
+  "\$AGENT" --config "\$CONFIG" >/dev/null 2>&1 &
+fi
+EOF
+
+    chmod 0755 "$script_path" || true
+    info "已创建 Magisk service.d: ${script_path}"
+}
+
 install_service() {
     init_service_manager
     case "$SERVICE_MANAGER" in
@@ -631,8 +927,14 @@ install_service() {
         launchd)
             create_launchd_service
             ;;
+        termux)
+            create_termux_service
+            ;;
+        magisk)
+            create_magisk_service
+            ;;
         none)
-            warn "未检测到 systemd/OpenRC/launchd，跳过服务安装，请手动管理 ${BIN_DIR}/${BINARY_NAME}"
+            warn "未检测到 systemd/OpenRC/launchd/Termux/Magisk，跳过服务安装，请手动管理 ${BIN_DIR}/${BINARY_NAME}"
             ;;
         *)
             warn "未知服务管理器: ${SERVICE_MANAGER}，跳过服务安装"
@@ -672,6 +974,61 @@ start_launchd_service() {
     warn "Agent 服务可能未成功启动，请使用 'sudo launchctl print system/${LAUNCHD_LABEL}' 查看详情"
 }
 
+start_background_agent() {
+    local agent="${BIN_DIR}/${BINARY_NAME}"
+    if command -v nohup >/dev/null 2>&1; then
+        nohup "$agent" --config "$CONFIG_FILE" >/dev/null 2>&1 &
+    else
+        "$agent" --config "$CONFIG_FILE" >/dev/null 2>&1 &
+    fi
+}
+
+start_termux_service() {
+    info "启动服务..."
+
+    local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+    local svdir="${prefix}/var/service"
+    local service_dir="${svdir}/${SERVICE_NAME}"
+
+    if command -v sv >/dev/null 2>&1 && command -v runsvdir >/dev/null 2>&1 && [[ -d "$service_dir" ]]; then
+        # 若 runsvdir 未启动，则拉起一次（best-effort）。
+        if command -v pgrep >/dev/null 2>&1; then
+            if ! pgrep -f "runsvdir .*${svdir}" >/dev/null 2>&1; then
+                if command -v nohup >/dev/null 2>&1; then
+                    nohup runsvdir "$svdir" >/dev/null 2>&1 &
+                else
+                    (runsvdir "$svdir" >/dev/null 2>&1 &)
+                fi
+            fi
+        else
+            if command -v nohup >/dev/null 2>&1; then
+                nohup runsvdir "$svdir" >/dev/null 2>&1 &
+            else
+                (runsvdir "$svdir" >/dev/null 2>&1 &)
+            fi
+        fi
+
+        sleep 1
+        sv up "$service_dir" >/dev/null 2>&1 || true
+        sleep 1
+        if sv status "$service_dir" >/dev/null 2>&1; then
+            info "Agent 服务启动成功 (Termux)"
+        else
+            warn "Agent 服务可能未成功启动，请使用 'sv status ${service_dir}' 查看详情"
+        fi
+        return
+    fi
+
+    warn "未检测到 termux-services（sv/runsvdir），将以后台方式启动（不保证常驻/自启）"
+    start_background_agent
+}
+
+start_magisk_service() {
+    info "启动服务..."
+    start_background_agent
+    info "Agent 已尝试后台启动 (Magisk)"
+}
+
 start_service() {
     case "$SERVICE_MANAGER" in
         systemd)
@@ -683,6 +1040,12 @@ start_service() {
         launchd)
             start_launchd_service
             ;;
+        termux)
+            start_termux_service
+            ;;
+        magisk)
+            start_magisk_service
+            ;;
         *)
             return
             ;;
@@ -690,15 +1053,22 @@ start_service() {
 }
 
 prepare_env() {
-    if [[ "$EUID" -ne 0 ]]; then
-        if ! command -v sudo >/dev/null 2>&1; then
-            error "脚本需要 root 权限或 sudo，请以 root 运行或安装 sudo"
+    local os
+    os="$(detect_os)"
+
+    if [[ "$os" == "android" ]]; then
+        apply_android_defaults
+    else
+        if [[ "$EUID" -ne 0 ]]; then
+            if ! command -v sudo >/dev/null 2>&1; then
+                error "脚本需要 root 权限或 sudo，请以 root 运行或安装 sudo"
+            fi
+            SUDO_CMD="sudo"
         fi
-        SUDO_CMD="sudo"
     fi
 
     require_cmd curl
-    require_cmd python3
+    require_python
 }
 
 main() {
@@ -728,6 +1098,19 @@ main() {
         info "查看状态: sudo launchctl print system/${LAUNCHD_LABEL}"
         info "重启服务: sudo launchctl kickstart -k system/${LAUNCHD_LABEL}"
         info "卸载服务: sudo launchctl bootout system ${LAUNCHD_PLIST}"
+    elif [[ "${SERVICE_MANAGER}" == "termux" ]]; then
+        local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+        info "查看日志: tail -f ${LOG_DIR}/agent.log"
+        if command -v sv >/dev/null 2>&1; then
+            info "查看状态: sv status ${prefix}/var/service/${SERVICE_NAME}"
+            info "重启服务: sv restart ${prefix}/var/service/${SERVICE_NAME}"
+        else
+            warn "未安装 termux-services，无法使用 sv 管理服务（建议安装 termux-services + Termux:Boot）"
+        fi
+        info "开机自启脚本: ~/.termux/boot/${SERVICE_NAME}.sh (需安装 Termux:Boot)"
+    elif [[ "${SERVICE_MANAGER}" == "magisk" ]]; then
+        info "开机自启脚本: /data/adb/service.d/${SERVICE_NAME}.sh"
+        info "查看日志: tail -f ${LOG_DIR}/agent.log"
     fi
 }
 

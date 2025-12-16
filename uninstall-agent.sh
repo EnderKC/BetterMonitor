@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Better Monitor Agent 一键卸载脚本（Linux/macOS）
+# Better Monitor Agent 一键卸载脚本（Linux/macOS/Android）
 # 使用方法:
 #   curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/refs/heads/main/uninstall-agent.sh | bash -s -- --yes
@@ -20,6 +20,7 @@ CONFIG_DIR="/etc/better-monitor"
 CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
 LOG_DIR="/var/log/better-monitor"
 LOG_FILE="${LOG_DIR}/agent.log"
+ANDROID_MODE="auto"
 
 LAUNCHD_LABEL="com.better-monitor.agent"
 LAUNCHD_PLIST="/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist"
@@ -39,6 +40,8 @@ usage() {
 可选参数:
   -y, --yes          不提示确认，直接卸载
   --keep-logs        保留日志文件 (/var/log/better-monitor/agent.log)
+  --android-mode <auto|termux|root>
+                    Android 卸载模式（默认: auto；Termux/Root 可手动指定）
   -h, --help         显示帮助
 
 默认会删除：
@@ -73,6 +76,10 @@ parse_args() {
                 KEEP_LOGS="true"
                 shift
                 ;;
+            --android-mode|--android)
+                ANDROID_MODE="$2"
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -82,9 +89,104 @@ parse_args() {
                 ;;
         esac
     done
+
+    case "${ANDROID_MODE}" in
+        auto|termux|root)
+            ;;
+        *)
+            error "无效的 --android-mode: ${ANDROID_MODE}（可选: auto|termux|root）"
+            ;;
+    esac
+}
+
+is_android() {
+    if command -v getprop >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" ]]; then
+        return 0
+    fi
+    if [[ -d "/system" && -d "/system/bin" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+is_termux() {
+    if [[ -n "${TERMUX_VERSION:-}" ]]; then
+        return 0
+    fi
+    if [[ -n "${PREFIX:-}" && "${PREFIX}" == /data/data/com.termux/* ]]; then
+        return 0
+    fi
+    if command -v termux-info >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+apply_android_defaults() {
+    local mode="${ANDROID_MODE}"
+    if [[ "$mode" == "auto" ]]; then
+        if is_termux; then
+            mode="termux"
+        else
+            mode="root"
+        fi
+    fi
+
+    case "$mode" in
+        termux)
+            if ! is_termux; then
+                error "未检测到 Termux 环境，无法使用 --android-mode termux（可改用 --android-mode root）"
+            fi
+            if [[ -z "${PREFIX:-}" ]]; then
+                PREFIX="/data/data/com.termux/files/usr"
+            fi
+
+            INSTALL_ROOT="${PREFIX}/opt/better-monitor"
+            BIN_DIR="${INSTALL_ROOT}/bin"
+            CONFIG_DIR="${INSTALL_ROOT}/etc"
+            CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+            LOG_DIR="${INSTALL_ROOT}/logs"
+            LOG_FILE="${LOG_DIR}/agent.log"
+            SUDO_CMD=""
+            ;;
+        root)
+            if [[ "$EUID" -ne 0 ]]; then
+                error "Android root 模式需要 root 权限，请以 root/su 运行，或改用 --android-mode termux（Termux 无需 root）"
+            fi
+
+            local base="/data/adb/better-monitor"
+            if [[ ! -d "/data/adb" ]]; then
+                base="/data/local/better-monitor"
+            fi
+
+            INSTALL_ROOT="$base"
+            BIN_DIR="${INSTALL_ROOT}/bin"
+            CONFIG_DIR="${INSTALL_ROOT}/etc"
+            CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+            LOG_DIR="${INSTALL_ROOT}/logs"
+            LOG_FILE="${LOG_DIR}/agent.log"
+            SUDO_CMD=""
+            ;;
+        *)
+            error "未知 Android 模式: ${mode}"
+            ;;
+    esac
+
+    ANDROID_MODE="$mode"
 }
 
 prepare_env() {
+    local kernel
+    kernel="$(uname -s)"
+
+    if [[ "$kernel" == Linux* ]] && is_android; then
+        apply_android_defaults
+        return
+    fi
+
     if [[ "$EUID" -ne 0 ]]; then
         if ! command -v sudo >/dev/null 2>&1; then
             error "脚本需要 root 权限或 sudo，请以 root 运行或安装 sudo"
@@ -106,7 +208,15 @@ confirm_uninstall() {
     else
         warn "  - 日志: ${LOG_FILE}"
     fi
-    warn "  - 服务定义: systemd/OpenRC/launchd（若存在）"
+    if is_android; then
+        if [[ "${ANDROID_MODE}" == "termux" ]]; then
+            warn "  - 服务定义: Termux(runit)/Termux:Boot（若存在）"
+        else
+            warn "  - 服务定义: Magisk service.d（若存在）"
+        fi
+    else
+        warn "  - 服务定义: systemd/OpenRC/launchd（若存在）"
+    fi
 
     local reply=""
     if [[ -r /dev/tty ]]; then
@@ -160,12 +270,49 @@ stop_and_remove_launchd() {
     $SUDO_CMD launchctl disable "system/${LAUNCHD_LABEL}" >/dev/null 2>&1 || true
 }
 
+stop_and_remove_termux() {
+    local prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+    local service_dir="${prefix}/var/service/${SERVICE_NAME}"
+    local boot_script=""
+    if [[ -n "${HOME:-}" ]]; then
+        boot_script="${HOME}/.termux/boot/${SERVICE_NAME}.sh"
+    fi
+
+    if command -v sv >/dev/null 2>&1 && [[ -d "$service_dir" ]]; then
+        sv down "$service_dir" >/dev/null 2>&1 || true
+        sv kill "$service_dir" >/dev/null 2>&1 || true
+    fi
+
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -f "${BIN_DIR}/${BINARY_NAME}" >/dev/null 2>&1 || true
+        pkill -f "${BINARY_NAME} --config ${CONFIG_FILE}" >/dev/null 2>&1 || true
+    fi
+
+    rm -rf "$service_dir" >/dev/null 2>&1 || true
+    if [[ -n "$boot_script" && -f "$boot_script" ]]; then
+        rm -f "$boot_script" >/dev/null 2>&1 || true
+    fi
+}
+
+stop_and_remove_magisk() {
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -f "${BIN_DIR}/${BINARY_NAME}" >/dev/null 2>&1 || true
+        pkill -f "${BINARY_NAME} --config ${CONFIG_FILE}" >/dev/null 2>&1 || true
+    fi
+    if command -v killall >/dev/null 2>&1; then
+        killall "${BINARY_NAME}" >/dev/null 2>&1 || true
+    fi
+
+    rm -f "/data/adb/service.d/${SERVICE_NAME}.sh" >/dev/null 2>&1 || true
+}
+
 remove_files() {
     $SUDO_CMD rm -f "${BIN_DIR}/${BINARY_NAME}"
     $SUDO_CMD rm -f "$CONFIG_FILE"
     $SUDO_CMD rm -f "$PID_FILE"
     if [[ "$KEEP_LOGS" != "true" ]]; then
         $SUDO_CMD rm -f "$LOG_FILE"
+        $SUDO_CMD rm -f "${LOG_DIR}/agent.stdout.log" "${LOG_DIR}/agent.stderr.log"
     fi
 
     # 尽量清理空目录（不会影响同目录下的其他文件）。
@@ -184,9 +331,17 @@ main() {
     confirm_uninstall
 
     info "停止并移除服务（若存在）..."
-    stop_and_remove_systemd
-    stop_and_remove_openrc
-    stop_and_remove_launchd
+    if is_android; then
+        if [[ "${ANDROID_MODE}" == "termux" ]]; then
+            stop_and_remove_termux
+        else
+            stop_and_remove_magisk
+        fi
+    else
+        stop_and_remove_systemd
+        stop_and_remove_openrc
+        stop_and_remove_launchd
+    fi
 
     info "删除文件..."
     remove_files
@@ -196,4 +351,3 @@ main() {
 }
 
 main "$@"
-

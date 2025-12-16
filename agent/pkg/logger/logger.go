@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -83,14 +84,10 @@ func New(logFile string, level string) (*Logger, error) {
 		}
 	}
 
-	// 默认输出到标准输出和文件（如果指定了）
-	var output *os.File
-	if file == nil {
-		output = os.Stdout
-	} else {
-		// 创建一个多输出器，同时写入标准输出和文件
-		output = os.Stdout
-		// TODO: 实现多输出
+	// 默认输出到标准输出；如果指定了日志文件，则同时写入文件（保持与 systemd/journal 等兼容）。
+	var output io.Writer = os.Stdout
+	if file != nil {
+		output = io.MultiWriter(os.Stdout, file)
 	}
 
 	// 创建日志器

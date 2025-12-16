@@ -2995,11 +2995,16 @@ func (c *Client) restartAgent() {
 		return
 	}
 
-	// 获取启动参数
-	args := os.Args[1:]
+	argv := append([]string{currentPath}, os.Args[1:]...)
+
+	// Unix 上优先使用 exec 替换当前进程，避免 systemd/OpenRC 等服务管理器误判为“退出并重启”导致双进程。
+	// Windows 不支持该行为（execSelf 会返回错误），会走下方的 fallback。
+	if err := execSelf(currentPath, argv); err != nil {
+		c.log.Warn("exec 重启失败，尝试启动新进程: %v", err)
+	}
 
 	// 在新进程中启动程序
-	cmd := exec.Command(currentPath, args...)
+	cmd := exec.Command(currentPath, os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
