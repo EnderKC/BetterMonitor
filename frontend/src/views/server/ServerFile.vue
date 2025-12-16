@@ -1031,149 +1031,166 @@ const resetPathJump = () => {
   pathJumpModalVisible.value = false;
   jumpToPath.value = '';
 };
+
+const customRow = (record: any) => {
+  return {
+    onClick: () => {
+      // 单击行选中逻辑可以放在这里，如果需要的话
+      selectedRowKeys.value = [record.key];
+      selectedFiles.value = [record];
+    },
+    onDblclick: () => {
+      handleRowDoubleClick(record);
+    }
+  };
+};
 </script>
 
 <template>
-  <div class="file-container">
-    <a-page-header title="文件管理" :sub-title="serverInfo.name" @back="goBack">
-      <template #tags>
-        <a-tag :color="isServerOnline ? 'success' : 'error'">
-          {{ isServerOnline ? '在线' : '离线' }}
-        </a-tag>
-      </template>
-    </a-page-header>
+  <div class="macos-container">
+    <div class="macos-window">
+      <!-- 顶部工具栏 -->
+      <div class="window-toolbar">
+        <div class="toolbar-left">
+          <div class="window-controls">
+            <div class="control-dot red"></div>
+            <div class="control-dot yellow"></div>
+            <div class="control-dot green"></div>
+          </div>
+          <div class="nav-controls">
+            <a-button type="text" class="nav-btn" @click="navigateToParent" :disabled="currentPath === '/'">
+              <ArrowLeftOutlined />
+            </a-button>
+            <span class="window-title">{{ serverInfo.name || '文件管理' }}</span>
+          </div>
+        </div>
 
-    <div class="file-content">
-      <a-spin :spinning="loading">
-        <a-alert v-if="!isServerOnline" type="warning" show-icon message="服务器当前离线，无法使用文件管理功能"
-          style="margin-bottom: 24px" />
+        <div class="toolbar-center">
+          <div class="path-breadcrumb">
+            <a-breadcrumb separator=">">
+              <a-breadcrumb-item v-for="(item, index) in breadcrumbItems" :key="index">
+                <a v-if="item.path !== currentPath" @click="fetchFileList(item.path)">{{ item.title }}</a>
+                <span v-else>{{ item.title }}</span>
+              </a-breadcrumb-item>
+            </a-breadcrumb>
+          </div>
+        </div>
 
-        <div v-else>
-          <div class="file-explorer">
-            <!-- 左侧目录树 -->
-            <div class="file-sidebar">
-              <div class="sidebar-header">
-                <h4>目录结构</h4>
-              </div>
-              <div class="sidebar-content">
-                <a-tree v-model:expandedKeys="expandedKeys" :tree-data="treeData" @select="handleTreeSelect"
-                  @expand="handleTreeExpand" :default-expanded-keys="['/']" :load-data="loadTreeNodeChildren">
-                  <template #icon="{ isLeaf }">
-                    <FolderOutlined v-if="!isLeaf" />
-                    <FileOutlined v-else />
-                  </template>
-                </a-tree>
+        <div class="toolbar-right">
+          <a-input-search v-model:value="searchKeyword" placeholder="搜索" class="search-input"
+            @search="(value: string) => searchKeyword = value"
+            @change="(e: Event) => searchKeyword = (e.target as HTMLInputElement).value">
+            <template #prefix>
+              <SearchOutlined />
+            </template>
+          </a-input-search>
+
+          <a-dropdown trigger="click">
+            <a-button class="action-btn">
+              <PlusOutlined />
+            </a-button>
+            <template #overlay>
+              <a-menu>
+                <a-menu-item key="upload" @click="uploadModalVisible = true">
+                  <UploadOutlined /> 上传文件
+                </a-menu-item>
+                <a-menu-item key="new-file" @click="createModalVisible = true; createFormState.type = 'file'">
+                  <FileOutlined /> 新建文件
+                </a-menu-item>
+                <a-menu-item key="new-folder" @click="createModalVisible = true; createFormState.type = 'directory'">
+                  <FolderOutlined /> 新建文件夹
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
+
+          <a-button class="action-btn" @click="fetchFileList(currentPath)">
+            <ReloadOutlined />
+          </a-button>
+
+          <a-button class="action-btn" @click="goBack">
+            退出
+          </a-button>
+        </div>
+      </div>
+
+      <!-- 主内容区域 -->
+      <div class="window-content">
+        <a-spin :spinning="loading" wrapperClassName="full-height-spin">
+          <div class="split-view">
+            <!-- 左侧边栏 -->
+            <div class="sidebar">
+              <div class="sidebar-section">
+                <div class="section-title">位置</div>
+                <div class="sidebar-tree">
+                  <a-tree v-model:expandedKeys="expandedKeys" :tree-data="treeData" @select="handleTreeSelect"
+                    @expand="handleTreeExpand" :default-expanded-keys="['/']" :load-data="loadTreeNodeChildren"
+                    block-node>
+                    <template #icon="{ isLeaf }">
+                      <FolderOutlined v-if="!isLeaf" style="color: #1890ff" />
+                      <FolderOutlined v-else style="color: #1890ff" />
+                    </template>
+                  </a-tree>
+                </div>
               </div>
             </div>
 
             <!-- 右侧文件列表 -->
-            <div class="file-main">
-              <div class="file-toolbar">
-                <div class="file-breadcrumb">
-                  <a-breadcrumb>
-                    <a-breadcrumb-item v-for="(item, index) in breadcrumbItems" :key="index">
-                      <a v-if="item.path !== currentPath" @click="fetchFileList(item.path)">{{ item.title }}</a>
-                      <span v-else>{{ item.title }}</span>
-                    </a-breadcrumb-item>
-                  </a-breadcrumb>
-                </div>
-
-                <div class="file-search">
-                  <a-input-search v-model:value="searchKeyword" placeholder="搜索文件..." style="width: 200px;"
-                    @search="(value: string) => searchKeyword = value"
-                    @change="(e: Event) => searchKeyword = (e.target as HTMLInputElement).value">
-                    <template #prefix>
-                      <SearchOutlined />
-                    </template>
-                  </a-input-search>
-                </div>
-
-                <div class="file-actions">
-                  <a-space>
-                    <a-button @click="pathJumpModalVisible = true">
-                      <template #icon>
-                        <EnterOutlined />
-                      </template>
-                      跳转
-                    </a-button>
-                    <a-button type="primary" @click="uploadModalVisible = true">
-                      <template #icon>
-                        <UploadOutlined />
-                      </template>
-                      上传
-                    </a-button>
-                    <a-button @click="createModalVisible = true">
-                      <template #icon>
-                        <PlusOutlined />
-                      </template>
-                      新建
-                    </a-button>
-                    <a-button danger :disabled="selectedFiles.length === 0" @click="deleteFiles">
-                      <template #icon>
-                        <DeleteOutlined />
-                      </template>
-                      删除
-                    </a-button>
-                    <a-button @click="fetchFileList(currentPath)">
-                      <template #icon>
-                        <ReloadOutlined />
-                      </template>
-                      刷新
-                    </a-button>
-                    <a-button @click="navigateToParent" :disabled="currentPath === '/'">
-                      <template #icon>
-                        <ArrowLeftOutlined />
-                      </template>
-                      上级目录
-                    </a-button>
-                  </a-space>
-                </div>
-              </div>
-
-              <div class="file-list">
+            <div class="main-view">
+              <div class="file-list-container">
                 <a-table :dataSource="filteredFileList" :columns="columns" :pagination="false" :row-selection="{
                   selectedRowKeys,
                   onChange: onSelectChange
-                }" :row-key="(record: any) => record.key" @row-dblclick="handleRowDoubleClick">
+                }" :row-key="(record: any) => record.key" @row-dblclick="handleRowDoubleClick"
+                  :scroll="{ y: 'calc(100vh - 180px)' }" size="small" :customRow="customRow">
+
                   <template #bodyCell="{ column, record }">
                     <template v-if="column.key === 'name'">
-                      <span :class="{ 'folder-name': record.is_dir }"
-                        @click="record.is_dir ? handleFolderClick(record) : null"
-                        :title="record.is_dir ? '点击或双击打开文件夹' : ''">
+                      <div class="name-cell">
                         <component :is="getFileIcon(record)"
-                          :style="{ marginRight: '8px', color: record.is_dir ? '#1890ff' : '#666' }" />
-                        {{ record.name }}
-                      </span>
+                          :style="{ fontSize: '16px', marginRight: '8px', color: record.is_dir ? '#1890ff' : '#8c8c8c' }" />
+                        <span class="name-text">{{ record.name }}</span>
+                      </div>
                     </template>
 
                     <template v-else-if="column.key === 'action'">
-                      <a-space>
-                        <a v-if="record.is_dir" @click="handleFolderClick(record)" title="打开文件夹">
-                          <FolderOutlined style="color: #1890ff;" />
-                        </a>
-                        <a v-if="!record.is_dir" @click="downloadFile(record)" title="下载">
-                          <DownloadOutlined />
-                        </a>
-                        <a v-if="!record.is_dir && isTextFile(record)" @click="openFileEditor(record)" title="编辑">
-                          <EditOutlined />
-                        </a>
-                        <a class="text-danger" @click="selectedFiles = [record]; deleteFiles()" title="删除">
-                          <DeleteOutlined />
-                        </a>
-                      </a-space>
+                      <div class="action-cell">
+                        <a-tooltip title="下载" v-if="!record.is_dir">
+                          <a-button type="text" size="small" @click.stop="downloadFile(record)">
+                            <DownloadOutlined />
+                          </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="编辑" v-if="!record.is_dir && isTextFile(record)">
+                          <a-button type="text" size="small" @click.stop="openFileEditor(record)">
+                            <EditOutlined />
+                          </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="删除">
+                          <a-button type="text" danger size="small"
+                            @click.stop="selectedFiles = [record]; deleteFiles()">
+                            <DeleteOutlined />
+                          </a-button>
+                        </a-tooltip>
+                      </div>
                     </template>
                   </template>
                 </a-table>
               </div>
+
+              <!-- 底部状态栏 -->
+              <div class="status-bar">
+                <span>{{ filteredFileList.length }} 项</span>
+                <span v-if="selectedFiles.length > 0">已选择 {{ selectedFiles.length }} 项</span>
+              </div>
             </div>
           </div>
-        </div>
-      </a-spin>
+        </a-spin>
+      </div>
     </div>
 
     <!-- 上传文件对话框 -->
     <a-modal v-model:open="uploadModalVisible" title="上传文件" @ok="handleFileUpload" :confirm-loading="uploading"
-      :maskClosable="false" :width="520">
+      :maskClosable="false" :width="520" class="macos-modal">
       <div class="upload-container">
         <p>当前目录: <span class="current-path">{{ currentPath }}</span></p>
         <a-upload-dragger :beforeUpload="() => false" @change="handleFileChange"
@@ -1183,48 +1200,30 @@ const resetPathJump = () => {
             <UploadOutlined />
           </p>
           <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
-          <p class="ant-upload-hint">
-            支持单个文件上传，上传后文件将保存到当前目录
-          </p>
         </a-upload-dragger>
-
-        <div class="selected-file" v-if="fileToUpload">
-          <div class="file-info">
-            <component :is="getFileIcon({ name: fileToUpload.name })" :style="{ marginRight: '8px', color: '#666' }" />
-            <span class="file-name">{{ fileToUpload.name }}</span>
-            <span class="file-size">{{ formatFileSize(fileToUpload.size) }}</span>
-          </div>
-        </div>
       </div>
     </a-modal>
 
     <!-- 编辑文件对话框 -->
     <a-modal v-model:open="editModalVisible" title="编辑文件" width="80%" @ok="saveFileContent"
-      :confirm-loading="editLoading" :maskClosable="false" :footer="null" :destroyOnClose="true" style="top: 20px;">
+      :confirm-loading="editLoading" :maskClosable="false" :footer="null" :destroyOnClose="true" style="top: 20px;"
+      class="macos-modal editor-modal" :title="null">
       <div class="file-editor">
         <div class="editor-header">
           <div class="file-info">
-            <span class="file-name">{{ editingFile?.name }}</span>
+            <span class="file-name" :title="editingFile?.name">{{ editingFile?.name }}</span>
             <span class="file-lang">{{ fileLanguage }}</span>
           </div>
           <div class="editor-actions">
-            <a-button type="primary" @click="saveFileContent" :loading="editLoading">
-              保存
-            </a-button>
-            <a-button @click="closeEditor" style="margin-left: 8px;">
-              关闭
-            </a-button>
+            <a-button type="primary" size="small" @click="saveFileContent" :loading="editLoading">保存</a-button>
+            <a-button size="small" @click="closeEditor" style="margin-left: 8px;">关闭</a-button>
           </div>
         </div>
-
-        <!-- 改进的编辑器结构 -->
         <div v-if="editModalVisible && !editLoading" style="height: 70vh;">
           <Codemirror v-model="fileContent" :style="{ height: '100%' }"
             :extensions="[basicSetup, getLanguageExtension(fileLanguage), vscodeDark]" :autofocus="true"
             :indent-with-tab="true" :tab-size="2" placeholder="文件内容" />
         </div>
-
-        <!-- 加载中状态 -->
         <div v-else style="height: 70vh; display: flex; align-items: center; justify-content: center;">
           <a-spin size="large" />
         </div>
@@ -1232,165 +1231,316 @@ const resetPathJump = () => {
     </a-modal>
 
     <!-- 新建文件/目录对话框 -->
-    <a-modal v-model:open="createModalVisible" title="新建文件/目录" @ok="createFileOrDirectory" :maskClosable="false">
-      <div>
-        <p>当前目录: {{ currentPath }}</p>
-        <a-form :model="createFormState" layout="vertical">
-          <a-form-item label="类型">
-            <a-radio-group v-model:value="createFormState.type">
-              <a-radio value="file">文件</a-radio>
-              <a-radio value="directory">目录</a-radio>
-            </a-radio-group>
-          </a-form-item>
-
-          <a-form-item :label="createFormState.type === 'file' ? '文件名' : '目录名'" required>
-            <a-input v-model:value="createFormState.name"
-              :placeholder="createFormState.type === 'file' ? '输入文件名' : '输入目录名'" />
-          </a-form-item>
-
-          <a-form-item v-if="createFormState.type === 'file'" label="内容">
-            <a-textarea v-model:value="createFormState.content" :rows="10" placeholder="输入文件内容" />
-          </a-form-item>
-        </a-form>
-      </div>
-    </a-modal>
-
-    <!-- 路径跳转对话框 -->
-    <a-modal v-model:open="pathJumpModalVisible" title="路径跳转" @ok="handlePathJump" @cancel="resetPathJump"
-      :maskClosable="false">
-      <div>
-        <p>当前目录: {{ currentPath }}</p>
-        <p class="path-jump-tip">输入要跳转的路径，以 / 开头表示绝对路径，否则表示相对于当前目录的路径</p>
-        <a-form layout="vertical">
-          <a-form-item label="目标路径" required>
-            <a-input v-model:value="jumpToPath" placeholder="输入路径，如 /home/user 或 logs" @pressEnter="handlePathJump">
-              <template #prefix>
-                <span style="color: #999;">/</span>
-              </template>
-            </a-input>
-          </a-form-item>
-        </a-form>
-      </div>
+    <a-modal v-model:open="createModalVisible" title="新建" @ok="createFileOrDirectory" :maskClosable="false"
+      class="macos-modal">
+      <a-form :model="createFormState" layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="createFormState.name" placeholder="请输入名称" />
+        </a-form-item>
+        <a-form-item v-if="createFormState.type === 'file'" label="内容">
+          <a-textarea v-model:value="createFormState.content" :rows="5" placeholder="可选" />
+        </a-form-item>
+      </a-form>
     </a-modal>
   </div>
 </template>
 
 <style scoped>
-.file-container {
-  padding: 0;
-  background: transparent;
-}
-
-.file-content {
-  margin-top: 16px;
-}
-
-.file-explorer {
-  display: flex;
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-}
-
-.file-sidebar {
-  width: 260px;
-  border-right: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.3);
-  overflow: auto;
-}
-
-.sidebar-header {
+.macos-container {
+  height: calc(100vh - 64px);
+  /* 减去顶部导航栏高度 */
   padding: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.sidebar-header h4 {
-  margin-bottom: 0;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 15px;
-}
-
-.sidebar-content {
-  padding: 12px;
-  max-height: 600px;
-  overflow: auto;
-}
-
-.file-main {
-  flex: 1;
+  background: transparent;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.5);
 }
 
-.file-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(10px);
-}
-
-.file-breadcrumb {
+.macos-window {
   flex: 1;
-}
-
-.file-search {
-  margin: 0 16px;
-}
-
-.path-jump-tip {
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin-bottom: 16px;
-  padding: 8px 12px;
-  background: rgba(0, 122, 255, 0.05);
-  border-radius: 8px;
-  border-left: 3px solid var(--primary-color);
-}
-
-/* 上传相关样式 */
-.upload-container {
-  padding: 0 20px;
-}
-
-.current-path {
-  font-weight: 600;
-  color: var(--primary-color);
-  font-family: "SF Mono", Menlo, monospace;
-}
-
-.upload-dragger {
-  margin: 20px 0;
-}
-
-.selected-file {
-  margin-top: 16px;
-  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-radius: 12px;
-  background: rgba(0, 122, 255, 0.05);
-  border: 1px solid rgba(0, 122, 255, 0.1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  overflow: hidden;
 }
 
-.file-info {
+
+
+/* Toolbar */
+.window-toolbar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-app-region: drag;
+  /* 模拟可拖动区域 */
+}
+
+
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 200px;
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.control-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.control-dot.red {
+  background: #ff5f57;
+  border: 1px solid #e0443e;
+}
+
+.control-dot.yellow {
+  background: #febc2e;
+  border: 1px solid #dba522;
+}
+
+.control-dot.green {
+  background: #28c840;
+  border: 1px solid #1aab29;
+}
+
+.nav-controls {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.file-name {
+.nav-btn {
+  color: var(--text-secondary);
+}
+
+.window-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.toolbar-center {
   flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.path-breadcrumb {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 4px 12px;
+  border-radius: 6px;
+  max-width: 400px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 300px;
+  justify-content: flex-end;
+}
+
+.search-input {
+  width: 160px;
+  border-radius: 6px;
+}
+
+.action-btn {
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+}
+
+.action-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+
+
+/* Content */
+.window-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.full-height-spin {
+  height: 100%;
+  width: 100%;
+}
+
+:deep(.ant-spin-container) {
+  height: 100%;
+}
+
+.split-view {
+  display: flex;
+  height: 100%;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 220px;
+  background: rgba(245, 245, 245, 0.6);
+  backdrop-filter: blur(10px);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+.sidebar-section {
+  padding: 12px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding-left: 8px;
+  text-transform: uppercase;
+}
+
+.sidebar-tree :deep(.ant-tree) {
+  background: transparent;
+}
+
+.sidebar-tree :deep(.ant-tree-node-content-wrapper) {
+  border-radius: 6px;
+  padding: 4px 0;
+}
+
+.sidebar-tree :deep(.ant-tree-node-selected .ant-tree-node-content-wrapper) {
+  background: rgba(0, 122, 255, 0.15) !important;
+  color: var(--primary-color);
+}
+
+/* Main View */
+.main-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+
+
+.file-list-container {
+  flex: 1;
+  overflow: hidden;
+  /* 关键：防止外层滚动 */
+  padding: 0;
+}
+
+/* Table Styling */
+:deep(.ant-table-thead > tr > th) {
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+}
+
+
+
+:deep(.ant-table-tbody > tr > td) {
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+
+
+
+:deep(.ant-upload-hint) {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Zebra Striping */
+:deep(.ant-table-tbody > tr:nth-child(even)) {
+  background-color: rgba(0, 0, 0, 0.01);
+}
+
+
+
+.name-cell {
+  display: flex;
+  align-items: center;
+}
+
+.name-text {
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.action-cell {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+:deep(.ant-table-row:hover) .action-cell {
+  opacity: 1;
+}
+
+/* Status Bar */
+.status-bar {
+  height: 28px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  /* Ensure text truncation works */
+  margin-right: 16px;
+}
+
+.file-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
 }
 
 .file-size {
@@ -1399,319 +1549,56 @@ const resetPathJump = () => {
   font-family: "SF Mono", Menlo, monospace;
 }
 
-.file-list {
-  flex: 1;
-  overflow: auto;
-  max-height: 600px;
-  padding: 8px;
-}
-.file-manager-container {
-  height: calc(100vh - 84px);
-  display: flex;
-  flex-direction: column;
-  background-color: #f5f5f5;
-}
-
-.file-manager-header {
-  padding: 12px 16px;
-  background-color: #fff;
-  border-bottom: 1px solid #e8e8e8;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.path-navigator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.file-manager-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-.file-tree-sidebar {
-  width: 260px;
-  background-color: #fff;
-  border-right: 1px solid #e8e8e8;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.file-tree-sidebar {
-  width: 260px;
-  background-color: #fff;
-  border-right: 1px solid #e8e8e8;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-header {
-  padding: 12px;
-  border-bottom: 1px solid #e8e8e8;
-  font-weight: 600;
-  color: #333;
-}
-
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
-}
-
-.file-list-content {
-  flex: 1;
-  background-color: #fff;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Ant Design 覆盖样式 */
-:deep(.ant-table-wrapper) {
-  height: 100%;
-}
-
-:deep(.ant-spin-nested-loading) {
-  height: 100%;
-}
-
-:deep(.ant-spin-container) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.ant-table) {
-  flex: 1;
-  overflow: hidden;
-}
-
-:deep(.ant-table-container) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.ant-table-body) {
-  flex: 1;
-  overflow-y: auto !important;
-}
-
+/* 编辑器样式 */
 .file-editor {
   display: flex;
   flex-direction: column;
   height: 100%;
+  padding-top: 8px;
 }
 
 .editor-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-name {
-  font-weight: 600;
-  font-size: 16px;
-  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
 }
 
 .file-lang {
-  font-size: 11px;
-  color: var(--primary-color);
-  padding: 4px 8px;
-  background: rgba(0, 122, 255, 0.1);
-  border-radius: 6px;
+  font-size: 10px;
+  color: #fff;
+  padding: 2px 8px;
+  background: var(--primary-color);
+  border-radius: 10px;
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 500;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .editor-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.text-danger {
-  color: #ff3b30;
-}
-
-.text-danger:hover {
-  color: #d70015;
-}
-
-.folder-name {
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.folder-name:hover {
-  color: var(--primary-color);
-  text-decoration: underline;
-}
-
-:deep(.cm-editor) {
-  height: 100%;
+/* Modal Styling */
+:global(.macos-modal .ant-modal-content) {
   border-radius: 12px;
   overflow: hidden;
-}
-
-:deep(.cm-scroller) {
-  overflow: auto;
-  font-family: "SF Mono", Menlo, monospace;
-}
-
-:deep(.cm-content) {
-  font-family: "SF Mono", Menlo, monospace;
-}
-
-/* 自定义上传组件样式 */
-:deep(.ant-upload-drag) {
-  border: 2px dashed rgba(0, 122, 255, 0.2);
-  transition: all 0.3s ease;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.5);
-}
-
-:deep(.ant-upload-drag:hover) {
-  border-color: var(--primary-color);
-  background: rgba(0, 122, 255, 0.05);
-}
-
-:deep(.ant-upload-drag-icon) {
-  margin-bottom: 16px;
-  color: var(--primary-color);
-  font-size: 48px;
-}
-
-:deep(.ant-upload-text) {
-  margin: 0 0 8px;
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 500;
-}
-
-:deep(.ant-upload-hint) {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-/* 表格样式优化 */
-:deep(.ant-table) {
-  background: transparent;
-}
-
-:deep(.ant-table-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.6);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-:deep(.ant-table-tbody > tr > td) {
-  background: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
-}
-
-:deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(0, 122, 255, 0.05);
-}
-
-:deep(.ant-table-tbody > tr.ant-table-row-selected > td) {
-  background: rgba(0, 122, 255, 0.1);
-}
-
-/* 面包屑样式 */
-:deep(.ant-breadcrumb-link) {
-  color: var(--text-secondary);
-  transition: all 0.2s ease;
-}
-
-:deep(.ant-breadcrumb-link:hover) {
-  color: var(--primary-color);
-}
-
-:deep(.ant-breadcrumb-separator) {
-  color: var(--text-hint);
-}
-
-/* 树形组件样式 */
-:deep(.ant-tree) {
-  background: transparent;
-}
-
-:deep(.ant-tree-node-content-wrapper) {
-  border-radius: 8px;
-  transition: all 0.2s ease;
-}
-
-:deep(.ant-tree-node-content-wrapper:hover) {
-  background: rgba(0, 122, 255, 0.08);
-}
-
-:deep(.ant-tree-node-selected .ant-tree-node-content-wrapper) {
-  background: rgba(0, 122, 255, 0.15);
-}
-
-:deep(.ant-tree-title) {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-/* 模态框样式 */
-:deep(.ant-modal-content) {
-  background: var(--card-bg);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: var(--shadow-lg);
 }
 
-:deep(.ant-modal-header) {
-  background: rgba(255, 255, 255, 0.5);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px 16px 0 0;
-}
 
-:deep(.ant-modal-title) {
-  font-weight: 600;
-  color: var(--text-primary);
-}
 
-:deep(.ant-modal-body) {
+:global(.macos-modal .ant-modal-header) {
   background: transparent;
-}
-
-:deep(.ant-modal-footer) {
-  background: rgba(255, 255, 255, 0.3);
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 0 0 16px 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 </style>
 
@@ -1746,22 +1633,22 @@ const resetPathJump = () => {
   color: #ccc;
 }
 
-:root.dark .ant-table-thead > tr > th {
+:root.dark .ant-table-thead>tr>th {
   background: #2d2d2d;
   color: #ccc;
   border-bottom: 1px solid #333;
 }
 
-:root.dark .ant-table-tbody > tr > td {
+:root.dark .ant-table-tbody>tr>td {
   border-bottom: 1px solid #333;
   color: #ccc;
 }
 
-:root.dark .ant-table-tbody > tr:hover > td {
+:root.dark .ant-table-tbody>tr:hover>td {
   background: #2a2d2e !important;
 }
 
-:root.dark .ant-table-row-selected > td {
+:root.dark .ant-table-row-selected>td {
   background: #37373d !important;
 }
 
@@ -1859,5 +1746,73 @@ const resetPathJump = () => {
 
 :root.dark .text-danger:hover {
   color: #be5046;
+}
+
+/* Migrated Dark Mode Styles */
+.dark .macos-window {
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.dark .window-toolbar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .path-breadcrumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .sidebar {
+  background: rgba(0, 0, 0, 0.2);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .main-view {
+  background: transparent;
+}
+
+.dark .ant-table-thead>tr>th {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .ant-table-tbody>tr>td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dark .ant-table-tbody>tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.dark .status-bar {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .macos-modal .ant-modal-content {
+  background: rgba(40, 40, 40, 0.9);
+}
+
+.dark .macos-modal .ant-modal-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .file-lang {
+  background: #61afef;
+  color: #1e1e1e;
+}
+
+/* Hide default modal header for editor since we have a custom one */
+.editor-modal .ant-modal-header {
+  display: none;
+}
+
+.editor-modal .ant-modal-body {
+  padding: 20px 24px;
 }
 </style>

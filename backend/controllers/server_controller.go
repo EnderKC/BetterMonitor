@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -265,89 +264,6 @@ func ReportMonitorData(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "监控数据上报成功"})
 }
 
-// generateMockData 生成模拟的监控数据用于测试
-func generateMockData(serverID uint, startTime, endTime time.Time) []models.ServerMonitor {
-	// 计算需要生成的数据点数量 - 每5分钟一个数据点
-	duration := endTime.Sub(startTime)
-	pointCount := int(duration.Minutes()/5) + 1
-
-	// 限制最大点数
-	if pointCount > 1000 {
-		pointCount = 1000
-	}
-
-	log.Printf("[DEBUG] 生成 %d 个模拟数据点，时间范围: %v 到 %v",
-		pointCount, startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
-
-	// 创建模拟数据
-	mockData := make([]models.ServerMonitor, 0, pointCount)
-	interval := duration / time.Duration(pointCount-1)
-
-	// 基准值
-	baseCPU := 15.0
-	baseMemory := uint64(4 * 1024 * 1024 * 1024)   // 4GB
-	totalMemory := uint64(16 * 1024 * 1024 * 1024) // 16GB
-	baseDisk := uint64(20 * 1024 * 1024 * 1024)    // 20GB
-	totalDisk := uint64(100 * 1024 * 1024 * 1024)  // 100GB
-	baseNetIn := 50000.0                           // 50KB/s
-	baseNetOut := 30000.0                          // 30KB/s
-	baseLoad1 := 1.5
-	baseLoad5 := 1.2
-	baseLoad15 := 0.8
-
-	// 创建随机数生成器，使用当前时间作为种子
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	for i := 0; i < pointCount; i++ {
-		// 当前时间点
-		currentTime := startTime.Add(interval * time.Duration(i))
-
-		// 添加随机波动
-		cpuVar := r.Float64() * 10.0                     // 0-10%
-		memVar := r.Uint64() % (1 * 1024 * 1024 * 1024)  // 0-1GB
-		diskVar := r.Uint64() % (5 * 1024 * 1024 * 1024) // 0-5GB
-		netInVar := r.Float64() * 20000.0                // 0-20KB/s
-		netOutVar := r.Float64() * 15000.0               // 0-15KB/s
-
-		// 创建数据点，添加小范围的随机变化
-		dataPoint := models.ServerMonitor{
-			ServerID:    serverID,
-			Timestamp:   currentTime,
-			CPUUsage:    baseCPU + cpuVar,
-			MemoryUsed:  baseMemory + memVar,
-			MemoryTotal: totalMemory,
-			DiskUsed:    baseDisk + diskVar,
-			DiskTotal:   totalDisk,
-			NetworkIn:   baseNetIn + netInVar,
-			NetworkOut:  baseNetOut + netOutVar,
-			LoadAvg1:    baseLoad1 + r.Float64() - 0.5,  // ±0.5
-			LoadAvg5:    baseLoad5 + r.Float64() - 0.5,  // ±0.5
-			LoadAvg15:   baseLoad15 + r.Float64() - 0.5, // ±0.5
-		}
-
-		// 添加高峰模拟，每小时有一个小高峰
-		hourFactor := float64(currentTime.Hour() % 24)
-		if hourFactor > 8 && hourFactor < 18 { // 工作时间
-			// 工作时间CPU和内存负载更高
-			dataPoint.CPUUsage += hourFactor * 2                           // 最高增加36%
-			dataPoint.MemoryUsed += uint64(hourFactor * 100 * 1024 * 1024) // 最高增加1.8GB
-			dataPoint.NetworkIn += hourFactor * 5000                       // 最高增加90KB/s
-			dataPoint.NetworkOut += hourFactor * 3000                      // 最高增加54KB/s
-		}
-
-		// 午夜处理任务模拟
-		if hourFactor >= 0 && hourFactor < 3 {
-			// 半夜处理任务CPU会升高
-			dataPoint.CPUUsage += 20.0                   // 增加20%
-			dataPoint.DiskUsed += 2 * 1024 * 1024 * 1024 // 增加2GB
-		}
-
-		mockData = append(mockData, dataPoint)
-	}
-
-	return mockData
-}
-
 // GetServerMonitor 获取服务器监控数据
 func GetServerMonitor(c *gin.Context) {
 	id, err := parseUintParam(c, "id")
@@ -360,8 +276,6 @@ func GetServerMonitor(c *gin.Context) {
 	startTimeStr := c.DefaultQuery("start_time", "")
 	endTimeStr := c.DefaultQuery("end_time", "")
 	limitStr := c.DefaultQuery("limit", "100")
-	// 添加mockData参数
-	useMockData := c.DefaultQuery("mock", "false") == "true"
 
 	var startTime, endTime time.Time
 	var limit int
@@ -403,8 +317,8 @@ func GetServerMonitor(c *gin.Context) {
 	}
 
 	// 记录时间范围，帮助调试
-	log.Printf("[DEBUG] 服务器监控查询时间范围: 开始=%v, 结束=%v, 使用模拟数据=%v",
-		startTime, endTime, useMockData)
+	log.Printf("[DEBUG] 服务器监控查询时间范围: server_id=%d, start=%v, end=%v",
+		id, startTime, endTime)
 
 	// 解析限制数
 	limit, err = strconv.Atoi(limitStr)
@@ -414,28 +328,15 @@ func GetServerMonitor(c *gin.Context) {
 
 	var data []models.ServerMonitor
 
-	// 如果请求使用模拟数据，直接生成模拟数据
-	if useMockData {
-		data = generateMockData(uint(id), startTime, endTime)
-		log.Printf("[DEBUG] 生成了 %d 条模拟监控数据", len(data))
-	} else {
-		// 获取真实监控数据
-		data, err = models.GetServerMonitorData(uint(id), startTime, endTime)
-		if err != nil {
-			log.Printf("[ERROR] 获取服务器ID=%d监控数据失败: %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "获取监控数据失败"})
-			return
-		}
-
-		log.Printf("[DEBUG] 查询到服务器ID=%d的监控数据 %d 条", id, len(data))
-
-		// 如果没有获取到真实数据，自动切换到模拟数据模式
-		if len(data) == 0 {
-			log.Printf("[INFO] 服务器ID=%d在时间范围内无监控数据，切换到模拟数据模式", id)
-			data = generateMockData(uint(id), startTime, endTime)
-			log.Printf("[DEBUG] 生成了 %d 条模拟监控数据", len(data))
-		}
+	// 仅返回真实监控数据（无数据时返回空数组）
+	data, err = models.GetServerMonitorData(uint(id), startTime, endTime)
+	if err != nil {
+		log.Printf("[ERROR] 获取服务器ID=%d监控数据失败: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取监控数据失败"})
+		return
 	}
+
+	log.Printf("[DEBUG] 查询到服务器ID=%d的监控数据 %d 条", id, len(data))
 
 	// 如果数据量太大，需要进行采样
 	if len(data) > 1000 {

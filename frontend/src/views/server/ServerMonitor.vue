@@ -90,6 +90,17 @@ const monitorData = reactive({
   }
 });
 
+const clearMonitorData = () => {
+  monitorData.cpu = [];
+  monitorData.memory = [];
+  monitorData.disk = [];
+  monitorData.network.in = [];
+  monitorData.network.out = [];
+  monitorData.load.load1 = [];
+  monitorData.load.load5 = [];
+  monitorData.load.load15 = [];
+};
+
 // WebSocket连接
 let ws: WebSocket | null = null;
 const wsConnected = ref(false);
@@ -108,6 +119,7 @@ const fetchHistoricalData = async () => {
   
   try {
     loading.value = true;
+    clearMonitorData();
     
     // 计算时间范围
     const endTime = new Date();
@@ -164,27 +176,18 @@ const fetchHistoricalData = async () => {
       }
     }
     
-    console.log(`获取到 ${historicalData.length} 条历史监控数据:`, historicalData);
-    
-    if (historicalData.length === 0) {
-      console.warn('没有历史监控数据，可能的原因：1. 时间范围内无数据 2. 数据格式不匹配 3. 服务器未返回数据');
-      message.warning('未找到监控历史数据，图表将展示实时数据');
-      return;
-    }
-    
-    // 清空现有数据
-    monitorData.cpu = [];
-    monitorData.memory = [];
-    monitorData.disk = [];
-    monitorData.network.in = [];
-    monitorData.network.out = [];
-    monitorData.load.load1 = [];
-    monitorData.load.load5 = [];
-    monitorData.load.load15 = [];
-    
-    // 按时间排序数据
-    const sortedData = [...historicalData].sort((a, b) => {
-      const timeA = new Date(a.timestamp || a.created_at || a.time || 0).getTime();
+	    console.log(`获取到 ${historicalData.length} 条历史监控数据:`, historicalData);
+	    
+	    if (historicalData.length === 0) {
+	      console.warn('没有历史监控数据，可能的原因：1. 时间范围内无数据 2. 数据格式不匹配 3. 服务器未返回数据');
+	      message.info('暂无监控历史数据（仅展示实时数据；需要 Agent 上报后才会产生历史记录）');
+	      updateCharts();
+	      return;
+	    }
+	    
+	    // 按时间排序数据
+	    const sortedData = [...historicalData].sort((a, b) => {
+	      const timeA = new Date(a.timestamp || a.created_at || a.time || 0).getTime();
       const timeB = new Date(b.timestamp || b.created_at || b.time || 0).getTime();
       return timeA - timeB;
     });
@@ -390,15 +393,16 @@ const initCharts = () => {
         loadChart = echarts.init(loadChartRef.value);
       }
       
-      // 更新图表数据
-      updateCharts();
-      
-      // 添加窗口大小变化监听
-      window.addEventListener('resize', handleResize);
-      
-    } catch (error) {
-      console.error('初始化图表时出错:', error);
-    }
+	      // 更新图表数据
+	      updateCharts();
+	      
+	      // 添加窗口大小变化监听
+	      window.removeEventListener('resize', handleResize);
+	      window.addEventListener('resize', handleResize);
+	      
+	    } catch (error) {
+	      console.error('初始化图表时出错:', error);
+	    }
   });
 };
 
@@ -1405,6 +1409,47 @@ watch(() => settingsStore.chartHistoryHours, async (newValue, oldValue) => {
     await fetchHistoricalData();
   }
 });
+
+watch(
+  () => route.params.id,
+  async (newValue, oldValue) => {
+    if (newValue === oldValue) return;
+    const nextServerId = Number(newValue);
+    if (!nextServerId || nextServerId === serverId.value) return;
+
+    console.log('监控页面切换服务器:', serverId.value, '->', nextServerId);
+
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+
+    wsConnected.value = false;
+    connecting.value = false;
+    reconnectCount.value = 0;
+    heartbeatFailCount = 0;
+
+    serverId.value = nextServerId;
+    serverInfo.value = {};
+    clearMonitorData();
+    updateCharts();
+
+    await fetchHistoricalData();
+    initCharts();
+    connectWebSocket();
+  }
+);
 
 // 页面卸载时关闭WebSocket连接和移除事件监听
 onUnmounted(() => {

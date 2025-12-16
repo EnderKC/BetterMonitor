@@ -27,6 +27,8 @@ const sortableInstance = ref<Sortable | null>(null); // Sortable 实例
 const localServerOrder = ref<any[]>([]); // 本地服务器列表副本（用于拖拽）
 const savingOrder = ref(false); // 保存中状态
 const tableRef = ref<any>(null); // 表格引用
+const normalPagination = { pageSize: 10 };
+const tablePagination = computed(() => (sortMode.value ? false : normalPagination));
 
 // 表单状态
 const formVisible = ref(false);
@@ -90,7 +92,7 @@ const columns = [
 
       if (tags.length === 0) return '-';
 
-      return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px;' }, tags);
+      return h('div', { style: 'display: flex; flexDirection: column' }, tags);
     }
   },
 
@@ -385,9 +387,9 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="server-list-content glass-card">
-      <a-table :dataSource="displayServers" :columns="columns" :loading="loading" :pagination="{ pageSize: 10 }"
-        rowKey="id" class="modern-table" ref="tableRef">
+	    <div class="server-list-content glass-card">
+	      <a-table :dataSource="displayServers" :columns="columns" :loading="loading" :pagination="tablePagination"
+	        rowKey="id" class="modern-table" ref="tableRef">
         <template #bodyCell="{ column, record }">
           <!-- 拖拽手柄列 -->
           <template v-if="column.key === 'dragHandle'">
