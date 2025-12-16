@@ -27,7 +27,11 @@ func init() {
 	// 从环境变量读取版本信息（仅在编译期未注入时生效）
 	// 生产环境优先使用编译期 -ldflags 注入的值，避免被容器环境变量意外覆盖
 	if Version == "" || strings.EqualFold(Version, "latest") || strings.EqualFold(Version, "unknown") {
-		if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" &&
+		if envVersion := strings.TrimSpace(os.Getenv("DASHBOARD_VERSION")); envVersion != "" &&
+			!strings.EqualFold(envVersion, "latest") &&
+			!strings.EqualFold(envVersion, "unknown") {
+			Version = envVersion
+		} else if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" &&
 			!strings.EqualFold(envVersion, "latest") &&
 			!strings.EqualFold(envVersion, "unknown") {
 			Version = envVersion
@@ -101,4 +105,4 @@ func GetVersion() *Info {
 func GetVersionString() string {
 	return fmt.Sprintf("Better-Monitor Dashboard v%s (commit: %s, %s/%s)",
 		Version, Commit, runtime.GOOS, runtime.GOARCH)
-} 
+}

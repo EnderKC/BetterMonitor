@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.all-in-one
       args:
-        VERSION: ${VERSION:-1.0.6}
+        VERSION: ${DASHBOARD_VERSION:-1.0.6}
         BUILD_DATE: ${BUILD_DATE:-$(date +%Y-%m-%d)}
     container_name: better-monitor
     restart: unless-stopped
@@ -17,7 +17,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - JWT_SECRET=${JWT_SECRET:-your_jwt_secret_key_change_this_in_production}
-      - VERSION=${VERSION:-1.0.6}
+      - VERSION=${DASHBOARD_VERSION:-1.0.6}
     security_opt:
       - no-new-privileges:true
     read_only: false

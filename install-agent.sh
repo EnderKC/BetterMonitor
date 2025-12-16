@@ -230,6 +230,40 @@ detect_service_manager() {
     echo "none"
 }
 
+init_service_manager() {
+    if [[ -n "${SERVICE_MANAGER}" ]]; then
+        return
+    fi
+    SERVICE_MANAGER="$(detect_service_manager)"
+}
+
+stop_existing_service() {
+    init_service_manager
+
+    case "$SERVICE_MANAGER" in
+        systemd)
+            if command -v systemctl >/dev/null 2>&1; then
+                # 服务不存在/未运行时也不会影响安装流程
+                $SUDO_CMD systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
+            fi
+            ;;
+        openrc)
+            if [[ -x "/etc/init.d/${SERVICE_NAME}" ]]; then
+                $SUDO_CMD rc-service "${SERVICE_NAME}" stop >/dev/null 2>&1 || true
+            fi
+            ;;
+        launchd)
+            if [[ -f "$LAUNCHD_PLIST" ]]; then
+                $SUDO_CMD launchctl bootout system "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+                $SUDO_CMD launchctl unload -w "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+            fi
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
 fetch_public_release_config() {
     info "从 Dashboard 获取公共设置..."
     local response
@@ -437,6 +471,9 @@ download_agent() {
 
     chmod +x "$tmp_bin"
 
+    # 若是升级场景，先停止服务再写入目标路径，避免出现 "text file busy"。
+    stop_existing_service
+
     info "安装 Agent 到 ${BIN_DIR}"
     $SUDO_CMD mkdir -p "$BIN_DIR"
     $SUDO_CMD install -m 0755 "$tmp_bin" "${BIN_DIR}/${BINARY_NAME}"
@@ -583,7 +620,7 @@ EOF
 }
 
 install_service() {
-    SERVICE_MANAGER="$(detect_service_manager)"
+    init_service_manager
     case "$SERVICE_MANAGER" in
         systemd)
             create_systemd_service

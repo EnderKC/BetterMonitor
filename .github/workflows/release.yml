@@ -4,15 +4,122 @@ on:
   push:
     branches:
       - main
+    # 仅在版本文件变更时触发发布流程（避免每次 push 都推镜像/发 release）
+    paths:
+      - ".env"
+      - ".github/workflows/release.yml"
+  workflow_dispatch: {}
 
 env:
   REGISTRY: docker.io
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/better-monitor
 
 jobs:
+  detect-versions:
+    name: Detect Versions
+    runs-on: ubuntu-latest
+    outputs:
+      dashboard_version: ${{ steps.current.outputs.DASHBOARD_VERSION }}
+      agent_version: ${{ steps.current.outputs.AGENT_VERSION }}
+      dashboard_changed: ${{ steps.changed.outputs.DASHBOARD_CHANGED }}
+      agent_changed: ${{ steps.changed.outputs.AGENT_CHANGED }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read versions from .env
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f .env ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+
+          get_var() {
+            local key="$1"
+            grep -m1 "^${key}=" .env 2>/dev/null | cut -d'=' -f2- | tr -d '\r' || true
+          }
+
+          DASHBOARD_VERSION="$(get_var DASHBOARD_VERSION)"
+          AGENT_VERSION="$(get_var AGENT_VERSION)"
+
+          if [ -z "${DASHBOARD_VERSION}" ]; then
+            echo "::error::DASHBOARD_VERSION entry not found in .env"
+            exit 1
+          fi
+          if [ -z "${AGENT_VERSION}" ]; then
+            echo "::error::AGENT_VERSION entry not found in .env"
+            exit 1
+          fi
+
+          echo "DASHBOARD_VERSION=${DASHBOARD_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "AGENT_VERSION=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect version changes vs previous commit
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BEFORE_SHA="${{ github.event.before }}"
+          # workflow_dispatch 事件可能没有 before 字段，fallback 到当前提交的父提交
+          if [ -z "${BEFORE_SHA}" ] || [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+          CURRENT_DASHBOARD="${{ steps.current.outputs.DASHBOARD_VERSION }}"
+          CURRENT_AGENT="${{ steps.current.outputs.AGENT_VERSION }}"
+
+          extract_from_text() {
+            local text="$1"
+            local key="$2"
+            printf "%s" "$text" | grep -m1 "^${key}=" 2>/dev/null | cut -d'=' -f2- | tr -d '\r' || true
+          }
+
+          PREV_ENV=""
+          if [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
+            PREV_ENV="$(git show "${BEFORE_SHA}:.env" 2>/dev/null || true)"
+          fi
+
+          PREV_DASHBOARD="$(extract_from_text "${PREV_ENV}" DASHBOARD_VERSION)"
+          PREV_AGENT="$(extract_from_text "${PREV_ENV}" AGENT_VERSION)"
+          PREV_LEGACY_VERSION="$(extract_from_text "${PREV_ENV}" VERSION)"
+
+          # 兼容旧版（只有 VERSION=... 的场景）：把旧的 VERSION 视为 Dashboard/Agent 共用版本
+          if [ -z "${PREV_DASHBOARD}" ]; then
+            PREV_DASHBOARD="${PREV_LEGACY_VERSION}"
+          fi
+          if [ -z "${PREV_AGENT}" ]; then
+            PREV_AGENT="${PREV_LEGACY_VERSION}"
+          fi
+
+          DASHBOARD_CHANGED="false"
+          AGENT_CHANGED="false"
+
+          if [ "${CURRENT_DASHBOARD}" != "${PREV_DASHBOARD}" ]; then
+            DASHBOARD_CHANGED="true"
+          fi
+          if [ "${CURRENT_AGENT}" != "${PREV_AGENT}" ]; then
+            AGENT_CHANGED="true"
+          fi
+
+          echo "Previous versions: DASHBOARD=${PREV_DASHBOARD:-<none>} AGENT=${PREV_AGENT:-<none>}"
+          echo "Current versions:  DASHBOARD=${CURRENT_DASHBOARD} AGENT=${CURRENT_AGENT}"
+          echo "Changed flags:     DASHBOARD_CHANGED=${DASHBOARD_CHANGED} AGENT_CHANGED=${AGENT_CHANGED}"
+
+          echo "DASHBOARD_CHANGED=${DASHBOARD_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "AGENT_CHANGED=${AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
+
   build-agent:
     name: Build Agent Binaries
     runs-on: ubuntu-latest
+    needs: [detect-versions]
+    if: needs.detect-versions.outputs.agent_changed == 'true'
+    env:
+      AGENT_VERSION: ${{ needs.detect-versions.outputs.agent_version }}
     strategy:
       matrix:
         include:
@@ -39,26 +146,6 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Get version
-        id: version
-        run: |
-          if [ ! -f .env ]; then
-            echo "::error::.env file not found"
-            exit 1
-          fi
-          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
-          if [ -z "$VERSION_LINE" ]; then
-            echo "::error::VERSION entry not found in .env"
-            exit 1
-          fi
-          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
-          if [ -z "$VERSION" ]; then
-            echo "::error::VERSION value in .env is empty"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
       - name: Build agent
         env:
           GOOS: ${{ matrix.os }}
@@ -67,12 +154,12 @@ jobs:
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           COMMIT=$(git rev-parse --short HEAD)
-          BINARY_NAME="better-monitor-agent-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}"
+          BINARY_NAME="better-monitor-agent-${AGENT_VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
           [ "${{ matrix.os }}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
 
           cd agent
           go build -ldflags="-w -s \
-            -X 'github.com/user/server-ops-agent/pkg/version.Version=${{ steps.version.outputs.VERSION }}' \
+            -X 'github.com/user/server-ops-agent/pkg/version.Version=${AGENT_VERSION}' \
             -X 'github.com/user/server-ops-agent/pkg/version.Commit=${COMMIT}' \
             -X 'github.com/user/server-ops-agent/pkg/version.BuildDate=${BUILD_DATE}'" \
             -o "../${BINARY_NAME}" cmd/agent/main.go
@@ -86,6 +173,10 @@ jobs:
   build-backend:
     name: Build Backend Binary
     runs-on: ubuntu-latest
+    needs: [detect-versions]
+    if: needs.detect-versions.outputs.dashboard_changed == 'true'
+    env:
+      DASHBOARD_VERSION: ${{ needs.detect-versions.outputs.dashboard_version }}
     strategy:
       matrix:
         include:
@@ -99,26 +190,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-
-      - name: Get version
-        id: version
-        run: |
-          if [ ! -f .env ]; then
-            echo "::error::.env file not found"
-            exit 1
-          fi
-          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
-          if [ -z "$VERSION_LINE" ]; then
-            echo "::error::VERSION entry not found in .env"
-            exit 1
-          fi
-          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
-          if [ -z "$VERSION" ]; then
-            echo "::error::VERSION value in .env is empty"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install cross-compilation tools
         if: matrix.arch == 'arm64'
@@ -136,7 +207,7 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           cd backend
           go build -ldflags="-w -s \
-            -X 'github.com/user/server-ops-backend/pkg/version.Version=${{ steps.version.outputs.VERSION }}' \
+            -X 'github.com/user/server-ops-backend/pkg/version.Version=${DASHBOARD_VERSION}' \
             -X 'github.com/user/server-ops-backend/pkg/version.Commit=${COMMIT}' \
             -X 'github.com/user/server-ops-backend/pkg/version.BuildDate=${BUILD_DATE}'" \
             -o better-monitor-backend-${{ matrix.arch }} main.go
@@ -150,6 +221,8 @@ jobs:
   build-frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
+    needs: [detect-versions]
+    if: needs.detect-versions.outputs.dashboard_changed == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -172,29 +245,12 @@ jobs:
   build-docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: [build-agent, build-backend, build-frontend]
+    needs: [detect-versions, build-backend, build-frontend]
+    if: needs.detect-versions.outputs.dashboard_changed == 'true'
+    env:
+      DASHBOARD_VERSION: ${{ needs.detect-versions.outputs.dashboard_version }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
-        run: |
-          if [ ! -f .env ]; then
-            echo "::error::.env file not found"
-            exit 1
-          fi
-          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
-          if [ -z "$VERSION_LINE" ]; then
-            echo "::error::VERSION entry not found in .env"
-            exit 1
-          fi
-          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
-          if [ -z "$VERSION" ]; then
-            echo "::error::VERSION value in .env is empty"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Get build metadata
         id: meta
@@ -207,7 +263,7 @@ jobs:
           echo "COMMIT_SHORT=${COMMIT_SHORT}" >> "$GITHUB_OUTPUT"
           echo "COMMIT_FULL=${COMMIT_FULL}" >> "$GITHUB_OUTPUT"
           echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
-          echo "Build metadata: VERSION=${{ steps.version.outputs.VERSION }}, COMMIT=${COMMIT_SHORT} (${COMMIT_FULL}), BUILD_DATE=${BUILD_DATE}"
+          echo "Build metadata: DASHBOARD_VERSION=${DASHBOARD_VERSION}, COMMIT=${COMMIT_SHORT} (${COMMIT_FULL}), BUILD_DATE=${BUILD_DATE}"
 
       - name: Download backend amd64 artifact
         uses: actions/download-artifact@v4
@@ -272,44 +328,27 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            VERSION=${{ steps.version.outputs.VERSION }}
+            VERSION=${{ env.DASHBOARD_VERSION }}
             COMMIT_SHORT=${{ steps.meta.outputs.COMMIT_SHORT }}
             COMMIT_FULL=${{ steps.meta.outputs.COMMIT_FULL }}
             BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.IMAGE_NAME }}:${{ env.DASHBOARD_VERSION }}
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-  create-release:
-    name: Create GitHub Release
+  create-agent-release:
+    name: Create Agent GitHub Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [build-agent, build-backend, build-frontend, build-docker]
+    needs: [detect-versions, build-agent]
+    if: needs.detect-versions.outputs.agent_changed == 'true'
+    env:
+      AGENT_VERSION: ${{ needs.detect-versions.outputs.agent_version }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
-        run: |
-          if [ ! -f .env ]; then
-            echo "::error::.env file not found"
-            exit 1
-          fi
-          VERSION_LINE=$(grep -m1 '^VERSION=' .env || true)
-          if [ -z "$VERSION_LINE" ]; then
-            echo "::error::VERSION entry not found in .env"
-            exit 1
-          fi
-          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2- | tr -d '\r')
-          if [ -z "$VERSION" ]; then
-            echo "::error::VERSION value in .env is empty"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -320,14 +359,12 @@ jobs:
         run: |
           mkdir -p release
           find artifacts/agent-* -type f -exec cp {} release/ \;
-          cp artifacts/backend/* release/ 2>/dev/null || true
-          cd artifacts/frontend && tar czf ../../release/frontend-dist.tar.gz . && cd ../..
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release v${{ steps.version.outputs.VERSION }}
+          tag_name: v${{ env.AGENT_VERSION }}
+          name: Agent v${{ env.AGENT_VERSION }}
           draft: false
           prerelease: false
           files: release/*

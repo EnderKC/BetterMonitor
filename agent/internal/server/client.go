@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -2530,6 +2531,13 @@ func (c *Client) performAgentUpgrade(requestID, targetVersion, channel string) {
 		"version": asset.Version,
 	})
 
+	// Windows 不能在运行中替换/启动自身（文件锁），需要退出让外部 updater 完成替换并拉起新进程。
+	if runtime.GOOS == "windows" {
+		time.Sleep(1 * time.Second)
+		os.Exit(0)
+		return
+	}
+
 	time.Sleep(2 * time.Second)
 	c.restartAgent()
 }
@@ -2844,22 +2852,11 @@ func (c *Client) installReleaseFile(tempFile string) error {
 
 	// 在Windows上需要特殊处理
 	if runtime.GOOS == "windows" {
-		// 在Windows上，运行中的程序不能直接替换
-		// 需要重命名当前程序，然后复制新程序
-		oldPath := currentPath + ".old"
-		if err := os.Rename(currentPath, oldPath); err != nil {
-			return fmt.Errorf("重命名当前程序失败: %v", err)
+		// Windows 下运行中的 exe 被锁定，无法 rename/overwrite。
+		// 采用外部 PowerShell updater：等待当前 PID 退出后，再完成替换并拉起新进程。
+		if err := c.startWindowsUpdater(currentPath, tempFile); err != nil {
+			return fmt.Errorf("启动 updater 失败: %v", err)
 		}
-
-		// 复制新程序到当前位置
-		if err := c.copyFile(tempFile, currentPath); err != nil {
-			// 恢复原程序
-			os.Rename(oldPath, currentPath)
-			return fmt.Errorf("复制新程序失败: %v", err)
-		}
-
-		// 删除旧程序
-		os.Remove(oldPath)
 	} else {
 		// 在Unix系统上，可以直接替换
 		if err := c.copyFile(tempFile, currentPath); err != nil {
@@ -2868,6 +2865,111 @@ func (c *Client) installReleaseFile(tempFile string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) startWindowsUpdater(oldExePath, newExePath string) error {
+	// 仅在 Windows 上调用；为保证跨平台编译，这里不使用 Windows 特有的 syscall 字段。
+	argsJSON, _ := json.Marshal(os.Args[1:]) // 不包含 argv[0]
+
+	dir := filepath.Dir(oldExePath)
+	scriptPath := filepath.Join(dir, fmt.Sprintf("bm-agent-upgrade-%d.ps1", time.Now().UnixNano()))
+	script := strings.TrimSpace(`
+param(
+  [Parameter(Mandatory=$true)][int]$Pid,
+  [Parameter(Mandatory=$true)][string]$OldExe,
+  [Parameter(Mandatory=$true)][string]$NewExe,
+  [Parameter(Mandatory=$false)][string]$ArgsJson
+)
+
+function Try-Remove([string]$Path) {
+  try { if (Test-Path $Path) { Remove-Item -Force -ErrorAction SilentlyContinue $Path } } catch {}
+}
+
+function Try-Move([string]$From, [string]$To) {
+  try { Move-Item -Force -ErrorAction Stop $From $To; return $true } catch { return $false }
+}
+
+$args = @()
+try {
+  if ($ArgsJson -and $ArgsJson.Trim().Length -gt 0) {
+    $args = ConvertFrom-Json -InputObject $ArgsJson
+  }
+} catch {
+  $args = @()
+}
+
+# wait for old process to exit (max ~120s)
+for ($i = 0; $i -lt 120; $i++) {
+  try {
+    $p = Get-Process -Id $Pid -ErrorAction Stop
+    Start-Sleep -Seconds 1
+  } catch {
+    break
+  }
+}
+
+$backup = "$OldExe.old"
+Try-Remove $backup
+
+# replace: OldExe -> backup, NewExe -> OldExe (retry a few times)
+for ($i = 0; $i -lt 30; $i++) {
+  try {
+    if (Test-Path $OldExe) { Try-Move $OldExe $backup | Out-Null }
+    if (Try-Move $NewExe $OldExe) { break }
+  } catch {}
+  Start-Sleep -Milliseconds 500
+}
+
+try {
+  Start-Process -FilePath $OldExe -ArgumentList $args -WindowStyle Hidden
+} catch {
+  # best-effort rollback
+  try {
+    if (Test-Path $backup) { Try-Move $backup $OldExe | Out-Null }
+  } catch {}
+}
+
+Try-Remove $NewExe
+Try-Remove $MyInvocation.MyCommand.Path
+`) + "\r\n"
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		return fmt.Errorf("写入 updater 脚本失败: %v", err)
+	}
+
+	pid := os.Getpid()
+	var lastErr error
+	for _, ps := range []string{"powershell.exe", "powershell", "pwsh"} {
+		cmd := exec.Command(
+			ps,
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-File",
+			scriptPath,
+			"-Pid",
+			strconv.Itoa(pid),
+			"-OldExe",
+			oldExePath,
+			"-NewExe",
+			newExePath,
+			"-ArgsJson",
+			string(argsJSON),
+		)
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Start(); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+
+	_ = os.Remove(scriptPath)
+	if lastErr != nil {
+		return fmt.Errorf("启动 PowerShell 失败: %v", lastErr)
+	}
+	return fmt.Errorf("启动 PowerShell 失败")
 }
 
 // 恢复备份
@@ -2921,27 +3023,50 @@ func (c *Client) copyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	// 直接对正在运行的可执行文件做 os.Create(dst) 可能触发 ETXTBSY（text file busy）。
+	// 使用“同目录临时文件 + rename”的方式原子替换，避免写入目标路径。
+	dir := filepath.Dir(dst)
+	base := filepath.Base(dst)
+	destFile, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("创建目标文件失败: %v", err)
+		return fmt.Errorf("创建临时目标文件失败: %v", err)
 	}
-	defer destFile.Close()
+	tempPath := destFile.Name()
 
 	_, err = io.Copy(destFile, sourceFile)
 	if err != nil {
+		destFile.Close()
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("复制文件内容失败: %v", err)
+	}
+	_ = destFile.Sync()
+	if err := destFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("关闭临时目标文件失败: %v", err)
 	}
 
 	// 设置文件权限（仅在Unix系统上）
 	if runtime.GOOS != "windows" {
 		sourceInfo, err := os.Stat(src)
 		if err != nil {
+			_ = os.Remove(tempPath)
 			return fmt.Errorf("获取源文件权限失败: %v", err)
 		}
 
-		if err := os.Chmod(dst, sourceInfo.Mode()); err != nil {
-			return fmt.Errorf("设置目标文件权限失败: %v", err)
+		if err := os.Chmod(tempPath, sourceInfo.Mode()); err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("设置临时目标文件权限失败: %v", err)
 		}
+	}
+
+	// Windows 下 os.Rename 不能覆盖已存在的文件；行为上与旧实现（Create+Truncate）一致，尽力移除旧文件。
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(dst)
+	}
+
+	if err := os.Rename(tempPath, dst); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("替换目标文件失败: %v", err)
 	}
 
 	return nil

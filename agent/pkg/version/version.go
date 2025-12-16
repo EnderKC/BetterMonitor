@@ -30,7 +30,9 @@ func init() {
 	buildCommit := strings.TrimSpace(Commit)
 
 	// 从环境变量读取版本信息（优先级最高）
-	if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" {
+	if envVersion := strings.TrimSpace(os.Getenv("AGENT_VERSION")); envVersion != "" {
+		Version = envVersion
+	} else if envVersion := strings.TrimSpace(os.Getenv("VERSION")); envVersion != "" {
 		Version = envVersion
 	} else if buildVersion != "" {
 		// 如果没有环境变量，则优先使用编译时注入的版本号
