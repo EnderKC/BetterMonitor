@@ -1205,9 +1205,9 @@ const customRow = (record: any) => {
     </a-modal>
 
     <!-- 编辑文件对话框 -->
-    <a-modal v-model:open="editModalVisible" title="编辑文件" width="80%" @ok="saveFileContent"
-      :confirm-loading="editLoading" :maskClosable="false" :footer="null" :destroyOnClose="true" style="top: 20px;"
-      class="macos-modal editor-modal" :title="null">
+    <a-modal v-model:open="editModalVisible" width="80%" @ok="saveFileContent" :confirm-loading="editLoading"
+      :maskClosable="false" :footer="null" :destroyOnClose="true" style="top: 20px;" class="macos-modal editor-modal"
+      :title="null">
       <div class="file-editor">
         <div class="editor-header">
           <div class="file-info">
