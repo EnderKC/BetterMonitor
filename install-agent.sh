@@ -818,7 +818,7 @@ CONFIG="${CONFIG_FILE}"
   if command -v runsvdir >/dev/null 2>&1 && command -v sv >/dev/null 2>&1 && [ -d "\$SERVICE_DIR" ]; then
   # 若 runsvdir 未启动，则拉起一次（best-effort）。
   if command -v pgrep >/dev/null 2>&1; then
-    if ! pgrep -f "runsvdir .*\\$SV_DIR" >/dev/null 2>&1; then
+    if ! pgrep -f "runsvdir .*\$SV_DIR" >/dev/null 2>&1; then
       if command -v nohup >/dev/null 2>&1; then
         nohup runsvdir "\$SV_DIR" >/dev/null 2>&1 &
       else
