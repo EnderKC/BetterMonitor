@@ -52,29 +52,43 @@ const rules = {
   ],
 };
 
+const normalizeIpForDisplay = (raw: string) => {
+  const trimmed = raw.trim();
+  // WebSocket RemoteAddr 可能会带上 IPv6 方括号，如 "[2001:db8::1]"
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+};
+
+const splitIpList = (value: unknown): string[] => {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/[,\s]+/)
+    .map((ip) => normalizeIpForDisplay(ip))
+    .filter((ip) => ip !== '');
+};
+
 // 定义表格列
 const columns = [
   { title: '', key: 'dragHandle', width: 50 }, // 拖拽手柄列
   { title: '名称', dataIndex: 'name', key: 'name' },
   {
-    title: 'IP地址',
+    title: '出口IP',
     key: 'ip',
     customRender: ({ record }: { record: any }) => {
       const tags = [];
+      const seen = new Set<string>();
 
-      // 优先显示公网IP（public_ip）
-      if (record.public_ip && record.public_ip.trim() !== '') {
-        // 如果有多个IP（逗号或空格分隔），全部显示
-        const ips = record.public_ip.split(/[,\s]+/).filter((ip: string) => ip.trim() !== '');
-        ips.forEach((ip: string) => {
-          tags.push(h(Tag, { color: 'blue' }, () => ip));
-        });
-      } else if (record.ip && record.ip.trim() !== '') {
-        // 如果没有公网IP，显示连接IP
-        tags.push(h(Tag, { color: 'cyan' }, () => record.ip));
-      } else {
-        return '-';
-      }
+      // 仅显示出口/公网 IP（public_ip）；如果同时存在 IPv4 和 IPv6，会以多个 Tag 展示
+      splitIpList(record.public_ip).forEach((ip) => {
+        const key = ip.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        tags.push(h(Tag, { color: 'blue' }, () => ip));
+      });
+
+      if (tags.length === 0) return '-';
 
       return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px;' }, tags);
     }

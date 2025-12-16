@@ -270,18 +270,21 @@ PY
 select_release_asset() {
     local os="$1"
     local arch="$2"
-    local release_data
-    release_data="$(cat)"
-    local result
-    result=$(
-        BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" BM_RELEASE_JSON="$release_data" \
-        python3 <<'PY' 2>/dev/null
-import json, os
+    # 注意：不要把完整 Release JSON 放进环境变量里（可能触发 "Argument list too long"）。
+    # 直接从 stdin 读取更稳妥。
+    BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" \
+        python3 -c '
+import json, os, sys
 
 channel=os.environ.get("BM_RELEASE_CHANNEL","stable").lower()
 os_name=os.environ["BM_OS"]
 arch=os.environ["BM_ARCH"]
-data=json.loads(os.environ.get("BM_RELEASE_JSON") or "[]")
+
+try:
+    data=json.load(sys.stdin)
+except Exception as e:
+    raise SystemExit(f"解析 Release JSON 失败: {e}")
+
 if isinstance(data, dict):
     data=[data]
 
@@ -346,9 +349,7 @@ print("|".join([
     selected.get("name") or "",
     selected.get("browser_download_url") or ""
 ]))
-PY
-    )
-    echo "$result"
+'
 }
 
 download_agent() {
