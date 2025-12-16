@@ -148,16 +148,35 @@ jobs:
         with:
           go-version: "1.24"
 
+      - name: Setup Android NDK
+        if: matrix.os == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+
       - name: Build agent
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           COMMIT=$(git rev-parse --short HEAD)
           BINARY_NAME="better-monitor-agent-${AGENT_VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
           [ "${{ matrix.os }}" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
+
+          if [ "${{ matrix.os }}" = "android" ]; then
+            echo "Configuring build for Android (CGO_ENABLED=1)..."
+            export CGO_ENABLED=1
+            NDK_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CC="$NDK_TOOLCHAIN/aarch64-linux-android29-clang"
+            if [ ! -f "$CC" ]; then
+              echo "Error: Compiler not found at $CC"
+              exit 1
+            fi
+          else
+            echo "Configuring build for Static Binary (CGO_ENABLED=0)..."
+            export CGO_ENABLED=0
+          fi
 
           cd agent
           go build -ldflags="-w -s \
