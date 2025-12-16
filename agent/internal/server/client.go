@@ -535,15 +535,38 @@ func (c *Client) handleWebSocketMessages() {
 			// 处理Shell命令 - 异步处理
 			go c.handleShellCommand(msgCopy)
 
-		case "agent_upgrade":
-			// 处理Agent升级请求 - 异步处理
-			go c.handleAgentUpgrade(msgCopy)
+			case "agent_upgrade":
+				// 处理Agent升级请求 - 异步处理
+				go c.handleAgentUpgrade(msgCopy)
 
-		default:
-			c.log.Warn("收到未知类型的WebSocket消息: %s", baseMsg.Type)
+			case "error":
+				// Dashboard/Server 可能会返回 error 消息（例如服务端不识别某些响应类型）。
+				// 解析并输出可读信息，避免误报“未知类型”。
+				var errMsg struct {
+					Type      string `json:"type"`
+					Message   string `json:"message"`
+					Timestamp int64  `json:"timestamp"`
+					RequestID string `json:"request_id"`
+				}
+				if err := json.Unmarshal(message, &errMsg); err != nil {
+					c.log.Warn("收到服务端 error 消息，但解析失败: %v", err)
+					continue
+				}
+				if strings.TrimSpace(errMsg.Message) != "" {
+					if errMsg.RequestID != "" {
+						c.log.Warn("收到服务端错误: %s (request_id=%s)", errMsg.Message, errMsg.RequestID)
+					} else {
+						c.log.Warn("收到服务端错误: %s", errMsg.Message)
+					}
+				} else {
+					c.log.Warn("收到服务端 error 消息（无详细信息）")
+				}
+
+			default:
+				c.log.Warn("收到未知类型的WebSocket消息: %s", baseMsg.Type)
+			}
 		}
 	}
-}
 
 // 处理Shell命令
 func (c *Client) handleShellCommand(message []byte) {
@@ -2723,8 +2746,26 @@ func (c *Client) downloadReleaseFile(downloadURL string) (string, error) {
 	}
 	defer tempFile.Close()
 
+	c.log.Info("开始下载升级包: %s", downloadURL)
+
+	req, err := http.NewRequest("GET", downloadURL, nil)
+	if err != nil {
+		_ = os.Remove(tempFile.Name())
+		return "", fmt.Errorf("创建下载请求失败: %v", err)
+	}
+	req.Header.Set("User-Agent", "better-monitor-agent")
+	req.Header.Set("Accept", "application/octet-stream")
+
+	// 下载升级包可能比普通 API 请求耗时更久，避免复用 10s 的短超时导致在慢网络下升级必然失败。
+	downloadClient := &http.Client{Timeout: 20 * time.Minute}
+	if c.httpClient != nil {
+		clone := *c.httpClient
+		clone.Timeout = 20 * time.Minute
+		downloadClient = &clone
+	}
+
 	// 发送HTTP请求
-	resp, err := http.Get(downloadURL)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		os.Remove(tempFile.Name())
 		return "", fmt.Errorf("下载文件失败: %v", err)
@@ -2742,6 +2783,9 @@ func (c *Client) downloadReleaseFile(downloadURL string) (string, error) {
 		os.Remove(tempFile.Name())
 		return "", fmt.Errorf("写入临时文件失败: %v", err)
 	}
+
+	_ = tempFile.Sync()
+	c.log.Info("升级包下载完成: %s", tempFile.Name())
 
 	return tempFile.Name(), nil
 }

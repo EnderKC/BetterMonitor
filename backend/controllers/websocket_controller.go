@@ -1474,29 +1474,53 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				log.Printf("警告: 收到的Nginx响应消息没有请求ID")
 			}
 
-		case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
-			"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload":
-			// 处理文件 / 容器文件操作响应
-			var fileResponse struct {
-				Type      string                 `json:"type"`
-				RequestID string                 `json:"request_id"`
-				Data      map[string]interface{} `json:"data"`
+			case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
+				"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload":
+				// 处理文件 / 容器文件操作响应
+				var fileResponse struct {
+					Type      string                 `json:"type"`
+					RequestID string                 `json:"request_id"`
+					Data      map[string]interface{} `json:"data"`
+				}
+				if err := json.Unmarshal(message, &fileResponse); err != nil {
+					log.Printf("解析文件响应消息失败: %v", err)
+					continue
+				}
+				// 调用文件控制器的响应处理函数
+				if fileResponse.RequestID != "" {
+					HandleFileResponse(fileResponse.RequestID, map[string]interface{}{
+						"type": fileResponse.Type,
+						"data": fileResponse.Data,
+					})
+				}
+			case "agent_upgrade_response":
+				// Agent 升级进度/结果回传（用于日志/后续扩展 UI 显示）。
+				// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现“未知类型/错误”噪音。
+				if !isAgent {
+					continue
+				}
+
+				var upgradeResp struct {
+					Type      string                 `json:"type"`
+					RequestID string                 `json:"request_id"`
+					Data      map[string]interface{} `json:"data"`
+				}
+				if err := json.Unmarshal(message, &upgradeResp); err != nil {
+					log.Printf("解析Agent升级响应失败: %v", err)
+					continue
+				}
+
+				status, _ := upgradeResp.Data["status"].(string)
+				msgText, _ := upgradeResp.Data["message"].(string)
+				if status != "" || msgText != "" {
+					log.Printf("收到Agent升级状态: server=%d request_id=%s status=%s message=%s", server.ID, upgradeResp.RequestID, status, msgText)
+				} else {
+					log.Printf("收到Agent升级响应: server=%d request_id=%s", server.ID, upgradeResp.RequestID)
+				}
+			default:
+				log.Printf("未知的消息类型: %s", msg.Type)
+				sendErrorMessage(conn, "未知的消息类型")
 			}
-			if err := json.Unmarshal(message, &fileResponse); err != nil {
-				log.Printf("解析文件响应消息失败: %v", err)
-				continue
-			}
-			// 调用文件控制器的响应处理函数
-			if fileResponse.RequestID != "" {
-				HandleFileResponse(fileResponse.RequestID, map[string]interface{}{
-					"type": fileResponse.Type,
-					"data": fileResponse.Data,
-				})
-			}
-		default:
-			log.Printf("未知的消息类型: %s", msg.Type)
-			sendErrorMessage(conn, "未知的消息类型")
-		}
 	}
 }
 
