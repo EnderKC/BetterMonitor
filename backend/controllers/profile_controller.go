@@ -196,7 +196,7 @@ func validatePhone(phone string) error {
 
 func currentUserIDFromContext(c *gin.Context) (uint, bool) {
 	// 常见 key 兼容
-	for _, key := range []string{"user_id", "userID", "uid", "id"} {
+	for _, key := range []string{"user_id", "userId", "userID", "uid", "id"} {
 		if v, ok := c.Get(key); ok {
 			if id, ok := toUint(v); ok {
 				return id, true

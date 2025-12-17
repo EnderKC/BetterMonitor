@@ -10,6 +10,7 @@ import {
   CameraOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { setUser } from '../../utils/auth';
 
 // 用户资料
 const userInfo = ref<any>({});
@@ -35,6 +36,8 @@ const fetchUserProfile = async () => {
     // axios拦截器已经返回了 response.data，这里直接使用响应体即可
     const response = await request.get('/profile');
     userInfo.value = response || {};
+    // 同步到本地缓存，保证顶部栏等位置的用户名/邮箱实时更新
+    setUser(userInfo.value);
 
     // 填充表单数据
     formState.username = userInfo.value.username || '';
@@ -163,10 +166,13 @@ onMounted(() => {
                 </div>
                 <div class="info-item">
                   <div class="info-icon"><user-outlined /></div>
-                  <div class="info-content">
+                    <div class="info-content">
                     <div class="info-label">最后登录</div>
-                    <div class="info-value">{{ userInfo.last_login ? new Date(userInfo.last_login).toLocaleString() :
-                      '未知' }}</div>
+                    <div class="info-value">
+                      {{ (userInfo.last_login_at || userInfo.last_login)
+                        ? new Date(userInfo.last_login_at || userInfo.last_login).toLocaleString()
+                        : '未知' }}
+                    </div>
                   </div>
                 </div>
               </div>

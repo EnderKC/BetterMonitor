@@ -107,8 +107,9 @@
             <a-input v-model:value="configForm.from_name" placeholder="发件人显示名称" />
           </a-form-item>
           
-          <a-form-item label="收件人邮箱" name="to_email">
-            <a-input v-model:value="configForm.to_email" placeholder="接收通知的邮箱地址" />
+          <a-form-item label="收件人邮箱">
+            <a-input :value="profileEmail || ''" disabled placeholder="请先在个人资料中设置邮箱" />
+            <div class="ant-form-item-extra">收件人将使用“个人资料”中设置的邮箱</div>
           </a-form-item>
           
           <a-form-item label="使用TLS" name="use_tls">
@@ -135,7 +136,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, reactive, watch } from 'vue';
-import { useAlertStore } from '@/stores';
+import { useAlertStore, useUserStore } from '@/stores';
 import { message } from 'ant-design-vue';
 
 export default defineComponent({
@@ -143,6 +144,7 @@ export default defineComponent({
   
   setup() {
     const alertStore = useAlertStore();
+    const userStore = useUserStore();
     
     const channelModalVisible = ref(false);
     const isEditing = ref(false);
@@ -163,7 +165,6 @@ export default defineComponent({
       password: '',
       from_email: '',
       from_name: '',
-      to_email: '',
       use_tls: true,
       
       // Server酱配置
@@ -200,9 +201,11 @@ export default defineComponent({
     // 计算属性
     const loading = computed(() => alertStore.loading);
     const notificationChannels = computed(() => alertStore.notificationChannels);
+    const profileEmail = computed(() => userStore.userInfo?.email || '');
     
     // 生命周期钩子
     onMounted(async () => {
+      await userStore.getUserInfo(true);
       await fetchData();
     });
     
@@ -224,7 +227,6 @@ export default defineComponent({
         configForm.password = '';
         configForm.from_email = '';
         configForm.from_name = '';
-        configForm.to_email = '';
         configForm.use_tls = true;
       } else if (formState.type === 'serverchan') {
         configForm.sendkey = '';
@@ -285,7 +287,6 @@ export default defineComponent({
         configForm.password = ''; // 不回显密码
         configForm.from_email = config.from_email || '';
         configForm.from_name = config.from_name || '';
-        configForm.to_email = config.to_email || '';
         configForm.use_tls = config.use_tls === 'true' || false;
       } else if (record.type === 'serverchan') {
         configForm.sendkey = ''; // 不回显密钥
@@ -303,7 +304,6 @@ export default defineComponent({
           password: configForm.password,
           from_email: configForm.from_email,
           from_name: configForm.from_name,
-          to_email: configForm.to_email,
           use_tls: configForm.use_tls.toString(),
         });
       } else if (formState.type === 'serverchan') {
@@ -337,8 +337,8 @@ export default defineComponent({
           message.error('请输入发件人邮箱');
           return false;
         }
-        if (!configForm.to_email) {
-          message.error('请输入收件人邮箱');
+        if (!profileEmail.value) {
+          message.error('请先在个人资料中设置邮箱（收件人将使用该邮箱）');
           return false;
         }
       } else if (formState.type === 'serverchan') {
@@ -418,6 +418,7 @@ export default defineComponent({
       channelModalVisible,
       formState,
       configForm,
+      profileEmail,
       isEditing,
       
       getTypeColor,

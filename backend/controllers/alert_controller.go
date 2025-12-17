@@ -226,7 +226,7 @@ func CreateNotificationChannel(c *gin.Context) {
 	// 根据类型验证必要的配置项
 	switch channel.Type {
 	case "email":
-		requiredFields := []string{"smtp_host", "username", "password", "from_email", "to_email"}
+		requiredFields := []string{"smtp_host", "username", "password", "from_email"}
 		for _, field := range requiredFields {
 			if _, ok := configMap[field]; !ok || configMap[field] == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "邮件配置缺少必要字段: " + field})
@@ -327,7 +327,7 @@ func UpdateNotificationChannel(c *gin.Context) {
 		// 根据类型验证必要的配置项
 		switch channel.Type {
 		case "email":
-			requiredFields := []string{"smtp_host", "username", "from_email", "to_email"}
+			requiredFields := []string{"smtp_host", "username", "from_email"}
 			for _, field := range requiredFields {
 				if _, ok := originalConfig[field]; !ok || originalConfig[field] == "" {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "邮件配置缺少必要字段: " + field})

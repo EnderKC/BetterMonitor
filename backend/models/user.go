@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -74,4 +75,38 @@ func CreateUser(username, password, role string) (*User, error) {
 func (u *User) UpdateLastLogin() error {
 	u.LastLoginAt = time.Now()
 	return DB.Model(u).Update("last_login_at", u.LastLoginAt).Error
+}
+
+// GetAdminEmails 获取管理员邮箱列表（去重、小写、过滤空值）
+func GetAdminEmails() ([]string, error) {
+	if DB == nil {
+		return nil, errors.New("database not initialized")
+	}
+
+	type row struct {
+		Email string
+	}
+
+	var rows []row
+	if err := DB.Model(&User{}).
+		Select("email").
+		Where("role = ? AND TRIM(email) <> ''", "admin").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(rows))
+	emails := make([]string, 0, len(rows))
+	for _, r := range rows {
+		email := strings.ToLower(strings.TrimSpace(r.Email))
+		if email == "" {
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		emails = append(emails, email)
+	}
+	return emails, nil
 }

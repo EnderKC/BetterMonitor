@@ -373,13 +373,68 @@ func (s *AlertService) sendEmailNotification(config map[string]string, title, co
 		</html>
 	`, title, content, time.Now().Format("2006-01-02 15:04:05"))
 
-	err := utils.SendEmail(emailConfig, title, htmlContent)
-	if err != nil {
-		log.Printf("发送邮件通知失败: %v", err)
+	// 优先使用管理员（个人资料）邮箱作为收件人；若未设置则回退到通知渠道配置中的 to_email
+	recipients := make([]string, 0, 4)
+	if adminEmails, err := models.GetAdminEmails(); err == nil && len(adminEmails) > 0 {
+		recipients = append(recipients, adminEmails...)
+	} else if err != nil {
+		log.Printf("获取管理员邮箱失败: %v", err)
+	}
+
+	// fallback: 使用配置中的 to_email（兼容历史配置）
+	if len(recipients) == 0 {
+		to := strings.TrimSpace(emailConfig.ToEmail)
+		if to != "" {
+			// 支持简单的逗号/分号分隔
+			split := strings.FieldsFunc(to, func(r rune) bool {
+				return r == ',' || r == ';'
+			})
+			for _, item := range split {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					recipients = append(recipients, item)
+				}
+			}
+		}
+	}
+
+	// 去重
+	seen := make(map[string]struct{}, len(recipients))
+	uniqueRecipients := make([]string, 0, len(recipients))
+	for _, r := range recipients {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if _, ok := seen[r]; ok {
+			continue
+		}
+		seen[r] = struct{}{}
+		uniqueRecipients = append(uniqueRecipients, r)
+	}
+	recipients = uniqueRecipients
+
+	if len(recipients) == 0 {
+		log.Printf("邮件通知发送失败：未找到收件人邮箱，请先在“个人资料”中设置管理员邮箱")
 		return false
 	}
 
-	log.Printf("邮件通知发送成功: %s", title)
+	successCount := 0
+	for _, recipient := range recipients {
+		cfg := emailConfig
+		cfg.ToEmail = recipient
+		if err := utils.SendEmail(cfg, title, htmlContent); err != nil {
+			log.Printf("发送邮件通知失败(收件人=%s): %v", recipient, err)
+			continue
+		}
+		successCount++
+	}
+
+	if successCount == 0 {
+		return false
+	}
+
+	log.Printf("邮件通知发送成功: %s (收件人数量=%d)", title, successCount)
 	return true
 }
 

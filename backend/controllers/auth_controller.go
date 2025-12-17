@@ -96,14 +96,39 @@ func Register(c *gin.Context) {
 
 // GetProfile 获取当前用户资料
 func GetProfile(c *gin.Context) {
-	userId, _ := c.Get("userId")
-	username, _ := c.Get("username")
-	role, _ := c.Get("role")
+	userIDValue, ok := c.Get("userId")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(uint)
+	if !ok || userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	db := models.DB
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database not initialized"})
+		return
+	}
+
+	var user models.User
+	if err := db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":       userId,
-		"username": username,
-		"role":     role,
+		"id":       user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"phone":    user.Phone,
+		"role":     user.Role,
+		// 兼容前端老字段：UserManagement/Profile 页使用 last_login
+		"last_login_at": user.LastLoginAt,
+		"last_login":    user.LastLoginAt,
 	})
 }
 
