@@ -37,6 +37,15 @@ const routes: Array<RouteRecordRaw> = [
     },
   },
   {
+    path: '/servers/:id',
+    name: 'PublicServerDetail',
+    component: () => import('../views/server/PublicServerDetail.vue'),
+    meta: {
+      title: '服务器详情',
+      requiresAuth: false,
+    },
+  },
+  {
     path: '/admin',
     name: 'Admin',
     component: () => import('../layout/AdminLayout.vue'),

@@ -705,6 +705,11 @@ const getStepsProgress = (probe: LifeProbeSummary) => {
 const openLifeDetail = (probeId: number) => {
   router.push({ name: 'LifeProbeDetail', params: { id: probeId } });
 };
+
+const openServerDetail = (serverId: number) => {
+  router.push({ name: 'PublicServerDetail', params: { id: serverId } });
+};
+
 // 获取简短的CPU型号
 const getShortCpuModel = (model: string) => {
   if (!model) return '';
@@ -986,7 +991,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
           </div>
 
           <!-- Server Probes -->
-          <div v-for="server in servers" :key="server.id" class="server-card glass-card">
+          <div v-for="server in servers" :key="server.id" class="server-card glass-card server-probe-card"
+            @click="openServerDetail(server.id)">
             <!-- 头部信息 -->
             <div class="card-header">
               <div class="header-left">
@@ -1730,6 +1736,15 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 .life-probe-card:hover {
   border-color: rgba(255, 77, 79, 0.5);
   box-shadow: 0 12px 32px -4px rgba(255, 77, 79, 0.15);
+}
+
+.server-probe-card {
+  cursor: pointer;
+}
+
+.server-probe-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 40px -6px rgba(0, 122, 255, 0.15);
 }
 
 .life-metrics-grid {

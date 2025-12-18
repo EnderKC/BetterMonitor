@@ -11,6 +11,7 @@ import (
 type Server struct {
 	gorm.Model
 	Name            string    `json:"name" gorm:"not null"`                   // 服务器名称
+	Hostname        string    `json:"hostname" gorm:"type:varchar(255)"`      // 主机名
 	IP              string    `json:"ip"`                                     // 服务器IP
 	PublicIP        string    `json:"public_ip" gorm:"type:varchar(100)"`     // 公网IP
 	OS              string    `json:"os"`                                     // 操作系统
@@ -43,23 +44,26 @@ type Server struct {
 // ServerMonitor 服务器监控数据模型
 type ServerMonitor struct {
 	gorm.Model
-	ServerID    uint      `gorm:"index:idx_server_timestamp" json:"server_id"`
-	Timestamp   time.Time `gorm:"index:idx_server_timestamp" json:"timestamp"`
-	CPUUsage    float64   `json:"cpu_usage"`    // CPU使用率百分比
-	MemoryUsed  uint64    `json:"memory_used"`  // 内存使用量(bytes)
-	MemoryTotal uint64    `json:"memory_total"` // 内存总量(bytes)
-	SwapUsed    uint64    `json:"swap_used"`    // Swap使用量(bytes)
-	SwapTotal   uint64    `json:"swap_total"`   // Swap总量(bytes)
-	DiskUsed    uint64    `json:"disk_used"`    // 磁盘使用量(bytes)
-	DiskTotal   uint64    `json:"disk_total"`   // 磁盘总量(bytes)
-	NetworkIn   float64   `json:"network_in"`   // 网络入流量(bytes/s)
-	NetworkOut  float64   `json:"network_out"`  // 网络出流量(bytes/s)
-	LoadAvg1    float64   `json:"load_avg_1"`   // 1分钟平均负载
-	LoadAvg5    float64   `json:"load_avg_5"`   // 5分钟平均负载
-	LoadAvg15   float64   `json:"load_avg_15"`  // 15分钟平均负载
-	BootTime    uint64    `json:"boot_time"`    // 系统启动时间戳
-	Latency     float64   `json:"latency"`      // 延迟(ms)
-	PacketLoss  float64   `json:"packet_loss"`  // 丢包率(%)
+	ServerID       uint      `gorm:"index:idx_server_timestamp" json:"server_id"`
+	Timestamp      time.Time `gorm:"index:idx_server_timestamp" json:"timestamp"`
+	CPUUsage       float64   `json:"cpu_usage"`       // CPU使用率百分比
+	MemoryUsed     uint64    `json:"memory_used"`     // 内存使用量(bytes)
+	MemoryTotal    uint64    `json:"memory_total"`    // 内存总量(bytes)
+	SwapUsed       uint64    `json:"swap_used"`       // Swap使用量(bytes)
+	SwapTotal      uint64    `json:"swap_total"`      // Swap总量(bytes)
+	DiskUsed       uint64    `json:"disk_used"`       // 磁盘使用量(bytes)
+	DiskTotal      uint64    `json:"disk_total"`      // 磁盘总量(bytes)
+	NetworkIn      float64   `json:"network_in"`      // 网络入流量(bytes/s)
+	NetworkOut     float64   `json:"network_out"`     // 网络出流量(bytes/s)
+	LoadAvg1       float64   `json:"load_avg_1"`      // 1分钟平均负载
+	LoadAvg5       float64   `json:"load_avg_5"`      // 5分钟平均负载
+	LoadAvg15      float64   `json:"load_avg_15"`     // 15分钟平均负载
+	BootTime       uint64    `json:"boot_time"`       // 系统启动时间戳
+	Latency        float64   `json:"latency"`         // 延迟(ms)
+	PacketLoss     float64   `json:"packet_loss"`     // 丢包率(%)
+	Processes      int       `json:"processes"`       // 进程数
+	TCPConnections int       `json:"tcp_connections"` // TCP连接数
+	UDPConnections int       `json:"udp_connections"` // UDP连接数
 }
 
 // ServerMonitorData 服务器监控数据
