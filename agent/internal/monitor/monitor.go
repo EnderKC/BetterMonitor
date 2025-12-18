@@ -15,6 +15,7 @@ import (
 	"github.com/shirou/gopsutil/v4/load"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/user/server-ops-agent/pkg/logger"
 )
 
@@ -36,21 +37,24 @@ type SystemInfo struct {
 
 // MonitorData 监控数据结构
 type MonitorData struct {
-	CPUUsage    float64 `json:"cpu_usage"`
-	MemoryUsed  uint64  `json:"memory_used"`
-	MemoryTotal uint64  `json:"memory_total"`
-	DiskUsed    uint64  `json:"disk_used"`
-	DiskTotal   uint64  `json:"disk_total"`
-	NetworkIn   float64 `json:"network_in"`
-	NetworkOut  float64 `json:"network_out"`
-	LoadAvg1    float64 `json:"load_avg_1"`
-	LoadAvg5    float64 `json:"load_avg_5"`
-	LoadAvg15   float64 `json:"load_avg_15"`
-	SwapUsed    uint64  `json:"swap_used"`
-	SwapTotal   uint64  `json:"swap_total"`
-	BootTime    uint64  `json:"boot_time"`
-	Latency     float64 `json:"latency"`     // 延迟(ms)
-	PacketLoss  float64 `json:"packet_loss"` // 丢包率(%)
+	CPUUsage       float64 `json:"cpu_usage"`
+	MemoryUsed     uint64  `json:"memory_used"`
+	MemoryTotal    uint64  `json:"memory_total"`
+	DiskUsed       uint64  `json:"disk_used"`
+	DiskTotal      uint64  `json:"disk_total"`
+	NetworkIn      float64 `json:"network_in"`
+	NetworkOut     float64 `json:"network_out"`
+	LoadAvg1       float64 `json:"load_avg_1"`
+	LoadAvg5       float64 `json:"load_avg_5"`
+	LoadAvg15      float64 `json:"load_avg_15"`
+	SwapUsed       uint64  `json:"swap_used"`
+	SwapTotal      uint64  `json:"swap_total"`
+	BootTime       uint64  `json:"boot_time"`
+	Latency        float64 `json:"latency"`         // 延迟(ms)
+	PacketLoss     float64 `json:"packet_loss"`     // 丢包率(%)
+	Processes      int     `json:"processes"`       // 进程数
+	TCPConnections int     `json:"tcp_connections"` // TCP连接数
+	UDPConnections int     `json:"udp_connections"` // UDP连接数
 }
 
 // Monitor 系统监控器
@@ -414,23 +418,60 @@ func (m *Monitor) GetMonitorData() (*MonitorData, error) {
 	// 测量延迟和丢包率
 	latency, packetLoss := m.MeasureLatency()
 
+	// 获取进程数
+	var processCount int = 0
+	procs, err := process.Processes()
+	if err != nil {
+		m.log.Warn("获取进程列表失败: %v", err)
+		// 尝试使用备用方法统计进程数
+		processCount = 0
+	} else {
+		processCount = len(procs)
+		m.log.Debug("进程数: %d", processCount)
+	}
+
+	// 获取TCP/UDP连接数 - 分别获取以提高稳定性
+	var tcpCount int = 0
+	var udpCount int = 0
+
+	// 先尝试获取TCP连接
+	tcpConnections, err := net.Connections("tcp")
+	if err != nil {
+		m.log.Warn("获取TCP连接失败: %v", err)
+	} else {
+		tcpCount = len(tcpConnections)
+		m.log.Debug("TCP连接数: %d", tcpCount)
+	}
+
+	// 再获取UDP连接
+	udpConnections, err := net.Connections("udp")
+	if err != nil {
+		m.log.Warn("获取UDP连接失败: %v", err)
+	} else {
+		udpCount = len(udpConnections)
+		m.log.Debug("UDP连接数: %d", udpCount)
+	}
+
 	// 构造监控数据
 	return &MonitorData{
-		CPUUsage:    cpuUsage,
-		MemoryUsed:  memoryUsed,
-		MemoryTotal: memoryTotal,
-		DiskUsed:    diskUsed,
-		DiskTotal:   diskTotal,
-		NetworkIn:   networkIn,
-		NetworkOut:  networkOut,
-		LoadAvg1:    loadAvg1,
-		LoadAvg5:    loadAvg5,
-		LoadAvg15:   loadAvg15,
-		SwapUsed:    swapUsed,
-		SwapTotal:   swapTotal,
-		BootTime:    bootTime,
-		Latency:     latency,
-		PacketLoss:  packetLoss,
+		CPUUsage:       cpuUsage,
+		MemoryUsed:     memoryUsed,
+		MemoryTotal:    memoryTotal,
+		DiskUsed:       diskUsed,
+		DiskTotal:      diskTotal,
+		NetworkIn:      networkIn,
+		NetworkOut:     networkOut,
+		LoadAvg1:       loadAvg1,
+		LoadAvg5:       loadAvg5,
+		LoadAvg15:      loadAvg15,
+		SwapUsed:       swapUsed,
+		SwapTotal:      swapTotal,
+		BootTime:       bootTime,
+		Latency:        latency,
+		PacketLoss:     packetLoss,
+		Processes:      processCount,
+		TCPConnections: tcpCount,
+		UDPConnections: udpCount,
 	}, nil
 }
 

@@ -17,6 +17,70 @@ import (
 	"github.com/user/server-ops-backend/utils"
 )
 
+// maskIP 对 IP 地址进行脱敏处理
+func maskIP(rawIP string) string {
+	rawIP = strings.TrimSpace(rawIP)
+	if rawIP == "" {
+		return ""
+	}
+
+	// 处理多个IP地址
+	if strings.ContainsAny(rawIP, ",; ") {
+		var maskedIPs []string
+		for _, ip := range strings.FieldsFunc(rawIP, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\t'
+		}) {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				maskedIPs = append(maskedIPs, maskIP(ip))
+			}
+		}
+		return strings.Join(maskedIPs, ", ")
+	}
+
+	// 提取zone id
+	zone := ""
+	if idx := strings.Index(rawIP, "%"); idx >= 0 {
+		zone = rawIP[idx:]
+		rawIP = rawIP[:idx]
+	}
+
+	isIPv6 := strings.Contains(rawIP, ":")
+	if !isIPv6 {
+		parts := strings.Split(rawIP, ".")
+		if len(parts) == 4 {
+			maskedIP := parts[0] + "." + parts[1] + ".*.*"
+			if zone != "" {
+				maskedIP += zone
+			}
+			return maskedIP
+		}
+		return "****"
+	}
+
+	segments := strings.Split(rawIP, ":")
+	var nonEmptySegments []string
+	for _, seg := range segments {
+		if seg != "" {
+			nonEmptySegments = append(nonEmptySegments, seg)
+		}
+	}
+
+	var maskedIP string
+	if len(nonEmptySegments) >= 2 {
+		maskedIP = nonEmptySegments[0] + ":" + nonEmptySegments[1] + ":****:****:****:****:****:****"
+	} else if len(nonEmptySegments) == 1 {
+		maskedIP = nonEmptySegments[0] + ":****:****:****:****:****:****:****"
+	} else {
+		maskedIP = "****:****:****:****:****:****:****:****"
+	}
+
+	if zone != "" {
+		maskedIP += zone
+	}
+	return maskedIP
+}
+
 // WebSocket消息类型常量
 const (
 	TypeShellCommand    = "shell_command"
@@ -498,13 +562,29 @@ func handlePublicWebSocket(conn *SafeConn, server *models.Server, interrupt chan
 		Message    string          `json:"message"`
 		ServerID   uint            `json:"server_id"`
 		SystemInfo json.RawMessage `json:"system_info"`
-		Status     string          `json:"status"` // 添加状态字段
+		Status     string          `json:"status"`
+		Name       string          `json:"name"`
+		Hostname   string          `json:"hostname"`
+		IP         string          `json:"ip"`
+		OS         string          `json:"os"`
+		Arch       string          `json:"arch"`
+		CPUCores   int             `json:"cpu_cores"`
+		CPUModel   string          `json:"cpu_model"`
+		Region     string          `json:"region"`
 	}{
 		Type:       "welcome",
 		Message:    "连接成功，服务器ID: " + strconv.Itoa(int(server.ID)),
 		ServerID:   server.ID,
 		SystemInfo: safeSystemInfo(server),
-		Status:     server.Status, // 添加状态字段
+		Status:     server.Status,
+		Name:       server.Name,
+		Hostname:   server.Hostname,
+		IP:         maskIP(server.IP),
+		OS:         server.OS,
+		Arch:       server.Arch,
+		CPUCores:   server.CPUCores,
+		CPUModel:   server.CPUModel,
+		Region:     server.CountryCode,
 	}
 
 	log.Printf("向服务器 %d 的WebSocket发送欢迎消息", server.ID)
@@ -638,6 +718,18 @@ func buildMonitorData(server *models.Server, monitor *models.ServerMonitor) map[
 		"network_out_total": server.NetworkOutTotal,
 		"latency":           monitor.Latency,
 		"packet_loss":       monitor.PacketLoss,
+	}
+
+	// 只有当进程数、TCP/UDP连接数大于0时才发送这些字段
+	// 避免用旧数据或无效数据覆盖前端已显示的正常值
+	if monitor.Processes > 0 {
+		data["processes"] = monitor.Processes
+	}
+	if monitor.TCPConnections > 0 {
+		data["tcp_connections"] = monitor.TCPConnections
+	}
+	if monitor.UDPConnections > 0 {
+		data["udp_connections"] = monitor.UDPConnections
 	}
 
 	// 兼容旧数据中未设置的延迟/丢包
@@ -1474,53 +1566,53 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				log.Printf("警告: 收到的Nginx响应消息没有请求ID")
 			}
 
-			case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
-				"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload":
-				// 处理文件 / 容器文件操作响应
-				var fileResponse struct {
-					Type      string                 `json:"type"`
-					RequestID string                 `json:"request_id"`
-					Data      map[string]interface{} `json:"data"`
-				}
-				if err := json.Unmarshal(message, &fileResponse); err != nil {
-					log.Printf("解析文件响应消息失败: %v", err)
-					continue
-				}
-				// 调用文件控制器的响应处理函数
-				if fileResponse.RequestID != "" {
-					HandleFileResponse(fileResponse.RequestID, map[string]interface{}{
-						"type": fileResponse.Type,
-						"data": fileResponse.Data,
-					})
-				}
-			case "agent_upgrade_response":
-				// Agent 升级进度/结果回传（用于日志/后续扩展 UI 显示）。
-				// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现“未知类型/错误”噪音。
-				if !isAgent {
-					continue
-				}
-
-				var upgradeResp struct {
-					Type      string                 `json:"type"`
-					RequestID string                 `json:"request_id"`
-					Data      map[string]interface{} `json:"data"`
-				}
-				if err := json.Unmarshal(message, &upgradeResp); err != nil {
-					log.Printf("解析Agent升级响应失败: %v", err)
-					continue
-				}
-
-				status, _ := upgradeResp.Data["status"].(string)
-				msgText, _ := upgradeResp.Data["message"].(string)
-				if status != "" || msgText != "" {
-					log.Printf("收到Agent升级状态: server=%d request_id=%s status=%s message=%s", server.ID, upgradeResp.RequestID, status, msgText)
-				} else {
-					log.Printf("收到Agent升级响应: server=%d request_id=%s", server.ID, upgradeResp.RequestID)
-				}
-			default:
-				log.Printf("未知的消息类型: %s", msg.Type)
-				sendErrorMessage(conn, "未知的消息类型")
+		case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
+			"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload":
+			// 处理文件 / 容器文件操作响应
+			var fileResponse struct {
+				Type      string                 `json:"type"`
+				RequestID string                 `json:"request_id"`
+				Data      map[string]interface{} `json:"data"`
 			}
+			if err := json.Unmarshal(message, &fileResponse); err != nil {
+				log.Printf("解析文件响应消息失败: %v", err)
+				continue
+			}
+			// 调用文件控制器的响应处理函数
+			if fileResponse.RequestID != "" {
+				HandleFileResponse(fileResponse.RequestID, map[string]interface{}{
+					"type": fileResponse.Type,
+					"data": fileResponse.Data,
+				})
+			}
+		case "agent_upgrade_response":
+			// Agent 升级进度/结果回传（用于日志/后续扩展 UI 显示）。
+			// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现“未知类型/错误”噪音。
+			if !isAgent {
+				continue
+			}
+
+			var upgradeResp struct {
+				Type      string                 `json:"type"`
+				RequestID string                 `json:"request_id"`
+				Data      map[string]interface{} `json:"data"`
+			}
+			if err := json.Unmarshal(message, &upgradeResp); err != nil {
+				log.Printf("解析Agent升级响应失败: %v", err)
+				continue
+			}
+
+			status, _ := upgradeResp.Data["status"].(string)
+			msgText, _ := upgradeResp.Data["message"].(string)
+			if status != "" || msgText != "" {
+				log.Printf("收到Agent升级状态: server=%d request_id=%s status=%s message=%s", server.ID, upgradeResp.RequestID, status, msgText)
+			} else {
+				log.Printf("收到Agent升级响应: server=%d request_id=%s", server.ID, upgradeResp.RequestID)
+			}
+		default:
+			log.Printf("未知的消息类型: %s", msg.Type)
+			sendErrorMessage(conn, "未知的消息类型")
+		}
 	}
 }
 

@@ -148,6 +148,55 @@ func GetServerStatus(c *gin.Context) {
 	})
 }
 
+// GetPublicServerMonitor 获取服务器监控历史数据（公开API，不需要认证）
+func GetPublicServerMonitor(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
+		return
+	}
+
+	// 验证服务器是否存在
+	server, err := models.GetServerByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
+		return
+	}
+	_ = server // 服务器存在即可，不需要额外检查
+
+	// 获取查询参数
+	hoursStr := c.DefaultQuery("hours", "1")
+	hours, err := strconv.Atoi(hoursStr)
+	if err != nil || hours <= 0 {
+		hours = 1
+	}
+
+	// 限制最大查询时间为24小时
+	if hours > 24 {
+		hours = 24
+	}
+
+	endTime := time.Now()
+	startTime := endTime.Add(-time.Duration(hours) * time.Hour)
+
+	// 获取监控数据
+	data, err := models.GetServerMonitorData(id, startTime, endTime)
+	if err != nil {
+		log.Printf("[ERROR] 获取服务器ID=%d公开监控数据失败: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取监控数据失败"})
+		return
+	}
+
+	log.Printf("[DEBUG] 公开监控数据查询: server_id=%d, hours=%d, 数据条数=%d", id, hours, len(data))
+
+	// 如果数据量太大，进行采样
+	if len(data) > 500 {
+		data = sampleMonitorData(data, 500)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": data})
+}
+
 // UpdateServer 更新服务器信息
 func UpdateServer(c *gin.Context) {
 	id, err := parseUintParam(c, "id")
@@ -529,6 +578,11 @@ func UpdateAgentSystemInfo(c *gin.Context) {
 		log.Printf("[DEBUG] 更新MemoryTotal字段: %d", server.MemoryTotal)
 	}
 
+	if hostname, ok := systemInfoData["hostname"].(string); ok && hostname != "" {
+		server.Hostname = hostname
+		log.Printf("[DEBUG] 更新Hostname字段: %s", hostname)
+	}
+
 	// 从系统信息中提取磁盘总量并更新
 	if diskTotal, ok := systemInfoData["disk_total"].(float64); ok && diskTotal > 0 {
 		server.DiskTotal = int64(diskTotal)
@@ -556,6 +610,7 @@ func UpdateAgentSystemInfo(c *gin.Context) {
 		"cpu_model":    server.CPUModel,
 		"memory_total": server.MemoryTotal,
 		"disk_total":   server.DiskTotal,
+		"hostname":     server.Hostname,
 	}
 
 	if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {

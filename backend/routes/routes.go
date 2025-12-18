@@ -45,6 +45,9 @@ func SetupRoutes(r *gin.Engine) {
 		// 公开的服务器状态API (前端检查状态)
 		api.GET("/servers/:id/status", controllers.GetServerStatus)
 
+		// 公开的服务器监控历史数据API (探针页面使用)
+		api.GET("/servers/public/:id/monitor", controllers.GetPublicServerMonitor)
+
 		// 公开的前端设置API (探针页面使用)
 		api.GET("/public/settings", controllers.GetPublicSettings)
 

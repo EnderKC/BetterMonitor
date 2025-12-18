@@ -53,14 +53,25 @@ func CreateAlertSetting(c *gin.Context) {
 		return
 	}
 
-	if setting.Threshold <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "阈值必须大于0"})
-		return
-	}
-
-	if setting.Duration <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间必须大于0秒"})
-		return
+	// 不同类型的阈值/持续时间含义不同：status 的 threshold=1/2/3，duration 允许为0（上线通知时无意义，离线可表示立即通知）
+	if setting.Type == "status" {
+		if setting.Threshold != 1 && setting.Threshold != 2 && setting.Threshold != 3 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "状态预警阈值必须为1(上线)、2(离线)或3(上下线)"})
+			return
+		}
+		if setting.Duration < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间不能为负数"})
+			return
+		}
+	} else {
+		if setting.Threshold <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "阈值必须大于0"})
+			return
+		}
+		if setting.Duration <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间必须大于0秒"})
+			return
+		}
 	}
 
 	if err := models.CreateAlertSetting(&setting); err != nil {
@@ -97,31 +108,36 @@ func UpdateAlertSetting(c *gin.Context) {
 		return
 	}
 
-	// 验证字段
-	if setting.Type == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "预警类型不能为空"})
-		return
-	}
+	// 防止修改不应该修改的字段（先恢复，再按真实类型做校验，避免用“请求体里的 type”绕过校验）
+	setting.ID = uint(id)
+	setting.Type = oldType         // 不允许修改预警类型
+	setting.ServerID = oldServerID // 不允许修改服务器ID
 
 	if setting.Type != "cpu" && setting.Type != "memory" && setting.Type != "network" && setting.Type != "status" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "预警类型必须是cpu、memory、network或status"})
 		return
 	}
 
-	if setting.Threshold <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "阈值必须大于0"})
-		return
+	// 不同类型的阈值/持续时间含义不同：status 的 threshold=1/2/3，duration 允许为0
+	if setting.Type == "status" {
+		if setting.Threshold != 1 && setting.Threshold != 2 && setting.Threshold != 3 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "状态预警阈值必须为1(上线)、2(离线)或3(上下线)"})
+			return
+		}
+		if setting.Duration < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间不能为负数"})
+			return
+		}
+	} else {
+		if setting.Threshold <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "阈值必须大于0"})
+			return
+		}
+		if setting.Duration <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间必须大于0秒"})
+			return
+		}
 	}
-
-	if setting.Duration <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "持续时间必须大于0秒"})
-		return
-	}
-
-	// 防止修改不应该修改的字段
-	setting.ID = uint(id)
-	setting.Type = oldType         // 不允许修改预警类型
-	setting.ServerID = oldServerID // 不允许修改服务器ID
 
 	if err := models.UpdateAlertSetting(&setting); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新预警设置失败"})
@@ -500,4 +516,3 @@ func ResolveAlertRecord(c *gin.Context) {
 		"record":  record,
 	})
 }
- 

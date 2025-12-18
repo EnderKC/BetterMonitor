@@ -28,6 +28,7 @@
             <a-select-option value="cpu">CPU 使用率</a-select-option>
             <a-select-option value="memory">内存使用率</a-select-option>
             <a-select-option value="network">网络流量</a-select-option>
+            <a-select-option value="status">服务器状态</a-select-option>
           </a-select>
         </a-col>
         <a-col :span="6">
@@ -190,6 +191,7 @@ export default defineComponent({
         case 'cpu': return 'blue';
         case 'memory': return 'orange';
         case 'network': return 'green';
+        case 'status': return 'purple';
         default: return 'default';
       }
     };
@@ -199,6 +201,7 @@ export default defineComponent({
         case 'cpu': return 'CPU 使用率';
         case 'memory': return '内存使用率';
         case 'network': return '网络流量';
+        case 'status': return '服务器状态';
         default: return type;
       }
     };
@@ -210,6 +213,8 @@ export default defineComponent({
           return `${record.value.toFixed(2)}%`;
         case 'network':
           return `${record.value.toFixed(2)} MB/s`;
+        case 'status':
+          return record.value >= 1 ? '在线' : '离线';
         default:
           return record.value;
       }
@@ -222,6 +227,13 @@ export default defineComponent({
           return `${record.threshold}%`;
         case 'network':
           return `${record.threshold} MB/s`;
+        case 'status':
+          switch (record.threshold) {
+            case 1: return '上线时';
+            case 2: return '离线时';
+            case 3: return '上下线';
+            default: return record.threshold;
+          }
         default:
           return record.threshold;
       }

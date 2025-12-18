@@ -593,12 +593,8 @@ function emptyBarOption(text: string) {
 <template>
   <div class="life-probe-detail">
     <div class="detail-header">
-      <a-page-header
-        class="page-header"
-        :title="pageTitle"
-        :sub-title="`设备ID: ${summary?.device_id || '--'}`"
-        @back="onBack"
-      >
+      <a-page-header class="page-header" :title="pageTitle" :sub-title="`设备ID: ${summary?.device_id || '--'}`"
+        @back="onBack">
         <template #extra>
           <a-radio-group v-model:value="timeRange" button-style="solid" size="middle">
             <a-radio-button value="24h">24小时</a-radio-button>
@@ -612,12 +608,7 @@ function emptyBarOption(text: string) {
     <div class="detail-content">
       <a-spin :spinning="loading" tip="加载中...">
         <div v-if="errorMessage && !loading" class="error-state">
-          <a-alert
-            type="error"
-            show-icon
-            :message="errorMessage"
-            description="请检查网络连接或稍后重试"
-          />
+          <a-alert type="error" show-icon :message="errorMessage" description="请检查网络连接或稍后重试" />
         </div>
         <template v-else>
           <div v-if="details" class="life-detail-body">
@@ -637,11 +628,8 @@ function emptyBarOption(text: string) {
                 <p class="label">睡眠时长</p>
                 <div style="display: flex; align-items: baseline; gap: 12px;">
                   <h3>{{ sleepDuration }}</h3>
-                  <a-tag
-                    v-if="sleepQualityRating.level !== 'unknown'"
-                    :color="sleepQualityRating.color"
-                    style="font-size: 14px; font-weight: 600; padding: 4px 12px; border-radius: 6px;"
-                  >
+                  <a-tag v-if="sleepQualityRating.level !== 'unknown'" :color="sleepQualityRating.color"
+                    style="font-size: 14px; font-weight: 600; padding: 4px 12px; border-radius: 6px;">
                     {{ sleepQualityRating.label }}
                   </a-tag>
                 </div>
@@ -746,9 +734,9 @@ function emptyBarOption(text: string) {
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 20px;
-  margin-bottom: 32px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .overview-card {
@@ -756,7 +744,7 @@ function emptyBarOption(text: string) {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 16px;
   box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -779,7 +767,7 @@ function emptyBarOption(text: string) {
 
 .overview-card h3 {
   margin: 0;
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -795,13 +783,17 @@ function emptyBarOption(text: string) {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 768px) {
+  .overview-grid {
+    grid-template-columns: 1fr !important;
+  }
+
   .chart-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -810,7 +802,7 @@ function emptyBarOption(text: string) {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 16px;
   box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -827,7 +819,7 @@ function emptyBarOption(text: string) {
 .chart-title {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   color: var(--text-primary);
   display: flex;
   align-items: center;
@@ -836,7 +828,7 @@ function emptyBarOption(text: string) {
 
 .chart {
   width: 100%;
-  height: 320px;
+  height: 240px;
 }
 </style>
 
@@ -847,22 +839,15 @@ function emptyBarOption(text: string) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.dark .overview-card {
-  background: rgba(30, 30, 30, 0.6);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.dark .overview-card:hover {
-  background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(255, 77, 79, 0.4);
-}
-
+.dark .overview-card,
 .dark .chart-card {
   background: rgba(30, 30, 30, 0.6);
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+.dark .overview-card:hover,
 .dark .chart-card:hover {
   background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(22, 119, 255, 0.4);
 }
 </style>

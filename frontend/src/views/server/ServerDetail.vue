@@ -70,6 +70,11 @@ type MonitorDataType = {
     in: DataPoint[];
     out: DataPoint[];
   };
+  processes: DataPoint[];
+  connections: {
+    tcp: DataPoint[];
+    udp: DataPoint[];
+  };
 };
 
 // 服务器监控数据
@@ -80,6 +85,11 @@ const monitorData = ref<MonitorDataType>({
   network: {
     in: [],
     out: []
+  },
+  processes: [],
+  connections: {
+    tcp: [],
+    udp: []
   }
 });
 
@@ -637,6 +647,70 @@ const hasMonitorData = computed(() => {
     monitorData.value.network.in.length > 0;
 });
 
+// 计算当前实时数据
+const currentCpuUsage = computed(() => {
+  const data = monitorData.value.cpu;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentMemoryUsage = computed(() => {
+  const data = monitorData.value.memory;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentDiskUsage = computed(() => {
+  const data = monitorData.value.disk;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentNetworkIn = computed(() => {
+  const data = monitorData.value.network.in;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentNetworkOut = computed(() => {
+  const data = monitorData.value.network.out;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentProcesses = computed(() => {
+  const data = monitorData.value.processes;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentTcpConnections = computed(() => {
+  const data = monitorData.value.connections.tcp;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentUdpConnections = computed(() => {
+  const data = monitorData.value.connections.udp;
+  return data.length > 0 ? data[data.length - 1].value : 0;
+});
+
+const currentNetworkTotal = computed(() => {
+  return currentNetworkIn.value + currentNetworkOut.value;
+});
+
+// 格式化字节
+const formatBytes = (bytes: number) => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+// 格式化运行时间
+const uptimeText = computed(() => {
+  if (!serverInfo.value.last_seen) return '未知';
+  // 这里假设last_seen是最后心跳时间，不是启动时间。
+  // 如果没有启动时间字段，我们只能显示最后在线时间。
+  // ServerDetail.vue 似乎没有 boot_time。
+  // 我们暂时显示 "最后在线: " + formatTime(serverInfo.value.last_seen)
+  return formatTime(serverInfo.value.last_seen);
+});
+
 // 建立WebSocket连接获取实时监控数据
 const connectWebSocket = () => {
   // 获取token
@@ -1079,6 +1153,39 @@ const updateMonitorData = (data: any) => {
     }
   }
 
+  // 更新进程数
+  if (data.processes !== undefined) {
+    monitorData.value.processes.push({
+      time: currentTime,
+      value: Number(data.processes)
+    });
+    if (monitorData.value.processes.length > maxDataPoints) {
+      monitorData.value.processes.shift();
+    }
+  }
+
+  // 更新TCP连接数
+  if (data.tcp_connections !== undefined) {
+    monitorData.value.connections.tcp.push({
+      time: currentTime,
+      value: Number(data.tcp_connections)
+    });
+    if (monitorData.value.connections.tcp.length > maxDataPoints) {
+      monitorData.value.connections.tcp.shift();
+    }
+  }
+
+  // 更新UDP连接数
+  if (data.udp_connections !== undefined) {
+    monitorData.value.connections.udp.push({
+      time: currentTime,
+      value: Number(data.udp_connections)
+    });
+    if (monitorData.value.connections.udp.length > maxDataPoints) {
+      monitorData.value.connections.udp.shift();
+    }
+  }
+
   // 添加初始数据点，如果没有数据的话
   if (monitorData.value.cpu.length === 0) {
     monitorData.value.cpu.push({ time: currentTime, value: 0 });
@@ -1094,6 +1201,15 @@ const updateMonitorData = (data: any) => {
   }
   if (monitorData.value.network.out.length === 0) {
     monitorData.value.network.out.push({ time: currentTime, value: 0 });
+  }
+  if (monitorData.value.processes.length === 0) {
+    monitorData.value.processes.push({ time: currentTime, value: 0 });
+  }
+  if (monitorData.value.connections.tcp.length === 0) {
+    monitorData.value.connections.tcp.push({ time: currentTime, value: 0 });
+  }
+  if (monitorData.value.connections.udp.length === 0) {
+    monitorData.value.connections.udp.push({ time: currentTime, value: 0 });
   }
 
   console.log('监控数据更新完成:', monitorData.value);
@@ -1137,7 +1253,12 @@ const updateMonitorData = (data: any) => {
             <div class="icon-placeholder">{{ serverInfo.os ? serverInfo.os.charAt(0).toUpperCase() : 'S' }}</div>
           </div>
           <div class="server-title-area">
-            <h1 class="server-title">{{ serverInfo.name }}</h1>
+            <h1 class="server-title">
+              {{ serverInfo.name }}
+              <span v-if="serverInfo.hostname && serverInfo.hostname !== '未知'" class="hostname-tag">{{
+                serverInfo.hostname
+              }}</span>
+            </h1>
             <div class="server-meta">
               <span class="meta-item">{{ serverInfo.ip }}</span>
               <span class="meta-dot">•</span>
@@ -1153,146 +1274,112 @@ const updateMonitorData = (data: any) => {
 
       <!-- 内容区域 -->
       <div class="ios-content">
-        <a-tabs default-active-key="info" class="ios-tabs" :animated="false">
-          <a-tab-pane key="info" tab="概览">
-            <div class="ios-card-grid">
-              <!-- 基本信息卡片 -->
-              <div class="ios-card glass-card">
-                <div class="card-header">
-                  <h3>基本信息</h3>
-                </div>
-                <div class="ios-list">
-                  <div class="list-item">
-                    <span class="label">ID</span>
-                    <span class="value">{{ serverInfo.id }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">主机名</span>
-                    <span class="value">{{ serverInfo.hostname || '未知' }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">系统版本</span>
-                    <span class="value">{{ serverInfo.os_version || '未知' }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">内核版本</span>
-                    <span class="value">{{ serverInfo.kernel_version || '未知' }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">最后在线</span>
-                    <span class="value">{{ formatTime(serverInfo.last_seen) }}</span>
-                  </div>
-                </div>
-              </div>
+        <!-- 概览卡片网格 -->
+        <div class="overview-grid">
+          <!-- 状态与运行时间 -->
+          <div class="overview-card">
+            <p class="label">运行状态</p>
+            <div class="status-value">
+              <div class="status-dot" :class="{ online: isServerOnline }"></div>
+              <h3>{{ isServerOnline ? '在线' : '离线' }}</h3>
+            </div>
+            <small>最后在线 {{ uptimeText }}</small>
+          </div>
 
-              <!-- 硬件配置卡片 -->
-              <div class="ios-card glass-card">
-                <div class="card-header">
-                  <h3>硬件配置</h3>
-                </div>
-                <div class="ios-list">
-                  <div class="list-item">
-                    <span class="label">CPU型号</span>
-                    <span class="value">{{ serverInfo.cpu_model || '未知' }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">核心数</span>
-                    <span class="value">{{ serverInfo.cpu_cores || '未知' }} 核</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">内存总量</span>
-                    <span class="value">{{ serverInfo.memory_total ? `${(serverInfo.memory_total / 1024 / 1024 /
-                      1024).toFixed(2)} GB` : '未知' }}</span>
-                  </div>
-                  <div class="list-divider"></div>
-                  <div class="list-item">
-                    <span class="label">磁盘总量</span>
-                    <span class="value">{{ serverInfo.disk_total ? `${(serverInfo.disk_total / 1024 / 1024 /
-                      1024).toFixed(2)}
-                      GB` : '未知' }}</span>
-                  </div>
-                </div>
-              </div>
+          <!-- CPU -->
+          <div class="overview-card">
+            <p class="label">CPU</p>
+            <h3>{{ currentCpuUsage.toFixed(1) }}%</h3>
+            <small>{{ serverInfo.cpu_cores }} 核 • {{ serverInfo.cpu_model || 'Unknown' }}</small>
+          </div>
 
-              <!-- 描述卡片 -->
-              <div class="ios-card glass-card full-width">
-                <div class="card-header">
-                  <h3>备注描述</h3>
-                </div>
-                <div class="card-body">
-                  <p class="description-text">{{ serverInfo.description || '暂无描述' }}</p>
-                </div>
+          <!-- 内存 -->
+          <div class="overview-card">
+            <p class="label">内存</p>
+            <h3>{{ currentMemoryUsage.toFixed(1) }}%</h3>
+            <small>总量: {{ serverInfo.memory_total ? formatBytes(serverInfo.memory_total) : '未知' }}</small>
+          </div>
+
+          <!-- 磁盘 -->
+          <div class="overview-card">
+            <p class="label">磁盘</p>
+            <h3>{{ currentDiskUsage.toFixed(1) }}%</h3>
+            <small>总量: {{ serverInfo.disk_total ? formatBytes(serverInfo.disk_total) : '未知' }}</small>
+          </div>
+
+          <!-- 网络 -->
+          <div class="overview-card">
+            <p class="label">网络速率</p>
+            <div class="network-speeds">
+              <div class="speed-item">
+                <span class="arrow up">↑</span>
+                <span class="speed-value">{{ currentNetworkOut.toFixed(2) }} MB/s</span>
+              </div>
+              <div class="speed-item">
+                <span class="arrow down">↓</span>
+                <span class="speed-value">{{ currentNetworkIn.toFixed(2) }} MB/s</span>
               </div>
             </div>
-          </a-tab-pane>
+            <small>实时速率</small>
+          </div>
 
-          <a-tab-pane key="resource" tab="监控">
-            <div class="monitor-panel" v-if="isServerOnline && wsConnected">
-              <div class="ios-card-grid">
-                <div class="ios-card glass-card chart-card">
-                  <div class="card-header">
-                    <h3>CPU 使用率</h3>
-                  </div>
-                  <div class="chart-container">
-                    <v-chart class="chart" :option="cpuChartOption" autoresize />
-                  </div>
-                </div>
+          <!-- 进程数 -->
+          <div class="overview-card">
+            <p class="label">进程数</p>
+            <h3>{{ currentProcesses }}</h3>
+            <small>活跃进程</small>
+          </div>
 
-                <div class="ios-card glass-card chart-card">
-                  <div class="card-header">
-                    <h3>内存使用率</h3>
-                  </div>
-                  <div class="chart-container">
-                    <v-chart class="chart" :option="memoryChartOption" autoresize />
-                  </div>
-                </div>
+          <!-- TCP连接 -->
+          <div class="overview-card">
+            <p class="label">TCP连接</p>
+            <h3>{{ currentTcpConnections }}</h3>
+            <small>建立连接</small>
+          </div>
 
-                <div class="ios-card glass-card chart-card">
-                  <div class="card-header">
-                    <h3>磁盘使用率</h3>
-                  </div>
-                  <div class="chart-container">
-                    <v-chart class="chart" :option="diskChartOption" autoresize />
-                  </div>
-                </div>
+          <!-- UDP连接 -->
+          <div class="overview-card">
+            <p class="label">UDP连接</p>
+            <h3>{{ currentUdpConnections }}</h3>
+            <small>活跃连接</small>
+          </div>
 
-                <div class="ios-card glass-card chart-card">
-                  <div class="card-header">
-                    <h3>网络流量</h3>
-                  </div>
-                  <div class="chart-container">
-                    <v-chart class="chart" :option="networkChartOption" autoresize />
-                  </div>
-                </div>
-              </div>
+          <!-- 系统信息 -->
+          <div class="overview-card">
+            <p class="label">系统信息</p>
+            <div class="system-info-row">
+              <span class="sys-item">{{ serverInfo.os_version || serverInfo.os }}</span>
             </div>
+            <small>{{ serverInfo.arch }} • {{ serverInfo.hostname }}</small>
+          </div>
 
-            <!-- 状态提示 -->
-            <div v-else class="status-alert-container">
-              <div class="ios-alert" v-if="!isServerOnline">
-                <div class="alert-icon warning">!</div>
-                <div class="alert-content">
-                  <h4>服务器离线</h4>
-                  <p>无法获取实时监控数据，请检查服务器状态。</p>
-                </div>
-              </div>
+          <!-- 描述 (全宽) -->
+          <div class="overview-card full-width" v-if="serverInfo.description">
+            <p class="label">备注</p>
+            <p class="description-text">{{ serverInfo.description }}</p>
+          </div>
+        </div>
 
-              <div class="ios-alert" v-if="isServerOnline && !wsConnected">
-                <div class="alert-icon info">i</div>
-                <div class="alert-content">
-                  <h4>连接断开</h4>
-                  <p>实时监控连接已断开，<a @click="connectWebSocket">点击重连</a></p>
-                </div>
-              </div>
+
+
+        <!-- 状态提示 -->
+        <div v-if="!isServerOnline || !wsConnected" class="status-alert-container">
+          <div class="ios-alert" v-if="!isServerOnline">
+            <div class="alert-icon warning">!</div>
+            <div class="alert-content">
+              <h4>服务器离线</h4>
+              <p>无法获取实时监控数据，请检查服务器状态。</p>
             </div>
-          </a-tab-pane>
-        </a-tabs>
+          </div>
+
+          <div class="ios-alert" v-if="isServerOnline && !wsConnected">
+            <div class="alert-icon info">i</div>
+            <div class="alert-content">
+              <h4>连接断开</h4>
+              <p>实时监控连接已断开，<a @click="connectWebSocket">点击重连</a></p>
+            </div>
+          </div>
+        </div>
       </div>
     </a-spin>
   </div>
@@ -1435,119 +1522,182 @@ const updateMonitorData = (data: any) => {
   padding: 0 8px;
 }
 
-.ios-card-grid {
+.overview-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 24px;
-  margin-top: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
 }
 
-.ios-card {
-  padding: 0;
-  overflow: hidden;
+.overview-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--card-border);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  flex-direction: column;
 }
 
-.full-width {
-  grid-column: span 2;
+.overview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
+  border-color: rgba(22, 119, 255, 0.3);
 }
 
-.card-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+.overview-card.full-width {
+  grid-column: 1 / -1;
 }
 
-.card-header h3 {
-  margin: 0;
-  font-size: 17px;
+.overview-card .label {
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.card-body {
-  padding: 24px;
+.overview-card h3 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+.overview-card small {
+  display: block;
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: normal;
+  overflow: visible;
 }
 
 .description-text {
   color: var(--text-secondary);
   line-height: 1.6;
   margin: 0;
+  font-size: 14px;
 }
 
-/* iOS List Style */
-.ios-list {
-  padding: 0 24px;
+/* Specific Card Styles */
+.status-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.list-item {
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #ff4d4f;
+  box-shadow: 0 0 8px rgba(255, 77, 79, 0.4);
+}
+
+.status-dot.online {
+  background-color: #52c41a;
+  box-shadow: 0 0 8px rgba(82, 196, 26, 0.4);
+}
+
+.network-speeds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.speed-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speed-value {
+  font-family: "SF Mono", Menlo, monospace;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.arrow {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.arrow.up {
+  color: #52c41a;
+}
+
+.arrow.down {
+  color: #1677ff;
+}
+
+/* Monitor Section */
+.monitor-cards-section {
+  margin-top: 32px;
+}
+
+.section-header {
   display: flex;
   justify-content: space-between;
-  padding: 16px 0;
-  font-size: 15px;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
-.list-divider {
-  height: 1px;
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.list-item .label {
-  color: var(--text-secondary);
-}
-
-.list-item .value {
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
   color: var(--text-primary);
-  font-weight: 500;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Mono", Menlo, monospace;
+  margin: 0;
 }
 
-/* Charts */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 24px;
+}
+
 .chart-card {
-  height: 380px;
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--card-border);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  height: 320px;
   display: flex;
   flex-direction: column;
 }
 
+.chart-card:hover {
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
+}
+
+.chart-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+}
+
 .chart-container {
   flex: 1;
-  padding: 16px;
   width: 100%;
+  min-height: 0;
 }
 
 .chart {
   width: 100%;
   height: 100%;
-}
-
-/* Tabs Customization */
-:deep(.ant-tabs-nav) {
-  margin-bottom: 0;
-}
-
-:deep(.ant-tabs-nav::before) {
-  border-bottom: none;
-}
-
-:deep(.ant-tabs-tab) {
-  padding: 8px 20px;
-  margin: 0 4px 0 0;
-  border-radius: 20px;
-  transition: all 0.3s;
-  font-size: 15px;
-  color: var(--text-secondary);
-}
-
-:deep(.ant-tabs-tab-active) {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-:deep(.ant-tabs-tab-active .ant-tabs-tab-btn) {
-  color: var(--text-primary);
-  font-weight: 600;
-  text-shadow: none;
-}
-
-:deep(.ant-tabs-ink-bar) {
-  display: none;
 }
 
 /* Alerts */
@@ -1602,14 +1752,31 @@ const updateMonitorData = (data: any) => {
   font-size: 14px;
 }
 
-/* Responsive */
+/* Dark Mode Overrides */
+:global(.dark) .ios-header {
+  background: rgba(20, 20, 20, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:global(.dark) .overview-card,
+:global(.dark) .chart-card {
+  background: rgba(30, 30, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .overview-card:hover,
+:global(.dark) .chart-card:hover {
+  background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(22, 119, 255, 0.4);
+}
+
 @media (max-width: 768px) {
-  .ios-card-grid {
-    grid-template-columns: 1fr;
+  .overview-grid {
+    grid-template-columns: 1fr !important;
   }
 
-  .full-width {
-    grid-column: span 1;
+  .chart-grid {
+    grid-template-columns: 1fr !important;
   }
 
   .header-top {
