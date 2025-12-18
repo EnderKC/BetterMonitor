@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/utils"
+	"gorm.io/gorm"
 )
 
 // 全局AlertService实例
@@ -18,6 +20,9 @@ var (
 	globalAlertService *AlertService
 	alertServiceOnce   sync.Once
 )
+
+// serverHeartbeatTimeout 用于估算“离线开始时间”，需要与 models.CheckServerStatus 的超时时间保持一致
+const serverHeartbeatTimeout = 15 * time.Second
 
 // MetricState 指标状态缓存结构
 type MetricState struct {
@@ -86,11 +91,6 @@ func (s *AlertService) checkAllServers() {
 		return
 	}
 
-	// 如果没有任何设置，跳过检查
-	if len(globalSettings) == 0 {
-		return
-	}
-
 	// 将设置转换为map便于查找
 	settingsMap := make(map[string]models.AlertSetting)
 	for _, setting := range globalSettings {
@@ -133,7 +133,7 @@ func (s *AlertService) checkAllServers() {
 		if statusSetting, ok := settings["status"]; ok {
 			s.checkServerStatus(server, statusSetting, channels)
 		}
-		
+
 		// 只对在线服务器检查资源指标
 		if !server.Online {
 			continue
@@ -198,7 +198,7 @@ func (s *AlertService) checkMetric(
 			state.Value = value
 			state.Alerted = false
 			s.metricStates[metricType][server.ID] = state
-			log.Printf("服务器 %s(%d) 的 %s 指标开始超过阈值: 当前值=%.2f, 阈值=%.2f", 
+			log.Printf("服务器 %s(%d) 的 %s 指标开始超过阈值: 当前值=%.2f, 阈值=%.2f",
 				server.Name, server.ID, metricType, value, setting.Threshold)
 			return
 		}
@@ -237,13 +237,13 @@ func (s *AlertService) triggerAlert(
 
 	// 创建预警记录
 	record := models.AlertRecord{
-		ServerID:    server.ID,
-		ServerName:  server.Name,
-		AlertType:   metricType,
-		Value:       value,
-		Threshold:   setting.Threshold,
-		Resolved:    false,
-		NotifiedAt:  time.Now(),
+		ServerID:   server.ID,
+		ServerName: server.Name,
+		AlertType:  metricType,
+		Value:      value,
+		Threshold:  setting.Threshold,
+		Resolved:   false,
+		NotifiedAt: time.Now(),
 	}
 
 	// 收集成功通知的渠道ID
@@ -262,16 +262,21 @@ func (s *AlertService) triggerAlert(
 }
 
 // resolveAlert 记录预警解决
-func (s *AlertService) resolveAlert(metricType string, server models.Server, value float64) {
-	log.Printf("预警解除: 服务器 %s(%d), 类型 %s, 当前值 %.2f",
-		server.Name, server.ID, metricType, value)
-
+// 返回值表示是否找到并成功标记了解决（未找到记录视为未解决任何内容，属于正常情况）
+func (s *AlertService) resolveAlert(metricType string, server models.Server, value float64) bool {
 	// 查找最近的未解决预警
 	record, err := models.GetLatestUnresolvedAlert(server.ID, metricType)
 	if err != nil {
+		// 未找到记录属于正常情况：比如告警未触发就恢复、或已被手动解决
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false
+		}
 		log.Printf("查找未解决预警失败: %v", err)
-		return
+		return false
 	}
+
+	log.Printf("预警解除: 服务器 %s(%d), 类型 %s, 当前值 %.2f",
+		server.Name, server.ID, metricType, value)
 
 	// 更新为已解决
 	record.Resolved = true
@@ -292,6 +297,7 @@ func (s *AlertService) resolveAlert(metricType string, server models.Server, val
 			s.sendResolutionNotification(channel, *record, value)
 		}
 	}
+	return true
 }
 
 // sendNotification 发送通知
@@ -341,7 +347,7 @@ func (s *AlertService) sendNotification(channel models.NotificationChannel, aler
 // sendEmailNotification 发送邮件通知
 func (s *AlertService) sendEmailNotification(config map[string]string, title, content string) bool {
 	emailConfig := utils.ParseEmailConfig(config)
-	
+
 	// 构建HTML内容
 	htmlContent := fmt.Sprintf(`
 		<html>
@@ -478,6 +484,12 @@ func (s *AlertService) sendResolutionNotification(channel models.NotificationCha
 		title = fmt.Sprintf("服务器 %s 网络流量已恢复", alert.ServerName)
 		content = fmt.Sprintf("服务器 %s 的网络流量已恢复至 %.2f MB/s, 低于预设阈值 %.2f MB/s",
 			alert.ServerName, currentValue, alert.Threshold)
+	case "status":
+		title = fmt.Sprintf("服务器 %s 已恢复在线", alert.ServerName)
+		content = fmt.Sprintf("服务器 %s (ID: %d) 已恢复在线。\n时间: %s",
+			alert.ServerName,
+			alert.ServerID,
+			time.Now().Format("2006-01-02 15:04:05"))
 	default:
 		title = fmt.Sprintf("服务器 %s 预警已解除", alert.ServerName)
 		content = fmt.Sprintf("服务器 %s 的 %s 指标已恢复至 %.2f, 低于预设阈值 %.2f",
@@ -508,15 +520,48 @@ func (s *AlertService) mergeSettings(global map[string]models.AlertSetting, serv
 		result[k] = v
 	}
 
-	// 用服务器特定设置覆盖全局设置
+	// 用服务器特定设置覆盖/禁用全局设置
 	for _, setting := range serverSettings {
 		if setting.Enabled {
 			result[setting.Type] = setting
+		} else {
+			// 显式禁用：允许服务器级别关闭继承的全局预警
+			delete(result, setting.Type)
 		}
 	}
 
 	return result
-} 
+}
+
+func statusValueFromOnline(online bool) float64 {
+	if online {
+		return 1.0
+	}
+	return 0.0
+}
+
+func offlineSince(server models.Server, now time.Time) time.Time {
+	// 服务器从未上报心跳时，避免用零值时间导致“立刻超时”的误报
+	if server.LastHeartbeat.IsZero() {
+		return now
+	}
+	t := server.LastHeartbeat.Add(serverHeartbeatTimeout)
+	if t.After(now) {
+		return now
+	}
+	return t
+}
+
+func (s *AlertService) triggerStatusOfflineAlert(server models.Server, setting models.AlertSetting, channels []models.NotificationChannel) {
+	// 避免服务重启/状态缓存丢失时重复发送离线告警：如果数据库里已经有未解决的 status 记录，则跳过
+	if _, err := models.GetLatestUnresolvedAlert(server.ID, "status"); err == nil {
+		return
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("查找未解决状态预警失败: %v", err)
+	}
+
+	s.sendStatusAlert(server, setting, channels, false)
+}
 
 // 新增方法：检查服务器状态变化
 func (s *AlertService) checkServerStatus(
@@ -533,58 +578,71 @@ func (s *AlertService) checkServerStatus(
 		s.metricStates["status"] = make(map[uint]MetricState)
 	}
 
+	now := time.Now()
+	currentStatus := statusValueFromOnline(server.Online)
+
 	// 获取旧状态
 	oldState, exists := s.metricStates["status"][server.ID]
-	
-	// 首次检测到服务器，记录其状态
+
+	// 首次检测到服务器：记录其状态，并且如果当前就是离线，初始化离线计时，避免服务重启/首次发现离线时永远不报警
 	if !exists {
-		s.metricStates["status"][server.ID] = MetricState{
-			Value: func() float64 {
-				if server.Online {
-					return 1.0
-				}
-				return 0.0
-			}(),
+		state := MetricState{
+			Value:      currentStatus,
 			ExceedTime: time.Time{},
-			Alerted: false,
+			Alerted:    false,
 		}
+
+		if currentStatus == 0.0 {
+			state.ExceedTime = offlineSince(server, now)
+			// 离线报警（阈值为2或3）
+			if setting.Threshold == 2 || setting.Threshold == 3 {
+				offlineDuration := now.Sub(state.ExceedTime).Seconds()
+				if setting.Duration <= 0 || offlineDuration >= float64(setting.Duration) {
+					s.triggerStatusOfflineAlert(server, setting, channels)
+					state.Alerted = true
+				}
+			}
+		}
+
+		s.metricStates["status"][server.ID] = state
 		return
 	}
-	
-	// 检查状态是否变化
-	currentStatus := func() float64 {
-		if server.Online {
-			return 1.0
-		}
-		return 0.0
-	}()
-	
-	// 状态变化或者状态持续超过阈值时处理
-	now := time.Now()
-	
+
 	if oldState.Value == 1.0 && currentStatus == 0.0 {
 		// 状态从在线变为离线
 		log.Printf("服务器 %s(ID:%d) 状态变化: 在线 -> 离线", server.Name, server.ID)
-		// 记录开始离线的时间
-		s.metricStates["status"][server.ID] = MetricState{
-			Value: 0.0,
-			ExceedTime: now, // 记录开始离线时间
-			Alerted: false,
+		// 记录开始离线的时间（尽量使用心跳时间推算，避免延迟/重启导致误差）
+		state := MetricState{
+			Value:      0.0,
+			ExceedTime: offlineSince(server, now),
+			Alerted:    false,
 		}
+
+		// 如果设置了离线报警（阈值为2或3）且持续时间为0，则立即报警
+		if (setting.Threshold == 2 || setting.Threshold == 3) && setting.Duration <= 0 {
+			s.triggerStatusOfflineAlert(server, setting, channels)
+			state.Alerted = true
+		}
+
+		s.metricStates["status"][server.ID] = state
 	} else if oldState.Value == 0.0 && currentStatus == 1.0 {
 		// 状态从离线变为在线
 		log.Printf("服务器 %s(ID:%d) 状态变化: 离线 -> 在线", server.Name, server.ID)
-		
-		// 处理上线通知（如果设置了上线通知）
-		if setting.Threshold == 1 || setting.Threshold == 3 {
+
+		// 若之前存在未解决的离线告警，则先自动解决并发送恢复通知（避免“只显示未解决”里永远挂着）
+		// 若未找到记录（比如离线未达到阈值就恢复，或已被手动解决），resolved=false
+		resolved := s.resolveAlert("status", server, currentStatus)
+
+		// 如果配置了上线通知，并且没有触发过离线告警（也就不会有恢复通知），则发送一次“上线事件”通知
+		if (setting.Threshold == 1 || setting.Threshold == 3) && !resolved {
 			s.sendStatusAlert(server, setting, channels, true)
 		}
-		
+
 		// 重置状态
 		s.metricStates["status"][server.ID] = MetricState{
-			Value: 1.0,
+			Value:      1.0,
 			ExceedTime: time.Time{},
-			Alerted: false,
+			Alerted:    false,
 		}
 	} else if currentStatus == 0.0 && !oldState.Alerted && !oldState.ExceedTime.IsZero() {
 		// 服务器持续离线，检查是否超过持续时间阈值
@@ -595,17 +653,21 @@ func (s *AlertService) checkServerStatus(
 			if duration >= float64(setting.Duration) {
 				log.Printf("服务器 %s(ID:%d) 离线持续时间 %.2f 秒，超过阈值 %d 秒，触发报警",
 					server.Name, server.ID, duration, setting.Duration)
-				
-				s.sendStatusAlert(server, setting, channels, false)
-				
+
+				s.triggerStatusOfflineAlert(server, setting, channels)
+
 				// 更新状态，标记已经发送报警
 				s.metricStates["status"][server.ID] = MetricState{
-					Value: 0.0,
+					Value:      0.0,
 					ExceedTime: oldState.ExceedTime,
-					Alerted: true,
+					Alerted:    true,
 				}
 			}
 		}
+	} else if currentStatus == 0.0 && oldState.ExceedTime.IsZero() {
+		// 容错：如果状态缓存没有记录离线开始时间，则补上
+		oldState.ExceedTime = offlineSince(server, now)
+		s.metricStates["status"][server.ID] = oldState
 	}
 }
 
@@ -621,17 +683,23 @@ func (s *AlertService) sendStatusAlert(
 	if isOnline {
 		alertValue = 1.0
 	}
-	
+
 	// 创建预警记录
 	record := models.AlertRecord{
-		ServerID:    server.ID,
-		ServerName:  server.Name,
-		AlertType:   alertType,
-		Value:       alertValue,
-		Threshold:   setting.Threshold,
-		Resolved:    true, // 状态预警不需要解决
-		ResolvedAt:  time.Now(),
-		NotifiedAt:  time.Now(),
+		ServerID:   server.ID,
+		ServerName: server.Name,
+		AlertType:  alertType,
+		Value:      alertValue,
+		Threshold:  setting.Threshold,
+		NotifiedAt: time.Now(),
+	}
+	// 离线告警需要在恢复在线后自动解决；上线通知作为事件记录，默认视为已解决
+	if isOnline {
+		record.Resolved = true
+		record.ResolvedAt = time.Now()
+	} else {
+		record.Resolved = false
+		record.ResolvedAt = time.Time{}
 	}
 
 	// 收集成功通知的渠道ID
@@ -641,10 +709,10 @@ func (s *AlertService) sendStatusAlert(
 			channelIDs = append(channelIDs, strconv.FormatUint(uint64(channel.ID), 10))
 		}
 	}
-	
+
 	// 记录通知渠道
 	record.ChannelIDs = strings.Join(channelIDs, ",")
-	
+
 	// 保存预警记录
 	if err := models.CreateAlertRecord(&record); err != nil {
 		log.Printf("保存状态预警记录失败: %v", err)
@@ -653,7 +721,7 @@ func (s *AlertService) sendStatusAlert(
 
 // 新增方法：发送服务器状态变化通知
 func (s *AlertService) sendStatusNotification(
-	channel models.NotificationChannel, 
+	channel models.NotificationChannel,
 	alert models.AlertRecord,
 	isOnline bool,
 ) bool {
@@ -662,19 +730,19 @@ func (s *AlertService) sendStatusNotification(
 		status = "离线"
 	}
 	title := fmt.Sprintf("【服务器%s】%s", status, alert.ServerName)
-	content := fmt.Sprintf("服务器 %s (ID: %d) 已%s，请关注。\n时间: %s", 
-		alert.ServerName, 
-		alert.ServerID, 
+	content := fmt.Sprintf("服务器 %s (ID: %d) 已%s，请关注。\n时间: %s",
+		alert.ServerName,
+		alert.ServerID,
 		status,
 		time.Now().Format("2006-01-02 15:04:05"))
-	
+
 	// 解析配置
 	config, err := channel.GetChannelConfig()
 	if err != nil {
 		log.Printf("解析通知渠道配置失败: %v", err)
 		return false
 	}
-	
+
 	// 根据渠道类型发送通知
 	switch channel.Type {
 	case "email":
@@ -685,5 +753,4 @@ func (s *AlertService) sendStatusNotification(
 		log.Printf("不支持的通知渠道类型: %s", channel.Type)
 		return false
 	}
-} 
- 
+}
