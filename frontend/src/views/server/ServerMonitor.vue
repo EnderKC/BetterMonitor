@@ -56,10 +56,10 @@ const getStatusType = (online: boolean): string => {
 
 // 添加一个判断是否有数据的计算属性
 const hasData = computed(() => {
-  return monitorData.cpu.length > 0 || 
-         monitorData.memory.length > 0 || 
-         monitorData.disk.length > 0 || 
-         monitorData.network.in.length > 0;
+  return monitorData.cpu.length > 0 ||
+    monitorData.memory.length > 0 ||
+    monitorData.disk.length > 0 ||
+    monitorData.network.in.length > 0;
 });
 
 // 图表实例
@@ -116,84 +116,84 @@ const maxHeartbeatFails = 3;
 // 获取历史监控数据
 const fetchHistoricalData = async () => {
   if (!serverId.value) return;
-  
+
   try {
     loading.value = true;
     clearMonitorData();
-    
+
     // 计算时间范围
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - (settingsStore.chartHistoryHours * 60 * 60 * 1000));
-    
+
     // 以非UTC格式构建日期参数，避免时区转换问题
     const startTimeStr = startTime.toISOString();
     const endTimeStr = endTime.toISOString();
-    
+
     // 构建API请求URL，添加时间范围参数
     const url = `/servers/${serverId.value}/monitor`;
-    const params = { 
-      start_time: startTimeStr, 
+    const params = {
+      start_time: startTimeStr,
       end_time: endTimeStr
     };
-    
+
     console.log('发送历史监控数据请求:', { url, params, startTime, endTime });
-    
+
     // 添加详细日志，记录完整请求信息
     const response = await request.get(url, { params });
-    
+
     // 输出完整响应以便调试
     console.log('历史监控数据API完整响应:', JSON.stringify(response));
     console.log('响应类型:', typeof response);
-    
+
     // 检查响应是否为空
     if (!response) {
       console.error('获取历史数据失败：响应为空');
       message.error('无法获取监控历史数据：服务器未返回数据');
       return;
     }
-    
+
     let historicalData = [];
-    
+
     // 由于axios拦截器已经返回了response.data，这里的response就是实际的数据
     if (Array.isArray(response)) {
-        // 如果响应直接是数组
-        console.log('响应数据是数组');
+      // 如果响应直接是数组
+      console.log('响应数据是数组');
       historicalData = response;
     } else if (response && Array.isArray(response.data)) {
-        // 如果响应是 { data: [...] } 格式
-        console.log('响应数据是 { data: [...] } 格式');
+      // 如果响应是 { data: [...] } 格式
+      console.log('响应数据是 { data: [...] } 格式');
       historicalData = response.data;
     } else if (response && typeof response === 'object') {
-        // 如果响应是对象但没有data字段，尝试其他可能的字段
-        console.log('响应数据是对象，检查可能的数据字段');
+      // 如果响应是对象但没有data字段，尝试其他可能的字段
+      console.log('响应数据是对象，检查可能的数据字段');
       const possibleFields = ['data', 'records', 'items', 'result', 'results', 'list', 'history'];
-        for (const field of possibleFields) {
+      for (const field of possibleFields) {
         if (Array.isArray(response[field])) {
-            console.log(`找到可能的数据字段: ${field}`);
+          console.log(`找到可能的数据字段: ${field}`);
           historicalData = response[field];
-            break;
+          break;
         }
       }
     }
-    
-	    console.log(`获取到 ${historicalData.length} 条历史监控数据:`, historicalData);
-	    
-	    if (historicalData.length === 0) {
-	      console.warn('没有历史监控数据，可能的原因：1. 时间范围内无数据 2. 数据格式不匹配 3. 服务器未返回数据');
-	      message.info('暂无监控历史数据（仅展示实时数据；需要 Agent 上报后才会产生历史记录）');
-	      updateCharts();
-	      return;
-	    }
-	    
-	    // 按时间排序数据
-	    const sortedData = [...historicalData].sort((a, b) => {
-	      const timeA = new Date(a.timestamp || a.created_at || a.time || 0).getTime();
+
+    console.log(`获取到 ${historicalData.length} 条历史监控数据:`, historicalData);
+
+    if (historicalData.length === 0) {
+      console.warn('没有历史监控数据，可能的原因：1. 时间范围内无数据 2. 数据格式不匹配 3. 服务器未返回数据');
+      message.info('暂无监控历史数据（仅展示实时数据；需要 Agent 上报后才会产生历史记录）');
+      updateCharts();
+      return;
+    }
+
+    // 按时间排序数据
+    const sortedData = [...historicalData].sort((a, b) => {
+      const timeA = new Date(a.timestamp || a.created_at || a.time || 0).getTime();
       const timeB = new Date(b.timestamp || b.created_at || b.time || 0).getTime();
       return timeA - timeB;
     });
-    
+
     console.log('排序后的数据:', sortedData);
-    
+
     // 处理历史数据
     sortedData.forEach((entry) => {
       // 尝试获取时间戳字段，支持多种格式
@@ -202,13 +202,13 @@ const fetchHistoricalData = async () => {
         console.warn('条目缺少时间戳字段:', entry);
         return; // 跳过没有时间戳的条目
       }
-      
+
       // 格式化时间
       const timestamp = new Date(rawTimestamp);
       const timeStr = timestamp.toLocaleTimeString('zh-CN', { hour12: false });
       const dateStr = timestamp.toLocaleDateString('zh-CN');
       const fullTimeStr = `${dateStr} ${timeStr}`;
-      
+
       // 记录原始值和处理后的值，帮助调试
       console.log('处理数据项:', {
         time: fullTimeStr,
@@ -220,7 +220,7 @@ const fetchHistoricalData = async () => {
         network_in: entry.network_in,
         network_out: entry.network_out
       });
-      
+
       // CPU数据 - 支持多种字段名
       const cpuRawValue = entry.cpu_usage || entry.cpu || entry.cpu_percent || 0;
       let cpuValue = parseFloat((cpuRawValue).toFixed(2));
@@ -232,11 +232,11 @@ const fetchHistoricalData = async () => {
         time: fullTimeStr,
         value: cpuValue
       });
-      
+
       // 内存数据 - 确保使用正确的单位，支持多种字段名
       const memoryRawValue = entry.memory_used || entry.memory || entry.mem_used || entry.mem || 0;
       const memoryTotalValue = entry.memory_total || entry.mem_total || 0;
-      
+
       let memoryPercent = 0;
       if (typeof memoryRawValue === 'number') {
         if (memoryRawValue <= 100) {
@@ -249,11 +249,11 @@ const fetchHistoricalData = async () => {
         time: fullTimeStr,
         value: parseFloat(memoryPercent.toFixed(2))
       });
-      
+
       // 磁盘数据 - 确保使用正确的单位，支持多种字段名
       const diskRawValue = entry.disk_used || entry.disk || entry.disk_percent || 0;
       const diskTotalValue = entry.disk_total || 0;
-      
+
       let diskPercent = 0;
       if (typeof diskRawValue === 'number') {
         if (diskRawValue <= 100) {
@@ -266,45 +266,45 @@ const fetchHistoricalData = async () => {
         time: fullTimeStr,
         value: parseFloat(diskPercent.toFixed(2))
       });
-      
+
       // 网络数据 - 转换为MB/s，支持多种字段名
       const networkInRaw = entry.network_in || entry.net_in || entry.rx_bytes || 0;
       const networkOutRaw = entry.network_out || entry.net_out || entry.tx_bytes || 0;
-      
+
       const networkInMB = convertToMB(networkInRaw);
       const networkOutMB = convertToMB(networkOutRaw);
-      
+
       monitorData.network.in.push({
         time: fullTimeStr,
         value: parseFloat(networkInMB.toFixed(2))
       });
-      
+
       monitorData.network.out.push({
         time: fullTimeStr,
         value: parseFloat(networkOutMB.toFixed(2))
       });
-      
+
       // 系统负载数据，支持多种字段名
       const load1 = entry.load_avg_1 || entry.load1 || entry.load_1 || 0;
       const load5 = entry.load_avg_5 || entry.load5 || entry.load_5 || 0;
       const load15 = entry.load_avg_15 || entry.load15 || entry.load_15 || 0;
-      
+
       monitorData.load.load1.push({
         time: fullTimeStr,
         value: parseFloat((load1).toFixed(2))
       });
-      
+
       monitorData.load.load5.push({
         time: fullTimeStr,
         value: parseFloat((load5).toFixed(2))
       });
-      
+
       monitorData.load.load15.push({
         time: fullTimeStr,
         value: parseFloat((load15).toFixed(2))
       });
     });
-    
+
     console.log('处理后的监控数据:', {
       cpu: monitorData.cpu.length,
       memory: monitorData.memory.length,
@@ -317,10 +317,10 @@ const fetchHistoricalData = async () => {
         load15: monitorData.load.load15.length
       }
     });
-    
+
     // 更新图表
     updateCharts();
-    
+
   } catch (error) {
     console.error('获取历史监控数据失败:', error);
     if (error.response) {
@@ -335,7 +335,7 @@ const fetchHistoricalData = async () => {
 // 添加工具函数：转换网络流量到MB
 const convertToMB = (value: number): number => {
   if (!value) return 0;
-  
+
   // 输入值为字节/秒，直接转换为MB/s
   return value / (1024 * 1024);
 };
@@ -352,7 +352,7 @@ const initCharts = () => {
         networkEl: !!networkChartRef.value,
         loadEl: !!loadChartRef.value
       });
-      
+
       // 初始化CPU图表
       if (cpuChartRef.value) {
         if (cpuChart) {
@@ -360,7 +360,7 @@ const initCharts = () => {
         }
         cpuChart = echarts.init(cpuChartRef.value);
       }
-      
+
       // 初始化内存图表
       if (memoryChartRef.value) {
         if (memoryChart) {
@@ -368,7 +368,7 @@ const initCharts = () => {
         }
         memoryChart = echarts.init(memoryChartRef.value);
       }
-      
+
       // 初始化磁盘图表
       if (diskChartRef.value) {
         if (diskChart) {
@@ -376,7 +376,7 @@ const initCharts = () => {
         }
         diskChart = echarts.init(diskChartRef.value);
       }
-      
+
       // 初始化网络图表
       if (networkChartRef.value) {
         if (networkChart) {
@@ -384,7 +384,7 @@ const initCharts = () => {
         }
         networkChart = echarts.init(networkChartRef.value);
       }
-      
+
       // 初始化负载图表
       if (loadChartRef.value) {
         if (loadChart) {
@@ -392,17 +392,17 @@ const initCharts = () => {
         }
         loadChart = echarts.init(loadChartRef.value);
       }
-      
-	      // 更新图表数据
-	      updateCharts();
-	      
-	      // 添加窗口大小变化监听
-	      window.removeEventListener('resize', handleResize);
-	      window.addEventListener('resize', handleResize);
-	      
-	    } catch (error) {
-	      console.error('初始化图表时出错:', error);
-	    }
+
+      // 更新图表数据
+      updateCharts();
+
+      // 添加窗口大小变化监听
+      window.removeEventListener('resize', handleResize);
+      window.addEventListener('resize', handleResize);
+
+    } catch (error) {
+      console.error('初始化图表时出错:', error);
+    }
   });
 };
 
@@ -434,12 +434,12 @@ const updateCharts = () => {
           load15: monitorData.load.load15.length
         }
       });
-      
+
       // CPU图表
       if (cpuChart) {
         const cpuOption = {
           title: { text: 'CPU使用率', left: 'center' },
-          tooltip: { 
+          tooltip: {
             trigger: 'axis',
             formatter: '{b}<br />CPU: {c}%',
             axisPointer: {
@@ -503,7 +503,7 @@ const updateCharts = () => {
       if (memoryChart) {
         const memoryOption = {
           title: { text: '内存使用率', left: 'center' },
-          tooltip: { 
+          tooltip: {
             trigger: 'axis',
             formatter: '{b}<br />内存: {c}%',
             axisPointer: {
@@ -567,7 +567,7 @@ const updateCharts = () => {
       if (diskChart) {
         const diskOption = {
           title: { text: '磁盘使用率', left: 'center' },
-          tooltip: { 
+          tooltip: {
             trigger: 'axis',
             formatter: '{b}<br />磁盘: {c}%',
             axisPointer: {
@@ -740,7 +740,7 @@ const updateCharts = () => {
                 backgroundColor: '#6a7985'
               }
             },
-            formatter: function(params: any[]) {
+            formatter: function (params: any[]) {
               const time = params[0].name;
               let result = `${time}<br />`;
               params.forEach(param => {
@@ -832,19 +832,19 @@ const connectWebSocket = () => {
     console.log('WebSocket连接已存在且处于活跃状态，不需要重新连接');
     return;
   }
-  
+
   // 获取token
   const token = localStorage.getItem('server_ops_token');
   if (!token) {
     message.error('未登录，无法获取实时数据');
     return;
   }
-  
+
   // 关闭之前的连接（如果存在）
   if (ws && ws.readyState !== WebSocket.CLOSED) {
     console.log('关闭之前的WebSocket连接');
     // 确保在关闭连接时不会触发重连
-    ws.onclose = null; 
+    ws.onclose = null;
     try {
       ws.close();
     } catch (e) {
@@ -852,30 +852,30 @@ const connectWebSocket = () => {
     }
     ws = null;
   }
-  
+
   // 清除之前的心跳定时器
   if (heartbeatInterval) {
     console.log('清除之前的心跳定时器');
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  
+
   // 重置心跳失败计数
   heartbeatFailCount = 0;
-  
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   // 修正WebSocket URL，更明确地指定监控专用路径
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId.value}/monitor-ws?token=${encodeURIComponent(token)}`;
-  
+
   console.log('正在连接监控WebSocket:', wsUrl);
-  
+
   // 设置连接标志
   connecting.value = true;
   wsConnected.value = false;
-  
+
   try {
     ws = new WebSocket(wsUrl);
-    
+
     // 设置超时处理，如果10秒内没有连接成功则认为失败
     const connectionTimeout = setTimeout(() => {
       if (ws && ws.readyState !== WebSocket.OPEN) {
@@ -889,7 +889,7 @@ const connectWebSocket = () => {
         connecting.value = false;
         wsConnected.value = false;
         message.error('连接超时，请稍后重试');
-        
+
         // 超时也尝试自动重连，但使用更长的延迟
         setTimeout(() => {
           if (!wsConnected.value && !connecting.value) {
@@ -898,7 +898,7 @@ const connectWebSocket = () => {
         }, 5000);
       }
     }, 10000);
-    
+
     ws.onopen = () => {
       clearTimeout(connectionTimeout);
       console.log('WebSocket连接成功打开');
@@ -906,24 +906,24 @@ const connectWebSocket = () => {
       connecting.value = false;
       reconnectCount.value = 0; // 成功连接后重置重连计数
       message.success('实时监控已连接');
-      
+
       // 服务器在线时更新服务器状态
       if (serverInfo.value && !isOnline.value) {
         serverInfo.value.status = 'online';
         // 同步更新到store
         serverStore.updateServerStatus(serverId.value, 'online');
       }
-      
+
       // 添加心跳机制，每30秒发送一次心跳包
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
-      
+
       // 获取系统设置中配置的UI刷新间隔，作为心跳间隔
       // 如果尚未加载设置或无法获取，则默认使用30秒
       const heartbeatMs = settingsStore.loaded ? settingsStore.getUiRefreshIntervalMs() : 30000;
       console.log('设置心跳间隔:', heartbeatMs, 'ms');
-      
+
       heartbeatInterval = window.setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           console.log('发送心跳包');
@@ -935,7 +935,7 @@ const connectWebSocket = () => {
           } catch (error) {
             console.error('心跳发送失败:', error);
             heartbeatFailCount++;
-            
+
             // 如果连续发送心跳失败次数达到上限，关闭连接并重连
             if (heartbeatFailCount >= maxHeartbeatFails) {
               console.log(`心跳失败${maxHeartbeatFails}次，关闭连接并尝试重连`);
@@ -943,13 +943,13 @@ const connectWebSocket = () => {
                 clearInterval(heartbeatInterval);
                 heartbeatInterval = null;
               }
-              
+
               if (ws) {
                 ws.onclose = null; // 禁用onclose回调，避免触发自动重连
                 ws.close();
                 ws = null;
               }
-              
+
               // 短暂延迟后重连
               setTimeout(() => {
                 if (!wsConnected.value && !connecting.value) {
@@ -967,15 +967,15 @@ const connectWebSocket = () => {
         }
       }, heartbeatMs);
     };
-    
+
     ws.onmessage = (event) => {
       try {
         console.log('收到WebSocket消息:', event.data);
         const data = JSON.parse(event.data);
-        
+
         // 重置心跳失败计数（收到任何消息都视为连接正常）
         heartbeatFailCount = 0;
-        
+
         // 更新监控数据
         if (data.type === 'monitor') {
           console.log('收到监控数据:', data.data);
@@ -991,13 +991,13 @@ const connectWebSocket = () => {
             // 同步更新到store
             serverStore.updateServerStatus(serverId.value, data.status);
           }
-          
+
           // 检查图表是否已初始化，如果没有则初始化
           if (!cpuChart || !memoryChart || !diskChart || !networkChart || !loadChart) {
             console.log('图表未完全初始化，正在重新初始化...');
             initCharts();
           }
-          
+
           // 处理嵌套的data字段
           if (data.data) {
             // 更新本地图表数据
@@ -1010,7 +1010,7 @@ const connectWebSocket = () => {
             // 同步数据到store
             serverStore.updateServerMonitorData(serverId.value, data);
           }
-        } 
+        }
         // 处理欢迎消息，可能包含服务器信息
         else if (data.type === 'welcome') {
           console.log('收到欢迎消息:', data);
@@ -1022,18 +1022,18 @@ const connectWebSocket = () => {
             last_heartbeat_time: data.last_seen ? new Date(data.last_seen * 1000) : serverInfo.value.last_heartbeat_time
           };
           serverStore.updateServerStatus(serverId.value, serverInfo.value.status);
-          
+
           if (data.system_info) {
-            serverStore.updateServerMonitorData(serverId.value, { 
+            serverStore.updateServerMonitorData(serverId.value, {
               system_info: data.system_info,
-              status: serverInfo.value.status 
+              status: serverInfo.value.status
             });
           }
         }
         // 处理心跳响应
         else if (data.type === 'heartbeat') {
           console.log('收到心跳响应');
-          
+
           // 如果心跳包含状态信息，更新服务器状态
           if (data.status && serverInfo.value) {
             console.log('从心跳响应更新服务器状态:', data.status);
@@ -1046,18 +1046,18 @@ const connectWebSocket = () => {
             // 同步更新到store
             serverStore.updateServerStatus(serverId.value, data.data.status);
           }
-          
+
           // 检查心跳消息是否包含监控数据
           // 首先检查data字段
           if (data.data) {
             // 检查data字段中是否有必要的监控数据
-            const hasMonitorData = 
-              data.data.cpu_usage !== undefined || 
-              data.data.memory_used !== undefined || 
+            const hasMonitorData =
+              data.data.cpu_usage !== undefined ||
+              data.data.memory_used !== undefined ||
               data.data.disk_used !== undefined ||
               data.data.network_in !== undefined ||
               data.data.load_avg_1 !== undefined;
-            
+
             if (hasMonitorData) {
               console.log('心跳消息的data字段包含监控数据，更新图表');
               updateMonitorData(data.data);
@@ -1068,13 +1068,13 @@ const connectWebSocket = () => {
             }
           } else {
             // 检查心跳消息本身是否直接包含监控数据
-            const hasDirectMonitorData = 
-              data.cpu_usage !== undefined || 
-              data.memory_used !== undefined || 
+            const hasDirectMonitorData =
+              data.cpu_usage !== undefined ||
+              data.memory_used !== undefined ||
               data.disk_used !== undefined ||
               data.network_in !== undefined ||
               data.load_avg_1 !== undefined;
-            
+
             if (hasDirectMonitorData) {
               console.log('心跳消息本身包含监控数据，更新图表');
               updateMonitorData(data);
@@ -1099,7 +1099,7 @@ const connectWebSocket = () => {
         console.error('解析WebSocket消息失败:', error, '原始消息:', event.data);
       }
     };
-    
+
     ws.onerror = (error) => {
       clearTimeout(connectionTimeout);
       console.error('WebSocket发生错误:', error);
@@ -1112,7 +1112,7 @@ const connectWebSocket = () => {
       }
       message.error('监控连接发生错误');
     };
-    
+
     ws.onclose = (event) => {
       clearTimeout(connectionTimeout);
       wsConnected.value = false;
@@ -1123,14 +1123,14 @@ const connectWebSocket = () => {
         // 同步更新到store
         serverStore.updateServerStatus(serverId.value, 'offline');
       }
-      
+
       // 清除心跳定时器
       if (heartbeatInterval) {
         console.log('连接关闭，清除心跳定时器');
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
       }
-      
+
       // 只有在非手动关闭的情况下才尝试重连
       if (event.code !== 1000 && event.code !== 1001) {
         setTimeout(() => {
@@ -1146,7 +1146,7 @@ const connectWebSocket = () => {
     console.error('创建WebSocket连接失败:', error);
     message.error('创建WebSocket连接失败');
     connecting.value = false;
-    
+
     // 连接失败也尝试重连，但使用更长的延迟
     setTimeout(() => {
       if (!wsConnected.value && !connecting.value) {
@@ -1162,7 +1162,7 @@ const handleReconnect = () => {
   if (reconnectCount.value < maxReconnectAttempts) {
     reconnectCount.value++;
     const delay = reconnectCount.value * 5000; // 延长重连间隔为5秒 * 重试次数
-    console.log(`${reconnectCount.value}/${maxReconnectAttempts} 将在 ${delay/1000} 秒后尝试重连...`);
+    console.log(`${reconnectCount.value}/${maxReconnectAttempts} 将在 ${delay / 1000} 秒后尝试重连...`);
     setTimeout(() => {
       if (!wsConnected.value && !connecting.value) { // 双重检查，确保还未连接成功才重连
         connectWebSocket();
@@ -1171,7 +1171,7 @@ const handleReconnect = () => {
   } else {
     console.log('已达到最大重连次数，不再自动重连');
     message.error('监控连接已断开，请手动重新连接');
-    
+
     // 所有重连失败，将服务器状态标记为离线
     if (serverInfo.value) {
       serverInfo.value.status = 'offline';
@@ -1188,32 +1188,32 @@ const reconnectWebSocket = () => {
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
   }
-  
+
   // 如果当前正在连接中，不进行操作
   if (connecting.value) {
     console.log('连接过程中，请勿重复操作');
     return;
   }
-  
+
   connecting.value = true;
-  
+
   // 关闭之前的WebSocket
   if (ws) {
     ws.onclose = null; // 防止触发自动重连
     ws.close();
     ws = null;
   }
-  
+
   // 清除心跳定时器
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  
+
   // 重置重连计数
   reconnectCount.value = 0;
   heartbeatFailCount = 0;
-  
+
   // 设置延迟避免立即重连可能导致的问题
   reconnectTimeout = window.setTimeout(() => {
     // 重新连接
@@ -1225,15 +1225,15 @@ const reconnectWebSocket = () => {
 // 更新监控数据
 const updateMonitorData = (data: any) => {
   console.log('更新监控数据:', data);
-  
+
   // 获取当前时间
   const now = new Date();
   const currentTime = now.toLocaleString('zh-CN', { hour12: false });
-  
+
   // 计算数据保留的时间范围（毫秒）
   const retentionTime = settingsStore.chartHistoryHours * 60 * 60 * 1000;
   const cutoffTime = now.getTime() - retentionTime;
-  
+
   // 清理超出时间范围的数据
   const cleanOldData = (dataArray: { time: string; value: number }[]) => {
     const index = dataArray.findIndex(item => new Date(item.time).getTime() > cutoffTime);
@@ -1241,7 +1241,7 @@ const updateMonitorData = (data: any) => {
       dataArray.splice(0, index);
     }
   };
-  
+
   // 更新CPU数据
   if (data.cpu_usage !== undefined) {
     let cpuValue = Number(data.cpu_usage);
@@ -1249,14 +1249,14 @@ const updateMonitorData = (data: any) => {
       cpuValue = cpuValue * 100;
     }
     const safeValue = isNaN(cpuValue) ? 0 : Math.min(Math.max(cpuValue, 0), 100);
-    
+
     monitorData.cpu.push({
       time: currentTime,
       value: safeValue
     });
     cleanOldData(monitorData.cpu);
   }
-  
+
   // 更新内存数据
   if (data.memory_used !== undefined) {
     let memoryPercent = 0;
@@ -1265,14 +1265,14 @@ const updateMonitorData = (data: any) => {
     } else if (data.memory_total && data.memory_total > 0) {
       memoryPercent = (data.memory_used / data.memory_total) * 100;
     }
-    
+
     monitorData.memory.push({
       time: currentTime,
       value: parseFloat(memoryPercent.toFixed(2))
     });
     cleanOldData(monitorData.memory);
   }
-  
+
   // 更新磁盘数据
   if (data.disk_used !== undefined) {
     let diskPercent = 0;
@@ -1281,21 +1281,21 @@ const updateMonitorData = (data: any) => {
     } else if (data.disk_total && data.disk_total > 0) {
       diskPercent = (data.disk_used / data.disk_total) * 100;
     }
-    
+
     monitorData.disk.push({
       time: currentTime,
       value: parseFloat(diskPercent.toFixed(2))
     });
     cleanOldData(monitorData.disk);
   }
-  
+
   // 更新网络数据
   const addNetworkData = (field: 'in' | 'out', value: any) => {
     if (value === undefined) return;
-    
+
     const numValue = Number(value);
     if (isNaN(numValue)) return;
-    
+
     let mbValue = 0;
     if (numValue > 1000000) {
       mbValue = numValue / (1024 * 1024);
@@ -1304,35 +1304,35 @@ const updateMonitorData = (data: any) => {
     } else {
       mbValue = numValue;
     }
-    
+
     monitorData.network[field].push({
       time: currentTime,
       value: parseFloat(mbValue.toFixed(2))
     });
     cleanOldData(monitorData.network[field]);
   };
-  
+
   addNetworkData('in', data.network_in);
   addNetworkData('out', data.network_out);
-  
+
   // 更新系统负载数据
   const addLoadData = (loadField: 'load1' | 'load5' | 'load15', value: any) => {
     if (value === undefined) return;
-    
+
     const numValue = Number(value);
     const safeValue = !isNaN(numValue) ? Math.max(0, numValue) : 0;
-    
+
     monitorData.load[loadField].push({
       time: currentTime,
       value: parseFloat(safeValue.toFixed(2))
     });
     cleanOldData(monitorData.load[loadField]);
   };
-  
+
   addLoadData('load1', data.load_avg_1);
   addLoadData('load5', data.load_avg_5);
   addLoadData('load15', data.load_avg_15);
-  
+
   // 更新图表
   updateCharts();
 };
@@ -1340,7 +1340,7 @@ const updateMonitorData = (data: any) => {
 // 添加数据键名格式规范化函数
 const normalizeName = (data: any) => {
   const result: any = { ...data };
-  
+
   // 检查常见的不同格式键名并统一
   const keyMappings: { [key: string]: string } = {
     'cpuUsage': 'cpu_usage',
@@ -1355,7 +1355,7 @@ const normalizeName = (data: any) => {
     'loadAvg5': 'load_avg_5',
     'loadAvg15': 'load_avg_15'
   };
-  
+
   // 检查并统一键名
   Object.keys(keyMappings).forEach(altKey => {
     if (data[altKey] !== undefined && result[keyMappings[altKey]] === undefined) {
@@ -1363,40 +1363,40 @@ const normalizeName = (data: any) => {
       result[keyMappings[altKey]] = data[altKey];
     }
   });
-  
+
   return result;
 };
 
 // 格式化内存大小
 const formatMemorySize = (bytes: number): string => {
   if (!bytes) return '0 B';
-  
+
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
   let size = bytes;
-  
+
   while (size >= 1024 && i < units.length - 1) {
     size /= 1024;
     i++;
   }
-  
+
   return `${size.toFixed(2)} ${units[i]}`;
 };
 
 // 页面挂载时获取服务器信息并连接WebSocket
 onMounted(async () => {
   console.log('组件挂载中...');
-  
+
   // 先加载系统设置
   await settingsStore.loadPublicSettings();
   console.log('已加载设置，历史数据显示时间:', settingsStore.chartHistoryHours, '小时');
-  
+
   // 获取历史监控数据
   await fetchHistoricalData();
-  
+
   // 初始化图表
   initCharts();
-  
+
   // 连接WebSocket获取实时数据
   connectWebSocket();
 });
@@ -1454,35 +1454,35 @@ watch(
 // 页面卸载时关闭WebSocket连接和移除事件监听
 onUnmounted(() => {
   console.log('组件卸载，清理资源...');
-  
+
   if (ws) {
     // 设置为null避免触发自动重连
     ws.onclose = null;
     ws.close();
     ws = null;
   }
-  
+
   // 清除任何可能存在的定时器
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
   }
-  
+
   // 清除心跳定时器
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  
+
   window.removeEventListener('resize', handleResize);
-  
+
   // 销毁图表实例
   cpuChart?.dispose();
   memoryChart?.dispose();
   diskChart?.dispose();
   networkChart?.dispose();
   loadChart?.dispose();
-  
+
   // 设置图表实例为null避免内存泄漏
   cpuChart = null;
   memoryChart = null;
@@ -1495,19 +1495,17 @@ onUnmounted(() => {
 <template>
   <div class="server-monitor-container">
     <a-spin :spinning="loading" tip="加载中...">
-      <a-page-header
-        title="服务器监控"
-        :sub-title="serverInfo.name"
-        @back="() => router.push(`/admin/servers/${serverId}`)"
-      >
+      <a-page-header title="服务器监控" :sub-title="serverInfo.name" @back="() => router.push(`/admin/servers/${serverId}`)">
         <template #tags>
           <a-tag :color="getStatusType(isOnline)">
             {{ isOnline ? '在线' : '离线' }}
           </a-tag>
           <a-tag v-if="wsConnected" color="blue">WebSocket已连接</a-tag>
           <a-tag v-if="settingsStore.chartHistoryHours" color="cyan">
-            <template #icon><ClockCircleOutlined /></template>
-            显示 {{settingsStore.chartHistoryHours}} 小时历史数据
+            <template #icon>
+              <ClockCircleOutlined />
+            </template>
+            显示 {{ settingsStore.chartHistoryHours }} 小时历史数据
           </a-tag>
         </template>
         <template #extra>
@@ -1518,15 +1516,8 @@ onUnmounted(() => {
       </a-page-header>
 
       <!-- 服务器离线提示 -->
-      <a-alert
-        v-if="!wsConnected && !isOnline && !loading"
-        type="warning"
-        show-icon
-        banner
-        style="margin-bottom: 16px"
-        message="服务器当前离线，无法获取实时监控数据"
-        description="请检查服务器是否启动，或者尝试重新连接。"
-      />
+      <a-alert v-if="!wsConnected && !isOnline && !loading" type="warning" show-icon banner style="margin-bottom: 16px"
+        message="服务器当前离线，无法获取实时监控数据" description="请检查服务器是否启动，或者尝试重新连接。" />
 
       <div v-if="hasData || wsConnected" class="charts-grid">
         <div class="chart-card">
@@ -1623,4 +1614,29 @@ onUnmounted(() => {
   align-items: center;
   height: 500px;
 }
-</style> 
+</style>
+
+<style>
+/* Dark mode adaptation */
+.dark .server-monitor-container {
+  background: transparent;
+}
+
+.dark .chart-card {
+  background: #1f1f1f;
+  border: 1px solid #303030;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.dark .chart-header {
+  border-bottom: 1px solid #303030;
+}
+
+.dark .chart-header h3 {
+  color: #e0e0e0;
+}
+
+.dark .no-data-container .ant-empty-description {
+  color: #a0a0a0;
+}
+</style>
