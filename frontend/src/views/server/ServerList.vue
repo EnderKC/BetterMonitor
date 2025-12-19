@@ -89,10 +89,9 @@ const columns = [
         seen.add(key);
         tags.push(h(Tag, { color: 'blue' }, () => ip));
       });
-
       if (tags.length === 0) return '-';
 
-      return h('div', { style: 'display: flex; flexDirection: column' }, tags);
+      return h('div', { style: 'display: flex; flex-direction: column; gap: 4px; align-items: flex-start;' }, tags);
     }
   },
 
@@ -387,9 +386,9 @@ onMounted(() => {
       </div>
     </div>
 
-	    <div class="server-list-content glass-card">
-	      <a-table :dataSource="displayServers" :columns="columns" :loading="loading" :pagination="tablePagination"
-	        rowKey="id" class="modern-table" ref="tableRef">
+    <div class="server-list-content glass-card">
+      <a-table :dataSource="displayServers" :columns="columns" :loading="loading" :pagination="tablePagination"
+        rowKey="id" class="modern-table" ref="tableRef">
         <template #bodyCell="{ column, record }">
           <!-- 拖拽手柄列 -->
           <template v-if="column.key === 'dragHandle'">

@@ -28,6 +28,9 @@ const userStore = useUserStore();
 const updating = ref(false);
 const updateModalVisible = ref(false);
 const selectedServerId = ref<number | null>(null);
+const updatingAll = ref(false);
+const updateAllModalVisible = ref(false);
+const serversToUpdate = ref<ServerVersion[]>([]);
 
 // 表格列定义
 const columns = [
@@ -47,7 +50,7 @@ const columns = [
       ips.forEach((ip: string) => {
         tags.push(h(Tag, { color: 'blue' }, () => ip));
       });
-      return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 4px;' }, tags);
+      return h('div', { style: 'display: flex; flex-direction: column; gap: 4px; align-items: flex-start;' }, tags);
     }
   },
   {
@@ -215,6 +218,54 @@ const cancelUpdate = () => {
   selectedServerId.value = null;
 };
 
+// 批量升级相关
+const showUpdateAllModal = () => {
+  // 筛选出在线且需要更新的服务器
+  const targets = serversVersions.value.filter(s => s.status === 1 && needsUpdate(s.agentVersion));
+
+  if (targets.length === 0) {
+    message.info('没有需要更新的在线服务器');
+    return;
+  }
+
+  serversToUpdate.value = targets;
+  updateAllModalVisible.value = true;
+};
+
+const performUpdateAll = async () => {
+  if (serversToUpdate.value.length === 0) return;
+
+  updatingAll.value = true;
+  try {
+    const serverIds = serversToUpdate.value.map(s => s.id);
+    const result = await forceAgentUpgrade({
+      serverIds: serverIds,
+      targetVersion: latestAgentVersion.value || dashboardVersion.value?.version || undefined
+    });
+
+    if (result.success) {
+      message.success(result.message || `已向 ${result.result.success.length} 台服务器发送升级指令`);
+      updateAllModalVisible.value = false;
+      // 延迟刷新版本信息
+      setTimeout(() => {
+        fetchVersions();
+      }, 3000);
+    } else {
+      message.error(`批量升级失败: ${result.message}`);
+    }
+  } catch (error) {
+    console.error('批量升级失败:', error);
+    message.error('批量升级失败');
+  } finally {
+    updatingAll.value = false;
+  }
+};
+
+const cancelUpdateAll = () => {
+  updateAllModalVisible.value = false;
+  serversToUpdate.value = [];
+};
+
 // 获取选中的服务器信息
 const getSelectedServer = () => {
   return serversVersions.value.find(s => s.id === selectedServerId.value);
@@ -282,6 +333,9 @@ onMounted(() => {
             <Button type="primary" size="small" :loading="loading" @click="fetchVersions">
               <SyncOutlined /> 刷新
             </Button>
+            <Button type="primary" size="small" :loading="updatingAll" @click="showUpdateAllModal">
+              <DownloadOutlined /> 一键更新
+            </Button>
           </Space>
         </template>
 
@@ -309,8 +363,8 @@ onMounted(() => {
               </template>
               <template v-else-if="column.key === 'action'">
                 <Space>
-                  <Button v-if="record.status === 1 && needsUpdate(record.agentVersion)"
-                    type="primary" size="small" @click="showUpdateModal(record.id)">
+                  <Button v-if="record.status === 1 && needsUpdate(record.agentVersion)" type="primary" size="small"
+                    @click="showUpdateModal(record.id)">
                     <DownloadOutlined /> 升级
                   </Button>
                   <span v-else-if="record.status !== 1" style="color: #999">
@@ -361,6 +415,26 @@ onMounted(() => {
       <p>确定要更新服务器 <strong>{{ getSelectedServer()?.name }}</strong> 的Agent吗？</p>
       <p>当前版本：<Tag>{{ getSelectedServer()?.agentVersion || '未知' }}</Tag>
       </p>
+      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
+      </p>
+      <p style="color: #faad14;">
+        <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
+      </p>
+    </Modal>
+
+    <!-- 批量更新确认对话框 -->
+    <Modal v-model:open="updateAllModalVisible" title="确认批量升级" :confirmLoading="updatingAll" @ok="performUpdateAll"
+      @cancel="cancelUpdateAll">
+      <p>确定要更新以下 <strong>{{ serversToUpdate.length }}</strong> 台服务器的Agent吗？</p>
+      <div
+        style="max-height: 200px; overflow-y: auto; margin: 10px 0; background: #f5f5f5; padding: 10px; border-radius: 4px;">
+        <div v-for="server in serversToUpdate" :key="server.id" style="margin-bottom: 4px;">
+          <Space>
+            <span>{{ server.name }}</span>
+            <Tag>{{ server.agentVersion || '未知' }}</Tag>
+          </Space>
+        </div>
+      </div>
       <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
       </p>
       <p style="color: #faad14;">
