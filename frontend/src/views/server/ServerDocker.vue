@@ -400,23 +400,73 @@ const removeContainer = (id: string, name: string) => {
     return;
   }
 
-  Modal.confirm({
-    title: '确认删除',
-    content: `确定要删除容器 ${name} 吗？此操作不可恢复。`,
-    okText: '确认',
-    cancelText: '取消',
-    okType: 'danger',
-    onOk: async () => {
-      try {
-        await request.delete(`/servers/${serverId.value}/docker/containers/${id}`);
-        message.success('容器已删除');
-        fetchContainers();
-      } catch (error) {
-        console.error('删除容器失败:', error);
-        message.error('删除容器失败');
+  // 查找容器信息
+  const container = containers.value.find(c => c.id === id);
+  const isRunning = container && (container.state === 'running' || container.status.toLowerCase().includes('up'));
+
+  // 如果容器正在运行，显示特殊提示
+  if (isRunning) {
+    Modal.confirm({
+      title: '容器正在运行',
+      content: h('div', [
+        h('p', `容器 ${name} 当前正在运行中。`),
+        h('p', '您可以选择:'),
+        h('ul', { style: { paddingLeft: '20px', marginTop: '10px' } }, [
+          h('li', '强制删除(会立即停止并删除容器)'),
+          h('li', '先停止容器再删除')
+        ])
+      ]),
+      okText: '强制删除',
+      cancelText: '先停止',
+      okType: 'danger',
+      onOk: async () => {
+        // 强制删除
+        try {
+          await request.delete(`/servers/${serverId.value}/docker/containers/${id}?force=true`);
+          message.success('容器已强制删除');
+          fetchContainers();
+        } catch (error: any) {
+          console.error('强制删除容器失败:', error);
+          const errorMsg = error.response?.data?.error || '强制删除容器失败';
+          message.error(errorMsg);
+        }
+      },
+      onCancel: async () => {
+        // 先停止再删除
+        try {
+          await request.post(`/servers/${serverId.value}/docker/containers/${id}/stop`);
+          message.info('容器已停止，正在删除...');
+          await request.delete(`/servers/${serverId.value}/docker/containers/${id}`);
+          message.success('容器已删除');
+          fetchContainers();
+        } catch (error: any) {
+          console.error('停止或删除容器失败:', error);
+          const errorMsg = error.response?.data?.error || '操作失败';
+          message.error(errorMsg);
+        }
       }
-    }
-  });
+    });
+  } else {
+    // 容器未运行，正常删除
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除容器 ${name} 吗？此操作不可恢复。`,
+      okText: '确认',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await request.delete(`/servers/${serverId.value}/docker/containers/${id}`);
+          message.success('容器已删除');
+          fetchContainers();
+        } catch (error: any) {
+          console.error('删除容器失败:', error);
+          const errorMsg = error.response?.data?.error || '删除容器失败';
+          message.error(errorMsg);
+        }
+      }
+    });
+  }
 };
 
 // 查看容器日志

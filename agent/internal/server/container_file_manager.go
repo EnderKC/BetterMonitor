@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	pathpkg "path"
 	"sort"
 	"strconv"
 	"strings"
@@ -144,8 +144,9 @@ func (cfm *ContainerFileManager) CreateDirectory(path string) error {
 
 // UploadFile 上传文件，前端的内容以 Base64 方式发送，解析后交给 writeFile。
 func (cfm *ContainerFileManager) UploadFile(path, filename, content string) error {
-	if filename == "" {
-		return fmt.Errorf("文件名不能为空")
+	safeName, err := sanitizeContainerFilename(filename)
+	if err != nil {
+		return err
 	}
 
 	data, err := base64.StdEncoding.DecodeString(content)
@@ -153,7 +154,7 @@ func (cfm *ContainerFileManager) UploadFile(path, filename, content string) erro
 		return fmt.Errorf("解码文件内容失败: %w", err)
 	}
 
-	targetPath := filepath.Join(path, filename)
+	targetPath := joinContainerPath(path, safeName)
 	return cfm.writeFile(targetPath, data, 0644)
 }
 
@@ -283,7 +284,7 @@ func (cfm *ContainerFileManager) buildTree(files []*FileInfo, rootPath string) [
 		}
 
 		// 获取父目录路径
-		dir := filepath.Dir(f.Name)
+		dir := pathpkg.Dir(f.Name)
 
 		// 如果父目录是 "." 或 "/" (取决于 filepath.Dir 的行为)，说明是根节点的直接子节点
 		if dir == "." || dir == "/" || dir == "" {
@@ -316,11 +317,11 @@ func (cfm *ContainerFileManager) buildTree(files []*FileInfo, rootPath string) [
 			if nodes[i].IsDir != nodes[j].IsDir {
 				return nodes[i].IsDir
 			}
-			return strings.ToLower(filepath.Base(nodes[i].Name)) < strings.ToLower(filepath.Base(nodes[j].Name))
+			return strings.ToLower(pathpkg.Base(nodes[i].Name)) < strings.ToLower(pathpkg.Base(nodes[j].Name))
 		})
 
 		for _, node := range nodes {
-			node.Name = filepath.Base(node.Name)
+			node.Name = pathpkg.Base(node.Name)
 			if len(node.Children) > 0 {
 				fixNames(node.Children)
 			}
@@ -368,7 +369,7 @@ fi
 	stdout, stderr, err := cfm.docker.RunCommand(cfm.containerID, []string{"/bin/sh", "-c", script}, []string{"LC_ALL=C"})
 	if err != nil {
 		if strings.TrimSpace(stderr) != "" {
-			return "", fmt.Errorf(strings.TrimSpace(stderr))
+			return "", fmt.Errorf("%s", strings.TrimSpace(stderr))
 		}
 		return "", fmt.Errorf("执行容器命令失败: %w", err)
 	}
@@ -401,7 +402,7 @@ fi
 	stdout, stderr, err := cfm.docker.RunCommand(cfm.containerID, []string{"/bin/sh", "-c", script}, []string{"LC_ALL=C"})
 	if err != nil {
 		if strings.TrimSpace(stderr) != "" {
-			return "", fmt.Errorf(strings.TrimSpace(stderr))
+			return "", fmt.Errorf("%s", strings.TrimSpace(stderr))
 		}
 		return "", fmt.Errorf("执行容器命令失败: %w", err)
 	}
@@ -451,13 +452,18 @@ func (cfm *ContainerFileManager) parseRecursiveStatOutput(rootPath, data string)
 		if err != nil {
 			modeUint = 0
 		}
-		fileMode := os.FileMode(modeUint)
+		fileMode := fileModeFromUnixMode(uint32(modeUint))
+		isDir := fileMode.IsDir()
+		if isDir {
+			// 目录大小对前端意义不大，且不同文件系统差异较大；统一返回 0 更直观
+			sizeVal = 0
+		}
 
 		info := &FileInfo{
 			Name:    name, // 这里保留相对路径，例如 "dir/file"
 			Size:    sizeVal,
 			ModTime: time.Unix(mtimeVal, 0).Format(time.RFC3339),
-			IsDir:   fileMode.IsDir(),
+			IsDir:   isDir,
 			Mode:    fileMode.String(),
 		}
 
@@ -505,13 +511,17 @@ func (cfm *ContainerFileManager) parseStatOutput(data string) ([]*FileInfo, erro
 		if err != nil {
 			modeUint = 0
 		}
-		fileMode := os.FileMode(modeUint)
+		fileMode := fileModeFromUnixMode(uint32(modeUint))
+		isDir := fileMode.IsDir()
+		if isDir {
+			sizeVal = 0
+		}
 
 		info := &FileInfo{
 			Name:    name,
 			Size:    sizeVal,
 			ModTime: time.Unix(mtimeVal, 0).Format(time.RFC3339),
-			IsDir:   fileMode.IsDir(),
+			IsDir:   isDir,
 			Mode:    fileMode.String(),
 		}
 
@@ -534,7 +544,7 @@ func (cfm *ContainerFileManager) listFilesViaTar(path string) ([]*FileInfo, erro
 	// 处理单文件场景
 	if !stat.Mode.IsDir() {
 		return []*FileInfo{{
-			Name:    filepath.Base(path),
+			Name:    pathpkg.Base(path),
 			Size:    stat.Size,
 			ModTime: stat.Mtime.Format(time.RFC3339),
 			IsDir:   false,
@@ -548,10 +558,10 @@ func (cfm *ContainerFileManager) listFilesViaTar(path string) ([]*FileInfo, erro
 	if cleanPath == "" {
 		cleanPath = "/"
 	}
-	cleanPath = filepath.Clean(cleanPath)
+	cleanPath = pathpkg.Clean(cleanPath)
 	rootPrefix := ""
 	if cleanPath != "/" {
-		rootPrefix = strings.Trim(filepath.Base(cleanPath), "/")
+		rootPrefix = strings.Trim(pathpkg.Base(cleanPath), "/")
 		if rootPrefix == "." {
 			rootPrefix = ""
 		}
@@ -675,7 +685,7 @@ func (cfm *ContainerFileManager) readFile(path string) ([]byte, error) {
 // writeFile 写入容器文件。
 // Docker CopyToContainer 只接受 tar 流，这里会把单个文件打包成临时 tar，并允许覆盖已有文件。
 func (cfm *ContainerFileManager) writeFile(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
+	dir := pathpkg.Dir(path)
 	if dir == "." || dir == "" {
 		dir = "/"
 	}
@@ -685,7 +695,7 @@ func (cfm *ContainerFileManager) writeFile(path string, data []byte, mode os.Fil
 	}
 
 	header := &tar.Header{
-		Name:    filepath.Base(path),
+		Name:    pathpkg.Base(path),
 		Mode:    int64(mode.Perm()),
 		Size:    int64(len(data)),
 		ModTime: time.Now(),
@@ -739,7 +749,7 @@ func (cfm *ContainerFileManager) runShell(script string) (string, error) {
 	stdout, stderr, err := cfm.docker.RunCommand(cfm.containerID, []string{"/bin/sh", "-c", script}, []string{"LC_ALL=C"})
 	if err != nil {
 		if strings.TrimSpace(stderr) != "" {
-			return "", fmt.Errorf(strings.TrimSpace(stderr))
+			return "", fmt.Errorf("%s", strings.TrimSpace(stderr))
 		}
 		return "", err
 	}
@@ -751,7 +761,7 @@ func (cfm *ContainerFileManager) normalizeName(name string) string {
 	name = strings.TrimSpace(name)
 	name = strings.TrimPrefix(name, "./")
 	name = strings.TrimPrefix(name, "/")
-	return filepath.Base(name)
+	return pathpkg.Base(name)
 }
 
 // joinContainerPath 组合容器路径
@@ -769,4 +779,63 @@ func shellEscape(path string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'"
+}
+
+// fileModeFromUnixMode 将 Linux stat(2) 的 st_mode 映射到 Go 的 os.FileMode。
+// 注意：直接将 st_mode 强转成 os.FileMode 会导致 IsDir()/String() 等结果不正确，
+// 因为两者在“文件类型位”的编码上并不一致。
+func fileModeFromUnixMode(mode uint32) os.FileMode {
+	var fm os.FileMode
+
+	// 权限位 (0777)
+	fm |= os.FileMode(mode & 0o777)
+
+	// 特殊权限位 (setuid/setgid/sticky)
+	if mode&0o4000 != 0 {
+		fm |= os.ModeSetuid
+	}
+	if mode&0o2000 != 0 {
+		fm |= os.ModeSetgid
+	}
+	if mode&0o1000 != 0 {
+		fm |= os.ModeSticky
+	}
+
+	// 文件类型位 (S_IFMT = 0170000)
+	switch mode & 0o170000 {
+	case 0o040000:
+		fm |= os.ModeDir
+	case 0o120000:
+		fm |= os.ModeSymlink
+	case 0o010000:
+		fm |= os.ModeNamedPipe
+	case 0o140000:
+		fm |= os.ModeSocket
+	case 0o020000:
+		fm |= os.ModeDevice | os.ModeCharDevice
+	case 0o060000:
+		fm |= os.ModeDevice
+	}
+
+	return fm
+}
+
+func sanitizeContainerFilename(filename string) (string, error) {
+	name := strings.TrimSpace(filename)
+	if name == "" {
+		return "", fmt.Errorf("文件名不能为空")
+	}
+
+	// 兼容部分客户端（或旧浏览器）传入的 Windows 风格路径。
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = pathpkg.Base(name)
+
+	if name == "" || name == "." || name == "/" || name == ".." {
+		return "", fmt.Errorf("文件名无效")
+	}
+	if strings.Contains(name, "/") {
+		return "", fmt.Errorf("文件名不能包含路径分隔符")
+	}
+
+	return name, nil
 }

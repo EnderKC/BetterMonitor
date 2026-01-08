@@ -873,6 +873,56 @@ func InstallOpenResty(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// GetOpenRestyInstallLogs 获取OpenResty安装日志
+func GetOpenRestyInstallLogs(c *gin.Context) {
+	serverID := c.Param("id")
+	id, err := strconv.Atoi(serverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
+		return
+	}
+
+	sessionID := c.Query("session_id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少session_id参数"})
+		return
+	}
+
+	var server models.Server
+	if err := models.DB.First(&server, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
+		return
+	}
+
+	models.CheckServerStatus(&server)
+	if !server.Online {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
+		return
+	}
+
+	message := map[string]interface{}{
+		"type": "nginx_command",
+		"payload": map[string]interface{}{
+			"action":     "openresty_install_logs",
+			"session_id": sessionID,
+		},
+	}
+
+	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取安装日志失败: %v", err)})
+		return
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // ApplyWebsiteConfig 通过声明式配置应用站点
 func ApplyWebsiteConfig(c *gin.Context) {
 	serverID := c.Param("id")

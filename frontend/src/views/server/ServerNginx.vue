@@ -88,6 +88,10 @@ const openRestyStatus = ref({
 });
 const openRestyChecking = ref(false);
 const installingOpenResty = ref(false);
+const installLogModalVisible = ref(false);
+const installLogs = ref<string[]>([]);
+const installSessionId = ref<string>('');
+let installLogTimer: number | null = null;
 
 const websites = ref<WebsiteItem[]>([]);
 const websitesLoading = ref(false);
@@ -375,19 +379,109 @@ const deleteCertificateRecord = (cert: ManagedCertificate) => {
   });
 };
 
+const renewingCertId = ref<number | null>(null);
+
+const renewCertificate = (cert: ManagedCertificate) => {
+  Modal.confirm({
+    title: `续期证书 ${cert.primary_domain}`,
+    content: '确认要续期此证书吗？续期将使用原有配置重新申请证书。',
+    onOk: async () => {
+      renewingCertId.value = cert.id;
+      try {
+        await request.post(`/servers/${serverId.value}/certificates/${cert.id}/renew`);
+        message.success('证书续期成功');
+        fetchCertificates();
+      } catch (error: any) {
+        message.error(error?.message || '证书续期失败');
+      } finally {
+        renewingCertId.value = null;
+      }
+    }
+  });
+};
+
 const installOpenResty = async () => {
   installingOpenResty.value = true;
+  installLogs.value = [];
+  installLogModalVisible.value = true;
+
   try {
-    await request.post(`/servers/${serverId.value}/nginx/openresty/install`);
-    message.success('OpenResty 已安装并启动');
-    await fetchOpenRestyStatus();
-    await fetchWebsites();
+    const response: any = await request.post(`/servers/${serverId.value}/nginx/openresty/install`);
+
+    if (response.session_id) {
+      installSessionId.value = response.session_id;
+      startPollingInstallLogs();
+    } else {
+      message.success('OpenResty 已安装并启动');
+      installLogModalVisible.value = false;
+      await fetchOpenRestyStatus();
+      await fetchWebsites();
+    }
   } catch (error) {
     console.error('安装OpenResty失败:', error);
     message.error('安装OpenResty失败，请查看节点日志');
+    installLogModalVisible.value = false;
   } finally {
     installingOpenResty.value = false;
   }
+};
+
+const startPollingInstallLogs = () => {
+  if (installLogTimer) {
+    clearInterval(installLogTimer);
+  }
+
+  // 立即获取一次
+  fetchInstallLogs();
+
+  // 每500ms轮询一次
+  installLogTimer = window.setInterval(() => {
+    fetchInstallLogs();
+  }, 500);
+};
+
+const fetchInstallLogs = async () => {
+  if (!installSessionId.value) return;
+
+  try {
+    const resp: any = await request.get(
+      `/servers/${serverId.value}/nginx/openresty/install-logs?session_id=${installSessionId.value}`
+    );
+
+    if (resp && resp.logs && Array.isArray(resp.logs)) {
+      installLogs.value = resp.logs;
+
+      // 根据返回的 status 判断是否完成
+      if (resp.status === 'completed' || resp.status === 'not_found') {
+        stopPollingInstallLogs();
+
+        // 如果是正常完成，延迟刷新状态
+        if (resp.status === 'completed') {
+          setTimeout(async () => {
+            await fetchOpenRestyStatus();
+            await fetchWebsites();
+          }, 1000);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('获取安装日志失败:', error);
+  }
+};
+
+const stopPollingInstallLogs = () => {
+  if (installLogTimer) {
+    clearInterval(installLogTimer);
+    installLogTimer = null;
+  }
+  installingOpenResty.value = false;
+};
+
+const closeInstallLogModal = () => {
+  stopPollingInstallLogs();
+  installLogModalVisible.value = false;
+  installLogs.value = [];
+  installSessionId.value = '';
 };
 
 const requestInstallOpenResty = () => {
@@ -880,6 +974,16 @@ watch(
   }
 );
 
+watch(installLogs, () => {
+  // 当日志更新时，自动滚动到底部
+  setTimeout(() => {
+    const logOutput = document.querySelector('.install-log-output');
+    if (logOutput) {
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+  }, 100);
+});
+
 </script>
 
 <template>
@@ -1124,9 +1228,13 @@ watch(
                     </a-tag>
                   </template>
                 </a-table-column>
-                <a-table-column title="操作" key="actions" :width="120">
+                <a-table-column title="操作" key="actions" :width="180">
                   <template #default="{ record }">
                     <a-space>
+                      <a-button type="link" size="small" @click="renewCertificate(record)"
+                        :loading="renewingCertId === record.id">
+                        续期
+                      </a-button>
                       <a-button type="link" size="small" @click="openCertificateContent(record)">
                         查看
                       </a-button>
@@ -1328,6 +1436,28 @@ watch(
           <a-button type="primary" @click="certificateContentModalVisible = false">关闭</a-button>
         </div>
       </a-spin>
+    </a-modal>
+
+    <a-modal v-model:open="installLogModalVisible" title="OpenResty 安装进度" :footer="null" width="720px"
+      :maskClosable="false" @cancel="closeInstallLogModal">
+      <div class="install-log-container">
+        <div class="install-log-output" ref="installLogOutput">
+          <div v-if="installLogs.length === 0" class="install-log-empty">
+            正在初始化安装...
+          </div>
+          <div v-else>
+            <div v-for="(log, index) in installLogs" :key="index" class="install-log-line">
+              {{ log }}
+            </div>
+          </div>
+        </div>
+        <div class="install-log-footer">
+          <a-button type="primary" @click="closeInstallLogModal"
+            :disabled="installingOpenResty || (installLogs.length > 0 && !installLogs[installLogs.length - 1]?.includes('完成'))">
+            关闭
+          </a-button>
+        </div>
+      </div>
     </a-modal>
   </div>
 </template>
@@ -1746,5 +1876,52 @@ watch(
   .certificate-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Install Log Modal */
+.install-log-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.install-log-output {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 8px;
+  padding: 16px;
+  min-height: 400px;
+  max-height: 600px;
+  overflow-y: auto;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.install-log-empty {
+  color: #888;
+  text-align: center;
+  padding: 20px;
+}
+
+.install-log-line {
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.install-log-line:empty {
+  min-height: 4px;
+}
+
+.install-log-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+/* Scroll to bottom */
+.install-log-output {
+  scroll-behavior: smooth;
 }
 </style>

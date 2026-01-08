@@ -1587,7 +1587,7 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			}
 		case "agent_upgrade_response":
 			// Agent 升级进度/结果回传（用于日志/后续扩展 UI 显示）。
-			// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现“未知类型/错误”噪音。
+			// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现"未知类型/错误"噪音。
 			if !isAgent {
 				continue
 			}
