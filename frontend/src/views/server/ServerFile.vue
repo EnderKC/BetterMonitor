@@ -972,9 +972,21 @@ const openTerminal = async () => {
   }
 
   try {
-    // 创建临时终端会话
+    // 使用固定的会话ID，避免创建多个临时会话
+    const fixedSessionId = `file-manager-temp-${serverId.value}`;
+
+    // 先尝试删除旧会话（如果存在）
+    try {
+      await request.delete(`/servers/${serverId.value}/terminal/sessions/${fixedSessionId}`);
+      console.log('已删除旧的文件管理器终端会话');
+    } catch (error) {
+      // 如果会话不存在，删除会失败，这是正常的，忽略错误
+    }
+
+    // 创建新的临时终端会话
     const response = await request.post(`/servers/${serverId.value}/terminal/sessions`, {
-      name: `文件管理器终端 - ${currentPath.value}`,
+      id: fixedSessionId,
+      name: `文件管理器临时终端`,
       cwd: currentPath.value
     });
 

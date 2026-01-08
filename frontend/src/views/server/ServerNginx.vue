@@ -1251,68 +1251,83 @@ watch(installLogs, () => {
       </a-tabs>
     </div>
 
-    <a-drawer v-model:open="websiteDrawerVisible" :title="editingWebsite ? '编辑网站' : '创建网站'" :width="520"
-      :destroy-on-close="true">
-      <a-form layout="vertical">
-        <a-form-item label="主域名">
+    <a-modal v-model:open="websiteDrawerVisible" :title="editingWebsite ? '编辑网站' : '创建网站'" width="600px"
+      :confirm-loading="websiteSaving" @ok="submitWebsite" @cancel="websiteDrawerVisible = false" class="glass-modal">
+      <a-form layout="vertical" class="website-form">
+        <a-form-item label="主域名" required>
           <a-input v-model:value="websiteForm.domain" placeholder="example.com" />
         </a-form-item>
         <a-form-item label="附加域名">
-          <a-select v-model:value="websiteForm.extraDomains" mode="tags" placeholder="输入域名后回车" />
+          <a-select v-model:value="websiteForm.extraDomains" mode="tags" placeholder="输入域名后回车"
+            :token-separators="[',', ' ']" />
         </a-form-item>
-        <a-form-item label="网站目录">
+        <a-form-item label="网站目录" required>
           <a-input v-model:value="websiteForm.rootDir" placeholder="/www/sites/example" />
         </a-form-item>
-        <a-form-item label="PHP版本">
-          <a-select v-model:value="websiteForm.phpVersion" allow-clear placeholder="选择PHP版本（可选）">
-            <a-select-option value="8.2">PHP 8.2</a-select-option>
-            <a-select-option value="8.1">PHP 8.1</a-select-option>
-            <a-select-option value="8.0">PHP 8.0</a-select-option>
-            <a-select-option value="7.4">PHP 7.4</a-select-option>
-          </a-select>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="PHP版本">
+              <a-select v-model:value="websiteForm.phpVersion" allow-clear placeholder="选择PHP版本（可选）">
+                <a-select-option value="8.2">PHP 8.2</a-select-option>
+                <a-select-option value="8.1">PHP 8.1</a-select-option>
+                <a-select-option value="8.0">PHP 8.0</a-select-option>
+                <a-select-option value="7.4">PHP 7.4</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="索引文件">
+              <a-input v-model:value="websiteForm.indexText" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <div class="form-section-title">高级配置</div>
+
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="反向代理">
+              <a-switch v-model:checked="websiteForm.proxyEnable" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="WebSocket">
+              <a-switch v-model:checked="websiteForm.proxyWebsocket" :disabled="!websiteForm.proxyEnable" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="启用HTTPS">
+              <a-switch v-model:checked="websiteForm.enableHTTPS" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item v-if="websiteForm.proxyEnable" label="反代目标地址" required>
+          <a-input v-model:value="websiteForm.proxyPass" placeholder="http://127.0.0.1:3000" />
         </a-form-item>
-        <a-form-item label="索引文件">
-          <a-input v-model:value="websiteForm.indexText" />
-        </a-form-item>
-        <a-form-item label="反向代理">
-          <a-switch v-model:checked="websiteForm.proxyEnable" />
-          <a-input v-if="websiteForm.proxyEnable" v-model:value="websiteForm.proxyPass"
-            placeholder="http://127.0.0.1:3000" style="margin-top: 12px" />
-        </a-form-item>
-        <a-form-item label="WebSocket">
-          <a-switch v-model:checked="websiteForm.proxyWebsocket" />
-        </a-form-item>
-        <a-form-item label="启用HTTPS">
-          <a-switch v-model:checked="websiteForm.enableHTTPS" />
-        </a-form-item>
-        <a-form-item label="强制HTTPS跳转">
-          <a-switch v-model:checked="websiteForm.forceSSL" />
-        </a-form-item>
-        <a-form-item v-if="websiteForm.enableHTTPS" label="使用证书">
-          <div style="display: flex; gap: 8px; align-items: flex-start;">
-            <a-select v-model:value="websiteForm.certificateId" :options="certificateOptions" allow-clear
-              placeholder="请选择已申请的证书" style="flex: 1">
-              <template #notFoundContent>
-                <div class="form-hint">暂无证书，请先在证书管理中申请</div>
-              </template>
-            </a-select>
-            <a-button @click="applySSLFromDrawer">申请</a-button>
-          </div>
-          <div class="form-hint">证书托管在节点本地，可被多个站点复用。</div>
-        </a-form-item>
-        <a-form-item label="HTTP验证目录">
-          <a-input v-model:value="websiteForm.httpChallengeDir" />
-        </a-form-item>
+
+        <template v-if="websiteForm.enableHTTPS">
+          <a-form-item label="强制HTTPS跳转">
+            <a-switch v-model:checked="websiteForm.forceSSL" />
+          </a-form-item>
+          <a-form-item label="SSL证书">
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <a-select v-model:value="websiteForm.certificateId" :options="certificateOptions" allow-clear
+                placeholder="请选择已申请的证书" style="flex: 1">
+                <template #notFoundContent>
+                  <div class="form-hint">暂无证书，请先在证书管理中申请</div>
+                </template>
+              </a-select>
+              <a-button @click="applySSLFromDrawer">申请</a-button>
+            </div>
+            <div class="form-hint">证书托管在节点本地，可被多个站点复用。</div>
+          </a-form-item>
+          <a-form-item label="HTTP验证目录">
+            <a-input v-model:value="websiteForm.httpChallengeDir" />
+          </a-form-item>
+        </template>
       </a-form>
-      <template #footer>
-        <a-space>
-          <a-button @click="websiteDrawerVisible = false">取消</a-button>
-          <a-button type="primary" :loading="websiteSaving" @click="submitWebsite">
-            保存
-          </a-button>
-        </a-space>
-      </template>
-    </a-drawer>
+    </a-modal>
 
     <a-modal v-model:open="sslModalVisible" title="申请SSL证书" :confirm-loading="sslLoading" @ok="submitSSL"
       @cancel="sslModalVisible = false">
@@ -1577,9 +1592,7 @@ watch(installLogs, () => {
   font-weight: 500;
 }
 
-:root.dark :deep(.ant-table-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.05);
-}
+
 
 :deep(.ant-table-tbody > tr > td) {
   border-bottom: 1px solid var(--card-border);
@@ -1616,9 +1629,7 @@ watch(installLogs, () => {
   border-radius: 6px;
 }
 
-:root.dark .extra-hint {
-  background: rgba(255, 255, 255, 0.1);
-}
+
 
 /* Path Link */
 .path-text {
@@ -1700,9 +1711,7 @@ watch(installLogs, () => {
   border-radius: 4px;
 }
 
-:root.dark .config-summary {
-  background: rgba(0, 0, 0, 0.2);
-}
+
 
 /* Form Hint */
 .form-hint {
@@ -1720,9 +1729,7 @@ watch(installLogs, () => {
   border: 1px solid var(--card-border);
 }
 
-:root.dark .cert-content-section {
-  background: rgba(0, 0, 0, 0.2);
-}
+
 
 .cert-content-header {
   display: flex;
@@ -1768,11 +1775,7 @@ watch(installLogs, () => {
   color: var(--text-primary);
 }
 
-:root.dark :deep(.ant-btn-default) {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
-}
+
 
 :deep(.ant-btn-default:hover) {
   background: #fff;
@@ -1780,11 +1783,7 @@ watch(installLogs, () => {
   color: var(--primary-color);
 }
 
-:root.dark :deep(.ant-btn-default:hover) {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
+
 
 :deep(.ant-btn-text) {
   color: var(--text-secondary);
@@ -1795,10 +1794,7 @@ watch(installLogs, () => {
   color: var(--text-primary);
 }
 
-:root.dark :deep(.ant-btn-text:hover) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
+
 
 :deep(.ant-btn-link) {
   color: var(--primary-color);
@@ -1817,12 +1813,7 @@ watch(installLogs, () => {
   border-radius: 8px !important;
 }
 
-:root.dark :deep(.ant-input),
-:root.dark :deep(.ant-select-selector) {
-  background: rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  color: rgba(255, 255, 255, 0.9) !important;
-}
+
 
 :deep(.ant-input:focus),
 :deep(.ant-select-focused .ant-select-selector) {
@@ -1921,7 +1912,276 @@ watch(installLogs, () => {
 }
 
 /* Scroll to bottom */
+/* Scroll to bottom */
 .install-log-output {
   scroll-behavior: smooth;
+}
+</style>
+
+<style>
+/* Global Dark Mode Overrides for ServerNginx */
+.dark .website-page {
+  color: #e0e0e0;
+}
+
+.dark .page-header {
+  background: rgba(30, 30, 30, 0.7);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.dark .ant-page-header-heading-title {
+  color: #e0e0e0;
+}
+
+.dark .ant-page-header-heading-sub-title {
+  color: #aaa;
+}
+
+.dark .service-card,
+.dark .websites-card,
+.dark .dns-card,
+.dark .cert-card {
+  background: rgba(30, 30, 30, 0.7);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.dark .ant-card-head {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  color: #e0e0e0;
+}
+
+.dark .ant-table {
+  color: #e0e0e0;
+}
+
+.dark .ant-table-thead>tr>th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ccc;
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+}
+
+.dark .ant-table-tbody>tr>td {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  color: #e0e0e0;
+}
+
+.dark .ant-table-tbody>tr:hover>td {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .ant-empty-description {
+  color: #888;
+}
+
+.dark .primary-domain {
+  color: #e0e0e0;
+}
+
+.dark .extra-hint {
+  background: rgba(255, 255, 255, 0.1);
+  color: #aaa;
+}
+
+.dark .path-text {
+  color: #aaa;
+}
+
+.dark .path-link {
+  color: #177ddc;
+}
+
+.dark .path-link:hover {
+  color: #40a9ff;
+}
+
+.dark .expiry-text {
+  color: #888;
+}
+
+.dark .ant-tabs-tab {
+  color: #aaa;
+}
+
+.dark .ant-tabs-tab:hover {
+  color: #e0e0e0;
+}
+
+.dark .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #177ddc;
+  text-shadow: 0 0 10px rgba(23, 125, 220, 0.5);
+}
+
+.dark .ant-tabs-ink-bar {
+  background: #177ddc;
+  box-shadow: 0 0 10px rgba(23, 125, 220, 0.5);
+}
+
+.dark .hint-text {
+  color: #aaa;
+}
+
+.dark .config-summary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+}
+
+.dark .form-hint {
+  color: #888;
+}
+
+.dark .cert-content-section {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .cert-content-header strong {
+  color: #e0e0e0;
+}
+
+.dark .cert-path {
+  color: #aaa;
+}
+
+.dark .ant-btn-default {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e0e0e0;
+}
+
+.dark .ant-btn-default:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.dark .ant-btn-text {
+  color: #aaa;
+}
+
+.dark .ant-btn-text:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.dark .ant-btn-link {
+  color: #177ddc;
+}
+
+.dark .ant-btn-link:hover {
+  color: #40a9ff;
+}
+
+.dark .ant-input,
+.dark .ant-select-selector {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #e0e0e0 !important;
+}
+
+.dark .ant-input:focus,
+.dark .ant-select-focused .ant-select-selector {
+  border-color: #177ddc !important;
+  box-shadow: 0 0 0 2px rgba(23, 125, 220, 0.2) !important;
+}
+
+.dark .ant-select-arrow {
+  color: #aaa;
+}
+
+.dark .ant-tag-success {
+  background: rgba(82, 196, 26, 0.2);
+  color: #95de64;
+}
+
+.dark .ant-tag-processing {
+  background: rgba(24, 144, 255, 0.2);
+  color: #69c0ff;
+}
+
+.dark .ant-tag-warning {
+  background: rgba(250, 173, 20, 0.2);
+  color: #ffc53d;
+}
+
+.dark .ant-tag-error {
+  background: rgba(255, 77, 79, 0.2);
+  color: #ff9c6e;
+}
+
+/* Glass Modal Styles (Copied from ServerDocker.vue for consistency) */
+.glass-modal .ant-modal-content {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.glass-modal .ant-modal-header {
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 16px 16px 0 0;
+}
+
+.glass-modal .ant-modal-title {
+  font-weight: 600;
+}
+
+.glass-modal .ant-input,
+.glass-modal .ant-select-selector,
+.glass-modal .ant-input-number {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.glass-modal .ant-btn {
+  border-radius: 8px;
+}
+
+/* Dark Mode Modal */
+.dark .glass-modal .ant-modal-content {
+  background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.dark .glass-modal .ant-modal-header {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+}
+
+.dark .glass-modal .ant-modal-title {
+  color: #e0e0e0;
+}
+
+.dark .glass-modal .ant-modal-close {
+  color: #aaa;
+}
+
+.dark .glass-modal .ant-input,
+.dark .glass-modal .ant-select-selector,
+.dark .glass-modal .ant-input-number {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e0e0e0;
+}
+
+.dark .glass-modal .ant-form-item-label>label {
+  color: #ccc;
+}
+
+.form-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 16px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.dark .form-section-title {
+  color: #e0e0e0;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
 }
 </style>

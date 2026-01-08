@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -48,7 +49,9 @@ func CreateTerminalSession(c *gin.Context) {
 
 	// 解析请求体
 	var request struct {
+		ID   string `json:"id"`                  // 可选：自定义会话ID
 		Name string `json:"name" binding:"required"`
+		Cwd  string `json:"cwd"`                 // 可选：工作目录
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -56,8 +59,19 @@ func CreateTerminalSession(c *gin.Context) {
 		return
 	}
 
-	// 生成会话ID
-	sessionID := uuid.New().String()
+	// 生成或使用自定义会话ID
+	var sessionID string
+	if request.ID != "" {
+		// 使用自定义ID，如果已存在则先删除旧会话
+		sessionID = request.ID
+		if _, exists := terminalSessions[sessionID]; exists {
+			delete(terminalSessions, sessionID)
+			log.Printf("已删除旧的终端会话: %s", sessionID)
+		}
+	} else {
+		// 生成新的UUID
+		sessionID = uuid.New().String()
+	}
 
 	// 创建会话
 	session := TerminalSession{

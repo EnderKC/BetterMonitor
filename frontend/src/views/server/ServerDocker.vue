@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, h } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { message, Modal, Tabs } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import {
   ReloadOutlined,
   PlayCircleOutlined,
@@ -21,7 +21,10 @@ import {
   QuestionCircleOutlined,
   InfoCircleOutlined,
   CodeOutlined,
-  DownOutlined
+  DownOutlined,
+  AppstoreOutlined,
+  CloudServerOutlined,
+  ContainerOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import { useServerStore } from '../../stores/serverStore';
@@ -109,11 +112,6 @@ const isServerOnline = computed(() => {
   return serverStore.isServerOnline(serverId.value);
 });
 
-// 创建环境变量对象的类型
-interface EnvVars {
-  [key: string]: string;
-}
-
 // 解析Docker容器状态
 const parseContainerStatus = (status: string): string => {
   if (!status) return 'unknown';
@@ -131,36 +129,19 @@ const parseContainerStatus = (status: string): string => {
   return 'unknown';
 };
 
-// 获取实际容器状态 (优先使用state字段，其次使用status解析结果)
-const getContainerActualState = (container: any): string => {
-  if (container.state && typeof container.state === 'string') {
-    return container.state.toLowerCase();
-  }
-  return parseContainerStatus(container.status);
-};
-
 // 获取服务器详情
 const fetchServerInfo = async () => {
   loading.value = true;
   try {
-    // 使用any类型避免TypeScript错误
     const response: any = await request.get(`/servers/${serverId.value}`);
-
-    // 从响应中提取服务器数据
     if (response && response.server) {
       serverInfo.value = response.server;
-
-      // 更新全局状态
       const status = response.server.status || 'offline';
-      const isOnline = response.server.online === true;
-
       serverStore.updateServerStatus(serverId.value, status);
     } else {
-      console.error('响应中没有找到服务器数据');
       message.error('获取服务器数据失败');
     }
   } catch (error) {
-    console.error('获取服务器信息失败:', error);
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
@@ -169,39 +150,20 @@ const fetchServerInfo = async () => {
 
 // 获取容器列表
 const fetchContainers = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法获取容器列表');
-    return;
-  }
-
+  if (!isServerOnline.value) return;
   containersLoading.value = true;
   try {
     const response: any = await request.get(`/servers/${serverId.value}/docker/containers`);
-    console.log('获取容器列表响应:', response);
-
-    // 处理不同的返回格式
     if (Array.isArray(response)) {
-      // 直接是数组
       containers.value = response;
     } else if (response && response.data && Array.isArray(response.data)) {
-      // 嵌套在data字段中
       containers.value = response.data;
     } else if (response && response.containers) {
-      if (Array.isArray(response.containers)) {
-        // 嵌套在containers字段中且是数组
-        containers.value = response.containers;
-      } else if (response.containers === null) {
-        // containers为null，表示没有容器
-        containers.value = [];
-        console.log('服务器上没有运行的容器');
-      }
+      containers.value = Array.isArray(response.containers) ? response.containers : [];
     } else {
-      console.error('获取容器列表格式错误:', response);
       containers.value = [];
     }
   } catch (error) {
-    console.error('获取容器列表失败:', error);
-    message.error('获取容器列表失败');
     containers.value = [];
   } finally {
     containersLoading.value = false;
@@ -210,10 +172,7 @@ const fetchContainers = async () => {
 
 const openContainerTerminal = (container: any) => {
   const id = container.id || container.ID;
-  if (!id) {
-    message.warning('无法识别容器ID');
-    return;
-  }
+  if (!id) return message.warning('无法识别容器ID');
   const name = container.name || container.Names?.[0] || id;
   router.push({
     name: 'ServerDockerTerminal',
@@ -224,10 +183,7 @@ const openContainerTerminal = (container: any) => {
 
 const openContainerFile = (container: any) => {
   const id = container.id || container.ID;
-  if (!id) {
-    message.warning('无法识别容器ID');
-    return;
-  }
+  if (!id) return message.warning('无法识别容器ID');
   const name = container.name || container.Names?.[0] || id;
   router.push({
     name: 'ServerDockerFile',
@@ -238,39 +194,20 @@ const openContainerFile = (container: any) => {
 
 // 获取镜像列表
 const fetchImages = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法获取镜像列表');
-    return;
-  }
-
+  if (!isServerOnline.value) return;
   imagesLoading.value = true;
   try {
     const response: any = await request.get(`/servers/${serverId.value}/docker/images`);
-    console.log('获取镜像列表响应:', response);
-
-    // 处理不同的返回格式
     if (Array.isArray(response)) {
-      // 直接是数组
       images.value = response;
     } else if (response && response.data && Array.isArray(response.data)) {
-      // 嵌套在data字段中
       images.value = response.data;
     } else if (response && response.images) {
-      if (Array.isArray(response.images)) {
-        // 嵌套在images字段中且是数组
-        images.value = response.images;
-      } else if (response.images === null) {
-        // images为null，表示没有镜像
-        images.value = [];
-        console.log('服务器上没有Docker镜像');
-      }
+      images.value = Array.isArray(response.images) ? response.images : [];
     } else {
-      console.error('获取镜像列表格式错误:', response);
       images.value = [];
     }
   } catch (error) {
-    console.error('获取镜像列表失败:', error);
-    message.error('获取镜像列表失败');
     images.value = [];
   } finally {
     imagesLoading.value = false;
@@ -279,39 +216,20 @@ const fetchImages = async () => {
 
 // 获取Compose列表
 const fetchComposes = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法获取Compose列表');
-    return;
-  }
-
+  if (!isServerOnline.value) return;
   composesLoading.value = true;
   try {
     const response: any = await request.get(`/servers/${serverId.value}/docker/composes`);
-    console.log('获取Compose列表响应:', response);
-
-    // 处理不同的返回格式
     if (Array.isArray(response)) {
-      // 直接是数组
       composes.value = response;
     } else if (response && response.data && Array.isArray(response.data)) {
-      // 嵌套在data字段中
       composes.value = response.data;
     } else if (response && response.composes) {
-      if (Array.isArray(response.composes)) {
-        // 嵌套在composes字段中且是数组
-        composes.value = response.composes;
-      } else if (response.composes === null) {
-        // composes为null，表示没有Compose项目
-        composes.value = [];
-        console.log('服务器上没有Compose项目');
-      }
+      composes.value = Array.isArray(response.composes) ? response.composes : [];
     } else {
-      console.error('获取Compose列表格式错误:', response);
       composes.value = [];
     }
   } catch (error) {
-    console.error('获取Compose列表失败:', error);
-    message.error('获取Compose列表失败');
     composes.value = [];
   } finally {
     composesLoading.value = false;
@@ -321,7 +239,6 @@ const fetchComposes = async () => {
 // 过滤容器列表
 const filteredContainers = computed(() => {
   if (!containerSearch.value) return containers.value;
-
   return containers.value.filter(container =>
     container.name.toLowerCase().includes(containerSearch.value.toLowerCase()) ||
     container.image.toLowerCase().includes(containerSearch.value.toLowerCase()) ||
@@ -334,7 +251,6 @@ const filteredContainers = computed(() => {
 // 过滤镜像列表
 const filteredImages = computed(() => {
   if (!imageSearch.value) return images.value;
-
   return images.value.filter(image =>
     (image.repository && image.repository.toLowerCase().includes(imageSearch.value.toLowerCase())) ||
     (image.tag && image.tag.toLowerCase().includes(imageSearch.value.toLowerCase())) ||
@@ -342,69 +258,45 @@ const filteredImages = computed(() => {
   );
 });
 
-// 启动容器
+// 容器操作
 const startContainer = async (id: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     await request.post(`/servers/${serverId.value}/docker/containers/${id}/start`);
     message.success('容器已启动');
     fetchContainers();
   } catch (error) {
-    console.error('启动容器失败:', error);
     message.error('启动容器失败');
   }
 };
 
-// 停止容器
 const stopContainer = async (id: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     await request.post(`/servers/${serverId.value}/docker/containers/${id}/stop`);
     message.success('容器已停止');
     fetchContainers();
   } catch (error) {
-    console.error('停止容器失败:', error);
     message.error('停止容器失败');
   }
 };
 
-// 重启容器
 const restartContainer = async (id: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     await request.post(`/servers/${serverId.value}/docker/containers/${id}/restart`);
     message.success('容器已重启');
     fetchContainers();
   } catch (error) {
-    console.error('重启容器失败:', error);
     message.error('重启容器失败');
   }
 };
 
-// 删除容器
 const removeContainer = (id: string, name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
-  // 查找容器信息
+  if (!isServerOnline.value) return message.warning('服务器离线');
   const container = containers.value.find(c => c.id === id);
   const isRunning = container && (container.state === 'running' || container.status.toLowerCase().includes('up'));
 
-  // 如果容器正在运行，显示特殊提示
   if (isRunning) {
     Modal.confirm({
       title: '容器正在运行',
@@ -420,19 +312,15 @@ const removeContainer = (id: string, name: string) => {
       cancelText: '先停止',
       okType: 'danger',
       onOk: async () => {
-        // 强制删除
         try {
           await request.delete(`/servers/${serverId.value}/docker/containers/${id}?force=true`);
           message.success('容器已强制删除');
           fetchContainers();
         } catch (error: any) {
-          console.error('强制删除容器失败:', error);
-          const errorMsg = error.response?.data?.error || '强制删除容器失败';
-          message.error(errorMsg);
+          message.error(error.response?.data?.error || '强制删除容器失败');
         }
       },
       onCancel: async () => {
-        // 先停止再删除
         try {
           await request.post(`/servers/${serverId.value}/docker/containers/${id}/stop`);
           message.info('容器已停止，正在删除...');
@@ -440,14 +328,11 @@ const removeContainer = (id: string, name: string) => {
           message.success('容器已删除');
           fetchContainers();
         } catch (error: any) {
-          console.error('停止或删除容器失败:', error);
-          const errorMsg = error.response?.data?.error || '操作失败';
-          message.error(errorMsg);
+          message.error(error.response?.data?.error || '操作失败');
         }
       }
     });
   } else {
-    // 容器未运行，正常删除
     Modal.confirm({
       title: '确认删除',
       content: `确定要删除容器 ${name} 吗？此操作不可恢复。`,
@@ -460,91 +345,59 @@ const removeContainer = (id: string, name: string) => {
           message.success('容器已删除');
           fetchContainers();
         } catch (error: any) {
-          console.error('删除容器失败:', error);
-          const errorMsg = error.response?.data?.error || '删除容器失败';
-          message.error(errorMsg);
+          message.error(error.response?.data?.error || '删除容器失败');
         }
       }
     });
   }
 };
 
-// 查看容器日志
-const viewContainerLogs = async (id: string, name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
-  try {
-    await fetchContainerLogs(id, name, 100); // 默认获取100行日志
-  } catch (error) {
-    console.error('获取容器日志失败:', error);
-    message.error('获取容器日志失败');
-  }
-};
-
-// 添加日志获取与显示的相关变量
+// 日志相关
 const currentLogContainerId = ref<string>('');
 const currentLogContainerName = ref<string>('');
 const containerLogModal = ref<any>(null);
 const logsTail = ref<number>(100);
 
-// 获取容器日志并显示
+const viewContainerLogs = async (id: string, name: string) => {
+  if (!isServerOnline.value) return message.warning('服务器离线');
+  try {
+    await fetchContainerLogs(id, name, 100);
+  } catch (error) {
+    message.error('获取容器日志失败');
+  }
+};
+
 const fetchContainerLogs = async (id: string, name: string, tail: number = 100) => {
   try {
     const response: any = await request.get(`/servers/${serverId.value}/docker/containers/${id}/logs?tail=${tail}`);
-    console.log('获取容器日志响应:', response);
-
-    // 处理不同的返回格式
     let logs = '';
-    if (typeof response === 'string') {
-      logs = response;
-    } else if (response && typeof response.data === 'string') {
-      logs = response.data;
-    } else if (response && response.logs && typeof response.logs === 'string') {
-      logs = response.logs;
-    } else {
-      logs = '无日志数据或格式不正确';
-      console.error('获取容器日志格式错误:', response);
-    }
+    if (typeof response === 'string') logs = response;
+    else if (response && typeof response.data === 'string') logs = response.data;
+    else if (response && response.logs && typeof response.logs === 'string') logs = response.logs;
+    else logs = '无日志数据或格式不正确';
 
-    // 将ANSI转义序列转换为HTML
     const htmlLogs = ansiConverter.toHtml(logs);
-
-    // 保存当前查看的容器ID和名称，用于刷新
     currentLogContainerId.value = id;
     currentLogContainerName.value = name;
 
-    // 创建日志内容元素
     const logContent = h('div', {
       style: {
         maxHeight: '500px',
         overflow: 'auto',
-        background: '#000',
+        background: '#1e1e1e',
         padding: '16px',
-        borderRadius: '4px',
-        fontFamily: 'monospace',
-        color: '#FFF'
+        borderRadius: '8px',
+        fontFamily: '"SF Mono", Menlo, monospace',
+        color: '#d4d4d4',
+        fontSize: '13px',
+        lineHeight: '1.5'
       },
       innerHTML: htmlLogs
     });
 
-    // 创建标题元素
-    const modalTitle = h('div', {
-      style: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }
-    }, [
+    const modalTitle = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } }, [
       h('span', `容器日志 - ${name}`),
-      h('div', {
-        style: {
-          display: 'flex',
-          gap: '8px'
-        }
-      }, [
+      h('div', { style: { display: 'flex', gap: '8px' } }, [
         h('a-input-number', {
           style: { width: '100px' },
           value: logsTail.value,
@@ -552,9 +405,7 @@ const fetchContainerLogs = async (id: string, name: string, tail: number = 100) 
           max: 10000,
           step: 100,
           addonAfter: '行',
-          onChange: (value: number) => {
-            logsTail.value = value;
-          }
+          onChange: (value: number) => { logsTail.value = value; }
         }),
         h('a-button', {
           type: 'primary',
@@ -564,47 +415,33 @@ const fetchContainerLogs = async (id: string, name: string, tail: number = 100) 
       ])
     ]);
 
-    // 判断是否已有模态框
-    if (containerLogModal.value) {
-      // 销毁旧的模态框
-      containerLogModal.value.destroy();
-    }
+    if (containerLogModal.value) containerLogModal.value.destroy();
 
-    // 创建新的模态框
     containerLogModal.value = Modal.info({
       title: modalTitle,
       width: 800,
       content: logContent,
       okText: '关闭',
-      afterClose: () => {
-        containerLogModal.value = null;
-      }
+      class: 'glass-modal',
+      afterClose: () => { containerLogModal.value = null; }
     });
   } catch (error) {
-    console.error('获取容器日志失败:', error);
     message.error('获取容器日志失败');
   }
 };
 
-// 刷新容器日志
 const refreshContainerLogs = async () => {
   if (!currentLogContainerId.value || !containerLogModal.value) return;
-
   try {
     await fetchContainerLogs(currentLogContainerId.value, currentLogContainerName.value, logsTail.value);
   } catch (error) {
-    console.error('刷新容器日志失败:', error);
     message.error('刷新容器日志失败');
   }
 };
 
-// 删除镜像
+// 镜像操作
 const removeImage = (id: string, name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   Modal.confirm({
     title: '确认删除',
     content: `确定要删除镜像 ${name} 吗？此操作不可恢复。`,
@@ -617,42 +454,23 @@ const removeImage = (id: string, name: string) => {
         message.success('镜像已删除');
         fetchImages();
       } catch (error) {
-        console.error('删除镜像失败:', error);
         message.error('删除镜像失败');
       }
     }
   });
 };
 
-// 拉取镜像
 const pullImage = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
-  if (!pullForm.value) {
-    message.error('请输入要拉取的镜像名称');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
+  if (!pullForm.value) return message.error('请输入要拉取的镜像名称');
   pullLoading.value = true;
-
   try {
-    await request.post(`/servers/${serverId.value}/docker/images/pull`, {
-      image: pullForm.value
-    });
-
-    message.success('镜像拉取任务已提交，请稍后刷新查看结果');
+    await request.post(`/servers/${serverId.value}/docker/images/pull`, { image: pullForm.value });
+    message.success('镜像拉取任务已提交');
     pullImageVisible.value = false;
     pullForm.value = '';
-
-    // 延迟3秒后刷新镜像列表
-    setTimeout(() => {
-      fetchImages();
-    }, 3000);
+    setTimeout(() => { fetchImages(); }, 3000);
   } catch (error) {
-    console.error('拉取镜像失败:', error);
     message.error('拉取镜像失败');
   } finally {
     pullLoading.value = false;
@@ -661,43 +479,29 @@ const pullImage = async () => {
 
 // Compose操作
 const composeUp = async (name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     await request.post(`/servers/${serverId.value}/docker/composes/${name}/up`);
     message.success('Compose服务已启动');
     fetchComposes();
   } catch (error) {
-    console.error('启动Compose服务失败:', error);
     message.error('启动Compose服务失败');
   }
 };
 
 const composeDown = async (name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     await request.post(`/servers/${serverId.value}/docker/composes/${name}/down`);
     message.success('Compose服务已停止');
     fetchComposes();
   } catch (error) {
-    console.error('停止Compose服务失败:', error);
     message.error('停止Compose服务失败');
   }
 };
 
 const removeCompose = (name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   Modal.confirm({
     title: '确认删除',
     content: `确定要删除Compose项目 ${name} 吗？此操作不可恢复。`,
@@ -710,36 +514,21 @@ const removeCompose = (name: string) => {
         message.success('Compose项目已删除');
         fetchComposes();
       } catch (error) {
-        console.error('删除Compose项目失败:', error);
         message.error('删除Compose项目失败');
       }
     }
   });
 };
 
-// 查看Compose配置
 const viewComposeConfig = async (name: string) => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
   try {
     const response: any = await request.get(`/servers/${serverId.value}/docker/composes/${name}/config`);
-    console.log('获取Compose配置响应:', response);
-
-    // 处理不同的返回格式
     let config = '';
-    if (typeof response === 'string') {
-      config = response;
-    } else if (response && typeof response.data === 'string') {
-      config = response.data;
-    } else if (response && response.config && typeof response.config === 'string') {
-      config = response.config;
-    } else {
-      config = '无配置数据或格式不正确';
-      console.error('获取Compose配置格式错误:', response);
-    }
+    if (typeof response === 'string') config = response;
+    else if (response && typeof response.data === 'string') config = response.data;
+    else if (response && response.config && typeof response.config === 'string') config = response.config;
+    else config = '无配置数据或格式不正确';
 
     Modal.info({
       title: `Compose配置 - ${name}`,
@@ -751,34 +540,25 @@ const viewComposeConfig = async (name: string) => {
             overflow: 'auto',
             background: '#1e1e1e',
             padding: '16px',
-            borderRadius: '4px',
-            fontFamily: 'monospace',
+            borderRadius: '8px',
+            fontFamily: '"SF Mono", Menlo, monospace',
             color: '#d4d4d4',
-            fontSize: '14px',
+            fontSize: '13px',
             lineHeight: '1.5'
           }
         }, config)
       ]),
-      okText: '关闭'
+      okText: '关闭',
+      class: 'glass-modal'
     });
   } catch (error) {
-    console.error('获取Compose配置失败:', error);
     message.error('获取Compose配置失败');
   }
 };
 
-// 创建Compose项目
 const createCompose = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
-  if (!composeForm.name || !composeForm.content) {
-    message.error('请填写Compose项目名称和配置内容');
-    return;
-  }
-
+  if (!isServerOnline.value) return message.warning('服务器离线');
+  if (!composeForm.name || !composeForm.content) return message.error('请填写完整信息');
   try {
     await request.post(`/servers/${serverId.value}/docker/composes`, composeForm);
     message.success('Compose项目已创建');
@@ -787,42 +567,18 @@ const createCompose = async () => {
     composeForm.content = '';
     fetchComposes();
   } catch (error) {
-    console.error('创建Compose项目失败:', error);
     message.error('创建Compose项目失败');
   }
 };
 
-// 添加端口映射
-const addPortMapping = () => {
-  containerForm.ports.push({ hostPort: '', containerPort: '' });
-};
+// 容器表单操作
+const addPortMapping = () => { containerForm.ports.push({ hostPort: '', containerPort: '' }); };
+const removePortMapping = (index: number) => { containerForm.ports.splice(index, 1); };
+const addVolumeMapping = () => { containerForm.volumes.push({ hostPath: '', containerPath: '' }); };
+const removeVolumeMapping = (index: number) => { containerForm.volumes.splice(index, 1); };
+const addEnvVar = () => { containerForm.envs.push({ key: '', value: '' }); };
+const removeEnvVar = (index: number) => { containerForm.envs.splice(index, 1); };
 
-// 删除端口映射
-const removePortMapping = (index: number) => {
-  containerForm.ports.splice(index, 1);
-};
-
-// 添加卷映射
-const addVolumeMapping = () => {
-  containerForm.volumes.push({ hostPath: '', containerPath: '' });
-};
-
-// 删除卷映射
-const removeVolumeMapping = (index: number) => {
-  containerForm.volumes.splice(index, 1);
-};
-
-// 添加环境变量
-const addEnvVar = () => {
-  containerForm.envs.push({ key: '', value: '' });
-};
-
-// 删除环境变量
-const removeEnvVar = (index: number) => {
-  containerForm.envs.splice(index, 1);
-};
-
-// 重置容器表单
 const resetContainerForm = () => {
   containerForm.name = '';
   containerForm.image = '';
@@ -834,653 +590,403 @@ const resetContainerForm = () => {
   containerForm.network = 'bridge';
 };
 
-// 创建容器
 const createContainer = async () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法执行此操作');
-    return;
-  }
-
-  if (!containerForm.name) {
-    message.error('请输入容器名称');
-    return;
-  }
-
-  if (!containerForm.image) {
-    message.error('请选择或输入镜像名称');
-    return;
-  }
+  if (!isServerOnline.value) return message.warning('服务器离线');
+  if (!containerForm.name || !containerForm.image) return message.error('请填写必要信息');
 
   try {
-    // 过滤空的端口映射
-    const ports = containerForm.ports.filter(port => port.hostPort && port.containerPort)
-      .map(port => `${port.hostPort}:${port.containerPort}`);
-
-    // 过滤空的卷映射
-    const volumes = containerForm.volumes.filter(volume => volume.hostPath && volume.containerPath)
-      .map(volume => `${volume.hostPath}:${volume.containerPath}`);
-
-    // 过滤空的环境变量并构建对象
+    const ports = containerForm.ports.filter(p => p.hostPort && p.containerPort).map(p => `${p.hostPort}:${p.containerPort}`);
+    const volumes = containerForm.volumes.filter(v => v.hostPath && v.containerPath).map(v => `${v.hostPath}:${v.containerPath}`);
     const env: Record<string, string> = {};
-    containerForm.envs.forEach(item => {
-      if (item.key) {
-        env[item.key] = item.value || '';
-      }
-    });
+    containerForm.envs.forEach(item => { if (item.key) env[item.key] = item.value || ''; });
 
-    const response = await request.post(`/servers/${serverId.value}/docker/containers`, {
+    await request.post(`/servers/${serverId.value}/docker/containers`, {
       name: containerForm.name,
       image: containerForm.image,
-      ports: ports,
-      volumes: volumes,
-      env: env,
+      ports, volumes, env,
       command: containerForm.command,
       restart: containerForm.restart,
       network: containerForm.network
     });
-
-    console.log('创建容器响应:', response);
 
     message.success('容器创建成功');
     createContainerVisible.value = false;
     resetContainerForm();
     fetchContainers();
   } catch (error) {
-    console.error('创建容器失败:', error);
     message.error('创建容器失败');
   }
 };
 
-// 页面挂载时获取服务器信息和Docker数据
+// 辅助函数
+const goBack = () => { router.push(`/admin/servers/${serverId.value}`); };
+const refreshData = () => {
+  if (!isServerOnline.value) return message.warning('服务器离线');
+  if (activeKey.value === 'containers') fetchContainers();
+  else if (activeKey.value === 'images') fetchImages();
+  else if (activeKey.value === 'composes') fetchComposes();
+};
+
+const formatTime = (timestamp: string) => new Date(timestamp).toLocaleString();
+const containerStatusText = (status: string) => {
+  const s = parseContainerStatus(status);
+  const map: Record<string, string> = {
+    'running': '运行中', 'exited': '已停止', 'created': '已创建',
+    'paused': '已暂停', 'restarting': '重启中', 'removing': '移除中', 'dead': '已死亡'
+  };
+  return map[s] || status;
+};
+const containerStatusColor = (status: string) => {
+  const s = parseContainerStatus(status);
+  const map: Record<string, string> = {
+    'running': 'success', 'exited': 'error', 'created': 'processing',
+    'paused': 'warning', 'restarting': 'warning', 'removing': 'default', 'dead': 'default'
+  };
+  return map[s] || 'default';
+};
+const isContainerActionable = (status: string) => !['removing', 'dead'].includes(parseContainerStatus(status));
+const onTabChange = (key: string) => {
+  activeKey.value = key;
+  if (key === 'containers') fetchContainers();
+  else if (key === 'images') fetchImages();
+  else if (key === 'composes') fetchComposes();
+};
+const getContainerStatusIcon = (status: string) => {
+  const s = parseContainerStatus(status);
+  const map: Record<string, any> = {
+    'running': CheckCircleOutlined, 'exited': CloseCircleOutlined, 'created': ClockCircleOutlined,
+    'paused': PauseCircleOutlined, 'restarting': SyncOutlined, 'removing': DeleteOutlined, 'dead': ExclamationCircleOutlined
+  };
+  return h(map[s] || QuestionCircleOutlined);
+};
+
 onMounted(() => {
   fetchServerInfo().then(() => {
     if (isServerOnline.value) {
       fetchContainers();
       fetchImages();
       fetchComposes();
-    } else {
-      message.warning('服务器离线，无法使用Docker管理功能');
     }
   });
 });
-
-// 返回服务器详情页
-const goBack = () => {
-  router.push(`/admin/servers/${serverId.value}`);
-};
-
-// 刷新数据
-const refreshData = () => {
-  if (!isServerOnline.value) {
-    message.warning('服务器离线，无法刷新数据');
-    return;
-  }
-
-  if (activeKey.value === 'containers') {
-    fetchContainers();
-  } else if (activeKey.value === 'images') {
-    fetchImages();
-  } else if (activeKey.value === 'composes') {
-    fetchComposes();
-  }
-};
-
-// 格式化创建时间
-const formatTime = (timestamp: string) => {
-  return new Date(timestamp).toLocaleString();
-};
-
-// 转换容器状态到中文
-const containerStatusText = (status: string) => {
-  const parsedStatus = parseContainerStatus(status);
-
-  switch (parsedStatus) {
-    case 'running':
-      return '运行中';
-    case 'exited':
-      return '已停止';
-    case 'created':
-      return '已创建';
-    case 'paused':
-      return '已暂停';
-    case 'restarting':
-      return '重启中';
-    case 'removing':
-      return '移除中';
-    case 'dead':
-      return '已死亡';
-    default:
-      return status; // 返回原始状态
-  }
-};
-
-// 获取容器状态颜色
-const containerStatusColor = (status: string) => {
-  const parsedStatus = parseContainerStatus(status);
-
-  switch (parsedStatus) {
-    case 'running':
-      return 'green';
-    case 'exited':
-      return 'red';
-    case 'created':
-      return 'blue';
-    case 'paused':
-      return 'orange';
-    case 'restarting':
-      return 'gold';
-    case 'removing':
-      return 'purple';
-    case 'dead':
-      return 'black';
-    default:
-      return 'default';
-  }
-};
-
-// 检查容器是否可操作
-const isContainerActionable = (status: string) => {
-  const parsedStatus = parseContainerStatus(status);
-
-  // 如果容器处于正在移除或死亡状态，则不允许操作
-  const nonActionableStates = ['removing', 'dead'];
-  return !nonActionableStates.includes(parsedStatus);
-};
-
-// 修复$event隐式any类型的问题
-const onTabChange = (key: string) => {
-  activeKey.value = key;
-
-  // 切换到对应标签页时刷新数据
-  if (key === 'containers') {
-    fetchContainers();
-  } else if (key === 'images') {
-    fetchImages();
-  } else if (key === 'composes') {
-    fetchComposes();
-  }
-};
-
-// 获取容器状态图标
-const getContainerStatusIcon = (status: string) => {
-  const parsedStatus = parseContainerStatus(status);
-
-  switch (parsedStatus) {
-    case 'running':
-      return h(CheckCircleOutlined);
-    case 'exited':
-      return h(CloseCircleOutlined);
-    case 'created':
-      return h(ClockCircleOutlined);
-    case 'paused':
-      return h(PauseCircleOutlined);
-    case 'restarting':
-      return h(SyncOutlined);
-    case 'removing':
-      return h(DeleteOutlined);
-    case 'dead':
-      return h(ExclamationCircleOutlined);
-    default:
-      return h(QuestionCircleOutlined);
-  }
-};
 </script>
 
 <template>
-  <div class="docker-container">
-    <a-page-header title="Docker管理" :sub-title="serverInfo.name" @back="goBack">
+  <div class="docker-page">
+    <a-page-header class="glass-header" :title="serverInfo.name || `服务器 ${serverId}`" sub-title="Docker管理"
+      @back="goBack">
       <template #tags>
         <a-tag :color="isServerOnline ? 'success' : 'error'">
           {{ isServerOnline ? '在线' : '离线' }}
         </a-tag>
       </template>
-
       <template #extra>
-        <a-space>
-          <a-button type="primary" @click="refreshData">
-            <template #icon>
-              <ReloadOutlined />
-            </template>
-            刷新
-          </a-button>
-        </a-space>
+        <a-button type="primary" @click="refreshData" class="glass-button">
+          <template #icon>
+            <ReloadOutlined />
+          </template>
+          刷新
+        </a-button>
       </template>
     </a-page-header>
 
-    <div class="docker-content">
+    <div class="main-content">
       <a-spin :spinning="loading">
         <a-alert v-if="!isServerOnline" type="warning" show-icon message="服务器当前离线，无法使用Docker管理功能"
-          style="margin-bottom: 24px" />
+          style="margin-bottom: 24px" class="glass-alert" />
 
-        <div v-else>
-          <a-tabs v-model:activeKey="activeKey" @change="onTabChange">
+        <div v-else class="glass-panel">
+          <a-tabs v-model:activeKey="activeKey" @change="onTabChange" class="custom-tabs">
             <!-- 容器管理 -->
-            <a-tab-pane key="containers" tab="容器管理">
-              <div class="tab-header">
-                <div class="search-box">
-                  <a-input-search v-model:value="containerSearch" placeholder="搜索容器名称、镜像或ID" style="width: 300px"
-                    :loading="containersLoading" />
+            <a-tab-pane key="containers">
+              <template #tab>
+                <span>
+                  <ContainerOutlined /> 容器管理
+                </span>
+              </template>
+              <div class="tab-content">
+                <div class="toolbar">
+                  <a-input-search v-model:value="containerSearch" placeholder="搜索容器..." style="width: 300px"
+                    class="glass-input" />
+                  <a-button type="primary" @click="createContainerVisible = true" class="action-button">
+                    <template #icon>
+                      <PlusOutlined />
+                    </template>
+                    创建容器
+                  </a-button>
                 </div>
-                <div class="action-box">
-                  <a-space>
-                    <a-button type="primary" @click="createContainerVisible = true">
-                      <template #icon>
-                        <PlusOutlined />
-                      </template>
-                      创建容器
-                    </a-button>
-                    <a-button @click="fetchContainers" :loading="containersLoading">
-                      <template #icon>
-                        <ReloadOutlined />
-                      </template>
-                      刷新
-                    </a-button>
-                  </a-space>
-                </div>
-              </div>
 
-              <a-table :dataSource="filteredContainers" :loading="containersLoading" :pagination="{ pageSize: 10 }"
-                rowKey="id">
-                <template #emptyText>
-                  <div style="text-align: center; padding: 16px;">
-                    <p>暂无容器数据</p>
-                    <p v-if="isServerOnline">服务器上没有运行的Docker容器</p>
-                    <p v-else>服务器离线，无法获取容器数据</p>
-                  </div>
-                </template>
-
-                <a-table-column title="容器ID" dataIndex="id" width="120">
-                  <template #default="{ text }">
-                    {{ text.substring(0, 12) }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="名称" dataIndex="name" />
-                <a-table-column title="镜像" dataIndex="image" />
-                <a-table-column title="状态" dataIndex="status">
-                  <template #default="{ text, record }">
-                    <a-tag :color="containerStatusColor(text)">
-                      <span style="display: flex; align-items: center; gap: 4px;">
-                        <component :is="getContainerStatusIcon(text)" />
-                        <span>{{ containerStatusText(text) }}</span>
-                        <a-tooltip>
-                          <template #title>原始状态: {{ text }}</template>
-                          <InfoCircleOutlined style="margin-left: 4px; opacity: 0.6;" />
-                        </a-tooltip>
-                      </span>
-                    </a-tag>
-                  </template>
-                </a-table-column>
-                <a-table-column title="端口" dataIndex="ports">
-                  <template #default="{ text }">
-                    <div v-if="text && text.length > 0">
-                      <a-tag v-for="port in text" :key="port" color="blue">
-                        {{ port }}
+                <a-table :dataSource="filteredContainers" :loading="containersLoading" :pagination="{ pageSize: 10 }"
+                  rowKey="id" class="glass-table">
+                  <a-table-column title="ID" dataIndex="id" width="120">
+                    <template #default="{ text }"><span class="mono-text">{{ text.substring(0, 12) }}</span></template>
+                  </a-table-column>
+                  <a-table-column title="名称" dataIndex="name">
+                    <template #default="{ text }"><span class="name-text">{{ text }}</span></template>
+                  </a-table-column>
+                  <a-table-column title="镜像" dataIndex="image">
+                    <template #default="{ text }"><a-tag color="blue">{{ text }}</a-tag></template>
+                  </a-table-column>
+                  <a-table-column title="状态" dataIndex="status">
+                    <template #default="{ text }">
+                      <a-tag :color="containerStatusColor(text)">
+                        <component :is="getContainerStatusIcon(text)" /> {{ containerStatusText(text) }}
                       </a-tag>
-                    </div>
-                    <span v-else>-</span>
-                  </template>
-                </a-table-column>
-                <a-table-column title="创建时间" dataIndex="created">
-                  <template #default="{ text }">
-                    {{ formatTime(text) }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="操作" width="120">
-                  <template #default="{ record }">
-                    <a-dropdown>
-                      <template #overlay>
-                        <a-menu>
-                          <a-menu-item v-if="parseContainerStatus(record.status) !== 'running'" key="start"
-                            :disabled="!isContainerActionable(record.status)" @click="startContainer(record.id)">
-                            <PlayCircleOutlined />
-                            启动容器
-                          </a-menu-item>
-                          <a-menu-item v-if="parseContainerStatus(record.status) === 'running'" key="stop"
-                            :disabled="!isContainerActionable(record.status)" @click="stopContainer(record.id)">
-                            <PauseCircleOutlined />
-                            停止容器
-                          </a-menu-item>
-                          <a-menu-item v-if="parseContainerStatus(record.status) === 'running'" key="restart"
-                            :disabled="!isContainerActionable(record.status)" @click="restartContainer(record.id)">
-                            <SyncOutlined />
-                            重启容器
-                          </a-menu-item>
-                          <a-menu-divider />
-                          <a-menu-item key="terminal" @click="openContainerTerminal(record)">
-                            <CodeOutlined />
-                            容器终端
-                          </a-menu-item>
-                          <a-menu-item key="file" @click="openContainerFile(record)">
-                            <FolderOutlined />
-                            容器文件
-                          </a-menu-item>
-                          <a-menu-item key="logs" @click="viewContainerLogs(record.id, record.name)">
-                            <EyeOutlined />
-                            查看日志
-                          </a-menu-item>
-                          <a-menu-divider />
-                          <a-menu-item key="delete" danger
-                            :disabled="parseContainerStatus(record.status) === 'removing'"
-                            @click="removeContainer(record.id, record.name)">
-                            <DeleteOutlined />
-                            删除容器
-                          </a-menu-item>
-                        </a-menu>
-                      </template>
-                      <a-button type="primary" size="small">
-                        操作
-                        <DownOutlined />
-                      </a-button>
-                    </a-dropdown>
-                  </template>
-                </a-table-column>
-              </a-table>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="端口" dataIndex="ports">
+                    <template #default="{ text }">
+                      <div v-if="text && text.length" class="ports-list">
+                        <a-tag v-for="port in text" :key="port" class="port-tag">{{ port }}</a-tag>
+                      </div>
+                      <span v-else class="text-secondary">-</span>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="操作" width="120">
+                    <template #default="{ record }">
+                      <a-dropdown>
+                        <a-button type="link" size="small">操作
+                          <DownOutlined />
+                        </a-button>
+                        <template #overlay>
+                          <a-menu>
+                            <a-menu-item v-if="parseContainerStatus(record.status) !== 'running'" key="start"
+                              :disabled="!isContainerActionable(record.status)" @click="startContainer(record.id)">
+                              <PlayCircleOutlined /> 启动
+                            </a-menu-item>
+                            <a-menu-item v-if="parseContainerStatus(record.status) === 'running'" key="stop"
+                              :disabled="!isContainerActionable(record.status)" @click="stopContainer(record.id)">
+                              <PauseCircleOutlined /> 停止
+                            </a-menu-item>
+                            <a-menu-item v-if="parseContainerStatus(record.status) === 'running'" key="restart"
+                              :disabled="!isContainerActionable(record.status)" @click="restartContainer(record.id)">
+                              <SyncOutlined /> 重启
+                            </a-menu-item>
+                            <a-menu-divider />
+                            <a-menu-item key="terminal" @click="openContainerTerminal(record)">
+                              <CodeOutlined /> 终端
+                            </a-menu-item>
+                            <a-menu-item key="file" @click="openContainerFile(record)">
+                              <FolderOutlined /> 文件
+                            </a-menu-item>
+                            <a-menu-item key="logs" @click="viewContainerLogs(record.id, record.name)">
+                              <EyeOutlined /> 日志
+                            </a-menu-item>
+                            <a-menu-divider />
+                            <a-menu-item key="delete" danger
+                              :disabled="parseContainerStatus(record.status) === 'removing'"
+                              @click="removeContainer(record.id, record.name)">
+                              <DeleteOutlined /> 删除
+                            </a-menu-item>
+                          </a-menu>
+                        </template>
+                      </a-dropdown>
+                    </template>
+                  </a-table-column>
+                </a-table>
+              </div>
             </a-tab-pane>
 
             <!-- 镜像管理 -->
-            <a-tab-pane key="images" tab="镜像管理">
-              <div class="tab-header">
-                <div class="search-box">
-                  <a-input-search v-model:value="imageSearch" placeholder="搜索镜像名称、标签或ID" style="width: 300px"
-                    :loading="imagesLoading" />
+            <a-tab-pane key="images">
+              <template #tab>
+                <span>
+                  <AppstoreOutlined /> 镜像管理
+                </span>
+              </template>
+              <div class="tab-content">
+                <div class="toolbar">
+                  <a-input-search v-model:value="imageSearch" placeholder="搜索镜像..." style="width: 300px"
+                    class="glass-input" />
+                  <a-button type="primary" @click="pullImageVisible = true" class="action-button">
+                    <template #icon>
+                      <DownloadOutlined />
+                    </template>
+                    拉取镜像
+                  </a-button>
                 </div>
-                <div class="action-box">
-                  <a-space>
-                    <a-button type="primary" @click="pullImageVisible = true">
-                      <template #icon>
-                        <DownloadOutlined />
-                      </template>
-                      拉取镜像
-                    </a-button>
-                    <a-button @click="fetchImages" :loading="imagesLoading">
-                      <template #icon>
-                        <ReloadOutlined />
-                      </template>
-                      刷新
-                    </a-button>
-                  </a-space>
-                </div>
+
+                <a-table :dataSource="filteredImages" :loading="imagesLoading" :pagination="{ pageSize: 10 }"
+                  rowKey="id" class="glass-table">
+                  <a-table-column title="ID" dataIndex="id" width="120">
+                    <template #default="{ text }"><span class="mono-text">{{ text.substring(0, 12) }}</span></template>
+                  </a-table-column>
+                  <a-table-column title="仓库" dataIndex="repository">
+                    <template #default="{ text }"><span class="name-text">{{ text }}</span></template>
+                  </a-table-column>
+                  <a-table-column title="标签" dataIndex="tag">
+                    <template #default="{ text }"><a-tag>{{ text }}</a-tag></template>
+                  </a-table-column>
+                  <a-table-column title="大小" dataIndex="size">
+                    <template #default="{ text }">{{ (text / (1024 * 1024)).toFixed(2) }} MB</template>
+                  </a-table-column>
+                  <a-table-column title="创建时间" dataIndex="created">
+                    <template #default="{ text }">{{ formatTime(text) }}</template>
+                  </a-table-column>
+                  <a-table-column title="操作">
+                    <template #default="{ record }">
+                      <a-popconfirm title="确定要删除此镜像吗？" ok-text="删除" cancel-text="取消"
+                        @confirm="removeImage(record.id, `${record.repository}:${record.tag}`)">
+                        <a-button type="text" danger size="small">
+                          <template #icon>
+                            <DeleteOutlined />
+                          </template> 删除
+                        </a-button>
+                      </a-popconfirm>
+                    </template>
+                  </a-table-column>
+                </a-table>
               </div>
-
-              <a-table :dataSource="filteredImages" :loading="imagesLoading" :pagination="{ pageSize: 10 }" rowKey="id">
-                <template #emptyText>
-                  <div style="text-align: center; padding: 16px;">
-                    <p>暂无镜像数据</p>
-                    <p v-if="isServerOnline">服务器上没有Docker镜像</p>
-                    <p v-else>服务器离线，无法获取镜像数据</p>
-                  </div>
-                </template>
-
-                <a-table-column title="镜像ID" dataIndex="id" width="120">
-                  <template #default="{ text }">
-                    {{ text.substring(0, 12) }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="仓库" dataIndex="repository" />
-                <a-table-column title="标签" dataIndex="tag" />
-                <a-table-column title="大小" dataIndex="size">
-                  <template #default="{ text }">
-                    {{ (text / (1024 * 1024)).toFixed(2) }} MB
-                  </template>
-                </a-table-column>
-                <a-table-column title="创建时间" dataIndex="created">
-                  <template #default="{ text }">
-                    {{ formatTime(text) }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="操作">
-                  <template #default="{ record }">
-                    <a-space>
-                      <a-button type="primary" danger size="small"
-                        @click="removeImage(record.id, `${record.repository}:${record.tag}`)">
-                        <template #icon>
-                          <DeleteOutlined />
-                        </template>
-                        删除
-                      </a-button>
-                    </a-space>
-                  </template>
-                </a-table-column>
-              </a-table>
             </a-tab-pane>
 
             <!-- Compose管理 -->
-            <a-tab-pane key="composes" tab="Compose管理">
-              <div class="tab-header">
-                <div class="search-box">
-                  <!-- Compose通常不会太多，所以不需要搜索框 -->
+            <a-tab-pane key="composes">
+              <template #tab>
+                <span>
+                  <CloudServerOutlined /> Compose管理
+                </span>
+              </template>
+              <div class="tab-content">
+                <div class="toolbar">
+                  <div class="spacer"></div>
+                  <a-button type="primary" @click="composeFormVisible = true" class="action-button">
+                    <template #icon>
+                      <PlusOutlined />
+                    </template>
+                    创建项目
+                  </a-button>
                 </div>
-                <div class="action-box">
-                  <a-space>
-                    <a-button type="primary" @click="composeFormVisible = true">
-                      <template #icon>
-                        <PlusOutlined />
-                      </template>
-                      创建Compose
-                    </a-button>
-                    <a-button @click="fetchComposes" :loading="composesLoading">
-                      <template #icon>
-                        <ReloadOutlined />
-                      </template>
-                      刷新
-                    </a-button>
-                  </a-space>
-                </div>
+
+                <a-table :dataSource="composes" :loading="composesLoading" :pagination="{ pageSize: 10 }" rowKey="name"
+                  class="glass-table">
+                  <a-table-column title="名称" dataIndex="name">
+                    <template #default="{ text }"><span class="name-text">{{ text }}</span></template>
+                  </a-table-column>
+                  <a-table-column title="状态" dataIndex="status">
+                    <template #default="{ text }">
+                      <a-tag :color="text === 'running' ? 'success' : 'error'">
+                        {{ text === 'running' ? '运行中' : '已停止' }}
+                      </a-tag>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="容器数" dataIndex="container_count" />
+                  <a-table-column title="更新时间" dataIndex="updated_at">
+                    <template #default="{ text }">{{ formatTime(text) }}</template>
+                  </a-table-column>
+                  <a-table-column title="操作">
+                    <template #default="{ record }">
+                      <a-space>
+                        <a-button v-if="record.status !== 'running'" type="link" size="small"
+                          @click="composeUp(record.name)">
+                          启动
+                        </a-button>
+                        <a-button v-if="record.status === 'running'" type="link" danger size="small"
+                          @click="composeDown(record.name)">
+                          停止
+                        </a-button>
+                        <a-button type="link" size="small" @click="viewComposeConfig(record.name)">配置</a-button>
+                        <a-popconfirm title="确定要删除此项目吗？" ok-text="删除" cancel-text="取消"
+                          @confirm="removeCompose(record.name)">
+                          <a-button type="link" danger size="small">删除</a-button>
+                        </a-popconfirm>
+                      </a-space>
+                    </template>
+                  </a-table-column>
+                </a-table>
               </div>
-
-              <a-table :dataSource="composes" :loading="composesLoading" :pagination="{ pageSize: 10 }" rowKey="name">
-                <template #emptyText>
-                  <div style="text-align: center; padding: 16px;">
-                    <p>暂无Compose项目数据</p>
-                    <p v-if="isServerOnline">服务器上没有Docker Compose项目</p>
-                    <p v-else>服务器离线，无法获取Compose项目数据</p>
-                  </div>
-                </template>
-
-                <a-table-column title="名称" dataIndex="name" />
-                <a-table-column title="状态" dataIndex="status">
-                  <template #default="{ text }">
-                    <a-tag :color="text === 'running' ? 'success' : 'error'">
-                      {{ text === 'running' ? '运行中' : '已停止' }}
-                    </a-tag>
-                  </template>
-                </a-table-column>
-                <a-table-column title="容器数量" dataIndex="container_count" />
-                <a-table-column title="上次更新" dataIndex="updated_at">
-                  <template #default="{ text }">
-                    {{ formatTime(text) }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="操作">
-                  <template #default="{ record }">
-                    <a-space>
-                      <a-button v-if="record.status !== 'running'" type="primary" size="small"
-                        @click="composeUp(record.name)">
-                        <template #icon>
-                          <PlayCircleOutlined />
-                        </template>
-                        启动
-                      </a-button>
-                      <a-button v-if="record.status === 'running'" type="primary" danger size="small"
-                        @click="composeDown(record.name)">
-                        <template #icon>
-                          <PauseCircleOutlined />
-                        </template>
-                        停止
-                      </a-button>
-                      <a-button type="primary" size="small" @click="viewComposeConfig(record.name)">
-                        <template #icon>
-                          <FileTextOutlined />
-                        </template>
-                        配置
-                      </a-button>
-                      <a-button type="primary" danger size="small" @click="removeCompose(record.name)">
-                        <template #icon>
-                          <DeleteOutlined />
-                        </template>
-                        删除
-                      </a-button>
-                    </a-space>
-                  </template>
-                </a-table-column>
-              </a-table>
             </a-tab-pane>
           </a-tabs>
         </div>
       </a-spin>
     </div>
 
-    <!-- 拉取镜像对话框 -->
+    <!-- 模态框组件 (保持原有逻辑，仅添加样式类) -->
     <a-modal v-model:visible="pullImageVisible" title="拉取镜像" @ok="pullImage" :confirmLoading="pullLoading"
-      :maskClosable="false">
+      :maskClosable="false" class="glass-modal">
       <a-form layout="vertical">
         <a-form-item label="镜像名称" required>
-          <a-input v-model:value="pullForm" placeholder="例如：nginx:latest、redis:6、ubuntu:20.04"
-            @pressEnter="pullImage" />
-          <div class="form-help">
-            <p>格式：repository:tag</p>
-            <p>如不指定tag，默认为latest</p>
-          </div>
+          <a-input v-model:value="pullForm" placeholder="例如：nginx:latest" @pressEnter="pullImage" />
+          <div class="form-help">格式：repository:tag (默认latest)</div>
         </a-form-item>
       </a-form>
     </a-modal>
 
-    <!-- Compose表单对话框 -->
     <a-modal v-model:visible="composeFormVisible" title="创建Compose项目" width="700px" @ok="createCompose"
-      :maskClosable="false">
+      :maskClosable="false" class="glass-modal">
       <a-form layout="vertical">
         <a-form-item label="项目名称" required>
-          <a-input v-model:value="composeForm.name" placeholder="输入项目名称，例如：webapp" />
+          <a-input v-model:value="composeForm.name" placeholder="输入项目名称" />
         </a-form-item>
         <a-form-item label="docker-compose.yml内容" required>
-          <a-textarea v-model:value="composeForm.content" placeholder="输入docker-compose.yml内容" :rows="15"
-            :autoSize="{ minRows: 15, maxRows: 25 }" />
-          <div class="form-help">
-            <p>YAML格式，请确保语法正确</p>
-          </div>
+          <a-textarea v-model:value="composeForm.content" placeholder="输入YAML内容" :rows="15"
+            :autoSize="{ minRows: 15, maxRows: 25 }" class="code-textarea" />
         </a-form-item>
       </a-form>
     </a-modal>
 
-    <!-- 创建容器对话框 -->
     <a-modal v-model:visible="createContainerVisible" title="创建容器" width="700px" @ok="createContainer"
-      :maskClosable="false">
+      :maskClosable="false" class="glass-modal">
       <a-form layout="vertical">
         <a-form-item label="容器名称" required>
-          <a-input v-model:value="containerForm.name" placeholder="输入容器名称，例如：my-nginx" />
+          <a-input v-model:value="containerForm.name" placeholder="输入容器名称" />
         </a-form-item>
         <a-form-item label="镜像" required>
           <a-input-group compact>
-            <a-select style="width: 75%" v-model:value="containerForm.image" placeholder="选择镜像或手动输入" show-search
-              :filter-option="false" @search="(value: string) => containerForm.image = value">
+            <a-select style="width: 75%" v-model:value="containerForm.image" placeholder="选择或输入镜像" show-search
+              :filter-option="false" @search="(v: string) => containerForm.image = v">
               <a-select-option v-for="image in images" :key="image.id" :value="`${image.repository}:${image.tag}`">
                 {{ image.repository }}:{{ image.tag }}
               </a-select-option>
             </a-select>
-            <a-button style="width: 25%" @click="fetchImages" :loading="imagesLoading" title="刷新镜像列表">
-              <template #icon>
-                <ReloadOutlined />
-              </template>
-              刷新镜像
+            <a-button style="width: 25%" @click="fetchImages" :loading="imagesLoading">
+              <ReloadOutlined />
             </a-button>
           </a-input-group>
         </a-form-item>
-
+        <!-- 端口映射等复杂表单项保持原样，样式由全局CSS控制 -->
         <a-divider orientation="left">端口映射</a-divider>
-        <div v-for="(port, index) in containerForm.ports" :key="'port-' + index">
-          <a-row :gutter="8">
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '主机端口' : undefined">
-                <a-input v-model:value="port.hostPort" placeholder="例如：8080" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '容器端口' : undefined">
-                <a-input v-model:value="port.containerPort" placeholder="例如：80" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="4">
-              <a-form-item :label="index === 0 ? '操作' : undefined">
-                <a-button v-if="index === 0" type="primary" @click="addPortMapping">
-                  <template #icon>
-                    <PlusOutlined />
-                  </template>
-                </a-button>
-                <a-button v-else type="danger" @click="removePortMapping(index)">
-                  <template #icon>
-                    <DeleteOutlined />
-                  </template>
-                </a-button>
-              </a-form-item>
-            </a-col>
-          </a-row>
+        <div v-for="(port, index) in containerForm.ports" :key="'port-' + index" class="form-row">
+          <a-input v-model:value="port.hostPort" placeholder="主机端口" style="width: 40%" />
+          <span class="separator">:</span>
+          <a-input v-model:value="port.containerPort" placeholder="容器端口" style="width: 40%" />
+          <a-button v-if="index === 0" type="primary" shape="circle" size="small" @click="addPortMapping">
+            <PlusOutlined />
+          </a-button>
+          <a-button v-else type="danger" shape="circle" size="small" @click="removePortMapping(index)">
+            <DeleteOutlined />
+          </a-button>
         </div>
 
         <a-divider orientation="left">数据卷</a-divider>
-        <div v-for="(volume, index) in containerForm.volumes" :key="'volume-' + index">
-          <a-row :gutter="8">
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '主机路径' : undefined">
-                <a-input v-model:value="volume.hostPath" placeholder="例如：/data/mysql" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '容器路径' : undefined">
-                <a-input v-model:value="volume.containerPath" placeholder="例如：/var/lib/mysql" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="4">
-              <a-form-item :label="index === 0 ? '操作' : undefined">
-                <a-button v-if="index === 0" type="primary" @click="addVolumeMapping">
-                  <template #icon>
-                    <PlusOutlined />
-                  </template>
-                </a-button>
-                <a-button v-else type="danger" @click="removeVolumeMapping(index)">
-                  <template #icon>
-                    <DeleteOutlined />
-                  </template>
-                </a-button>
-              </a-form-item>
-            </a-col>
-          </a-row>
+        <div v-for="(volume, index) in containerForm.volumes" :key="'volume-' + index" class="form-row">
+          <a-input v-model:value="volume.hostPath" placeholder="主机路径" style="width: 40%" />
+          <span class="separator">:</span>
+          <a-input v-model:value="volume.containerPath" placeholder="容器路径" style="width: 40%" />
+          <a-button v-if="index === 0" type="primary" shape="circle" size="small" @click="addVolumeMapping">
+            <PlusOutlined />
+          </a-button>
+          <a-button v-else type="danger" shape="circle" size="small" @click="removeVolumeMapping(index)">
+            <DeleteOutlined />
+          </a-button>
         </div>
 
         <a-divider orientation="left">环境变量</a-divider>
-        <div v-for="(env, index) in containerForm.envs" :key="'env-' + index">
-          <a-row :gutter="8">
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '变量名' : undefined">
-                <a-input v-model:value="env.key" placeholder="例如：MYSQL_ROOT_PASSWORD" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="10">
-              <a-form-item :label="index === 0 ? '变量值' : undefined">
-                <a-input v-model:value="env.value" placeholder="例如：123456" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="4">
-              <a-form-item :label="index === 0 ? '操作' : undefined">
-                <a-button v-if="index === 0" type="primary" @click="addEnvVar">
-                  <template #icon>
-                    <PlusOutlined />
-                  </template>
-                </a-button>
-                <a-button v-else type="danger" @click="removeEnvVar(index)">
-                  <template #icon>
-                    <DeleteOutlined />
-                  </template>
-                </a-button>
-              </a-form-item>
-            </a-col>
-          </a-row>
+        <div v-for="(env, index) in containerForm.envs" :key="'env-' + index" class="form-row">
+          <a-input v-model:value="env.key" placeholder="变量名" style="width: 40%" />
+          <span class="separator">=</span>
+          <a-input v-model:value="env.value" placeholder="变量值" style="width: 40%" />
+          <a-button v-if="index === 0" type="primary" shape="circle" size="small" @click="addEnvVar">
+            <PlusOutlined />
+          </a-button>
+          <a-button v-else type="danger" shape="circle" size="small" @click="removeEnvVar(index)">
+            <DeleteOutlined />
+          </a-button>
         </div>
 
         <a-divider orientation="left">高级设置</a-divider>
         <a-form-item label="启动命令">
-          <a-input v-model:value="containerForm.command" placeholder="可选，例如：nginx -g 'daemon off;'" />
+          <a-input v-model:value="containerForm.command" placeholder="可选" />
         </a-form-item>
-
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="重启策略">
@@ -1508,457 +1014,233 @@ const getContainerStatusIcon = (status: string) => {
 </template>
 
 <style scoped>
-.server-docker-container {
-  min-height: calc(100vh - 84px);
-  background-color: #f5f5f5;
-  padding: 24px;
+.docker-page {
+  padding: 0;
+  min-height: 100%;
+  background: transparent;
 }
 
-.docker-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.glass-header {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  margin-bottom: 16px;
+}
+
+.main-content {
+  padding: 0 24px 24px;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  padding: 24px;
+  min-height: 600px;
+}
+
+.custom-tabs :deep(.ant-tabs-nav) {
   margin-bottom: 24px;
 }
 
-.header-left h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #1f1f1f;
-}
-
-.header-left p {
-  margin: 8px 0 0;
-  color: #8c8c8c;
-}
-
-.header-right {
-  display: flex;
-  gap: 12px;
-}
-
-.docker-content {
-  background-color: #fff;
+.custom-tabs :deep(.ant-tabs-tab) {
+  padding: 8px 16px;
   border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s;
+}
+
+.custom-tabs :deep(.ant-tabs-tab-active) {
+  background: rgba(24, 144, 255, 0.1);
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   margin-bottom: 16px;
+  gap: 16px;
 }
 
-.toolbar-left {
-  display: flex;
-  gap: 12px;
+.glass-input {
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
 }
 
-/* Ant Design 覆盖样式 */
-:deep(.ant-tabs-nav) {
-  margin-bottom: 24px;
+.glass-table :deep(.ant-table) {
+  background: transparent;
 }
 
-:deep(.ant-table-wrapper) {
-  background-color: #fff;
+.glass-table :deep(.ant-table-thead > tr > th) {
+  background: rgba(0, 0, 0, 0.02);
+  font-weight: 600;
 }
 
-/* 状态徽章 */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.glass-table :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.glass-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: rgba(0, 0, 0, 0.02);
 }
 
-.status-text {
-  font-size: 14px;
+.mono-text {
+  font-family: "SF Mono", Menlo, monospace;
+  color: #666;
 }
 
-/* 运行中 */
-.status-running .status-dot {
-  background-color: #52c41a;
-  box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
-}
-.status-running .status-text {
-  color: #52c41a;
-}
-
-/* 已停止 */
-.status-exited .status-dot {
-  background-color: #d9d9d9;
-}
-.status-exited .status-text {
-  color: #8c8c8c;
-}
-
-/* 暂停 */
-.status-paused .status-dot {
-  background-color: #faad14;
-}
-.status-paused .status-text {
-  color: #faad14;
-}
-
-/* 重启中 */
-.status-restarting .status-dot {
-  background-color: #1890ff;
-}
-.status-restarting .status-text {
+.name-text {
+  font-weight: 500;
   color: #1890ff;
 }
 
-/* 错误/死亡 */
-.status-dead .status-dot,
-.status-unknown .status-dot {
-  background-color: #ff4d4f;
-}
-.status-dead .status-text,
-.status-unknown .status-text {
-  color: #ff4d4f;
+.text-secondary {
+  color: #999;
 }
 
-/* 操作按钮 */
-.action-btn {
-  padding: 0 8px;
-}
-
-.action-btn.danger {
-  color: #ff4d4f;
-}
-
-.action-btn.danger:hover {
-  color: #ff7875;
-}
-
-.docker-container {
-  padding: 0;
-  background: transparent;
-}
-
-.docker-content {
-  margin-top: 16px;
-}
-
-.tab-header {
+.form-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding: 16px;
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 16px;
-  box-shadow: var(--shadow-sm);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.separator {
+  color: #999;
+  font-weight: bold;
 }
 
 .form-help {
-  color: var(--text-secondary);
-  margin-top: 8px;
   font-size: 12px;
-  padding: 8px 12px;
-  background: rgba(0, 122, 255, 0.05);
-  border-radius: 8px;
-  border-left: 3px solid var(--primary-color);
+  color: #999;
+  margin-top: 4px;
 }
 
-.form-help p {
-  margin-bottom: 4px;
+.code-textarea {
+  font-family: "SF Mono", Menlo, monospace;
+  background: #f5f5f5;
+}
+</style>
+
+<style>
+/* Dark Mode Global Overrides */
+.dark .glass-header {
+  background: rgba(30, 30, 30, 0.7);
+  border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 表格样式优化 */
-:deep(.ant-table) {
-  background: transparent;
+.dark .glass-panel {
+  background: rgba(30, 30, 30, 0.7);
+  border-color: rgba(255, 255, 255, 0.05);
 }
 
-:deep(.ant-table-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.6);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 13px;
+.dark .glass-input {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
-:deep(.ant-table-tbody > tr > td) {
-  background: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
-  font-size: 13px;
+.dark .glass-table .ant-table-thead>tr>th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e6e6e6;
+  border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-:deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(0, 122, 255, 0.05);
+.dark .glass-table .ant-table-tbody>tr>td {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  color: #e6e6e6;
 }
 
-/* 标签样式优化 */
-:deep(.ant-tag) {
-  border-radius: 8px;
-  font-size: 12px;
-  padding: 2px 10px;
-  font-weight: 500;
+.dark .glass-table .ant-table-tbody>tr:hover>td {
+  background: rgba(255, 255, 255, 0.05);
 }
 
-/* 标签页样式 */
-:deep(.ant-tabs) {
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: var(--shadow-md);
+.dark .mono-text {
+  color: #aaa;
 }
 
-:deep(.ant-tabs-nav) {
-  margin-bottom: 16px;
+.dark .name-text {
+  color: #177ddc;
 }
 
-:deep(.ant-tabs-tab) {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
+.dark .code-textarea {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-:deep(.ant-tabs-tab-active) {
-  color: var(--primary-color);
+.dark .custom-tabs .ant-tabs-tab-active {
+  background: rgba(23, 125, 220, 0.2);
 }
 
-:deep(.ant-tabs-ink-bar) {
-  background: var(--primary-color);
-  height: 3px;
-  border-radius: 2px;
+.dark .custom-tabs .ant-tabs-tab {
+  color: #aaa;
 }
 
-/* 模态框样式 */
-:deep(.ant-modal-content) {
-  background: var(--card-bg);
+.dark .custom-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #177ddc;
+}
+
+/* Glass Modal Styles */
+.glass-modal .ant-modal-content {
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.5);
 }
 
-:deep(.ant-modal-header) {
-  background: rgba(255, 255, 255, 0.5);
+.glass-modal .ant-modal-header {
+  background: transparent;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 16px 16px 0 0;
 }
 
-:deep(.ant-modal-title) {
+.glass-modal .ant-modal-title {
   font-weight: 600;
-  color: var(--text-primary);
 }
 
-:deep(.ant-modal-body) {
-  background: transparent;
-}
-
-:deep(.ant-modal-footer) {
-  background: rgba(255, 255, 255, 0.3);
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 0 0 16px 16px;
-}
-
-/* 下拉菜单样式 */
-:deep(.ant-dropdown-menu) {
-  background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: var(--shadow-lg);
-  padding: 6px;
-}
-
-:deep(.ant-dropdown-menu-item) {
+.glass-modal .ant-input,
+.glass-modal .ant-select-selector,
+.glass-modal .ant-input-number {
   border-radius: 8px;
-  margin: 2px 0;
-  font-size: 13px;
-  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
-:deep(.ant-dropdown-menu-item:hover) {
-  background: rgba(0, 122, 255, 0.1);
+.glass-modal .ant-btn {
+  border-radius: 8px;
 }
 
-:deep(.ant-dropdown-menu-item-danger:hover) {
-  background: rgba(255, 59, 48, 0.1);
+/* Dark Mode Modal */
+.dark .glass-modal .ant-modal-content {
+  background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
 }
 
-:deep(.ant-dropdown-menu-item-divider) {
-  background: rgba(0, 0, 0, 0.05);
+.dark .glass-modal .ant-modal-header {
+  border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 输入框样式 */
-:deep(.ant-input),
-:deep(.ant-input-search) {
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-:deep(.ant-input:focus),
-:deep(.ant-input-search:focus) {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.1);
-}
-
-:deep(.ant-select-selector) {
-  border-radius: 10px !important;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
-}
-
-:deep(.ant-select-focused .ant-select-selector) {
-  border-color: var(--primary-color) !important;
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.1) !important;
-}
-
-/* 分割线样式 */
-:deep(.ant-divider) {
-  border-color: rgba(0, 0, 0, 0.06);
-  margin: 24px 0 16px;
-}
-
-:deep(.ant-divider-inner-text) {
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-/* 表单项样式 */
-:deep(.ant-form-item-label > label) {
-  font-weight: 500;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-:deep(.ant-form-item) {
-  margin-bottom: 16px;
-}
-
-/* 动态表单行样式 */
-:deep(.ant-row) {
-  margin-bottom: 0;
-}
-
-/* 文本域样式 */
-:deep(.ant-input-textarea) {
-  border-radius: 10px;
-}
-
-:deep(.ant-input-textarea .ant-input) {
-  border-radius: 10px;
-}
-
-/* 按钮组样式优化 */
-:deep(.ant-space) {
-  gap: 8px !important;
-}
-
-/* 输入组样式 */
-:deep(.ant-input-group-compact) {
-  display: flex;
-  gap: 8px;
-}
-
-:deep(.ant-input-group-compact > *:first-child) {
-  border-radius: 10px !important;
-}
-
-:deep(.ant-input-group-compact > *:last-child) {
-  border-radius: 10px !important;
-}
-</style>
-<style>
-.dark .server-docker-container {
-  background-color: #1e1e1e;
-}
-
-.dark .header-left h2 {
+.dark .glass-modal .ant-modal-title {
   color: #e0e0e0;
 }
 
-.dark .header-left p {
-  color: #8c8c8c;
+.dark .glass-modal .ant-modal-close {
+  color: #aaa;
 }
 
-.dark .docker-content {
-  background-color: #252526;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.dark .ant-tabs-tab {
-  color: #8c8c8c;
-}
-
-.dark .ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: #177ddc;
-}
-
-.dark .ant-tabs-ink-bar {
-  background: #177ddc;
-}
-
-.dark .ant-table-wrapper {
-  background-color: transparent;
-}
-
-.dark .ant-table {
-  background: transparent;
-  color: #ccc;
-}
-
-.dark .ant-table-thead > tr > th {
-  background: #2d2d2d;
-  color: #ccc;
-  border-bottom: 1px solid #333;
-}
-
-.dark .ant-table-tbody > tr > td {
-  border-bottom: 1px solid #333;
-  color: #ccc;
-}
-
-.dark .ant-table-tbody > tr:hover > td {
-  background: #2a2d2e !important;
-}
-
-.dark .ant-modal-content {
-  background-color: #252526;
-}
-
-.dark .ant-modal-header {
-  background-color: #252526;
-  border-bottom: 1px solid #333;
-}
-
-.dark .ant-modal-title {
+.dark .glass-modal .ant-input,
+.dark .glass-modal .ant-select-selector,
+.dark .glass-modal .ant-input-number {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.1);
   color: #e0e0e0;
 }
 
-.dark .ant-modal-close {
+.dark .glass-modal .ant-form-item-label>label {
   color: #ccc;
-}
-
-.dark .ant-modal-footer {
-  border-top: 1px solid #333;
-}
-
-.dark .ant-select-selector {
-  background-color: #3c3c3c !important;
-  border-color: #434343 !important;
-  color: #ccc !important;
-}
-
-.dark .ant-select-selector:focus {
-  border-color: #177ddc !important;
 }
 </style>
