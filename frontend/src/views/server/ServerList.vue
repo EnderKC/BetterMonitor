@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, h, computed, nextTick, watch } from 'vue';
+defineOptions({
+  name: 'ServerList'
+});
+
+import { ref, reactive, onMounted, h, computed, nextTick, watch, onActivated, onDeactivated } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Modal, Tag } from 'ant-design-vue';
 import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, KeyOutlined, CopyOutlined, HolderOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons-vue';
@@ -113,8 +117,10 @@ const columns = [
 ];
 
 // 获取服务器列表
-const fetchServers = async (force = false) => {
-  loading.value = true;
+const fetchServers = async (force = false, showLoading = true) => {
+  if (showLoading) {
+    loading.value = true;
+  }
   try {
     await serverStore.fetchServers(force);
   } catch (error) {
@@ -127,7 +133,7 @@ const fetchServers = async (force = false) => {
 
 // 强制刷新
 const handleRefresh = () => {
-  fetchServers(true);
+  fetchServers(true, true);
   message.success('已刷新服务器列表');
 };
 
@@ -335,6 +341,17 @@ const displayServers = computed(() => {
 // 页面加载时获取数据
 onMounted(() => {
   fetchServers();
+});
+
+// 页面激活时静默刷新
+onActivated(() => {
+  fetchServers(false, false);
+});
+
+onDeactivated(() => {
+  if (sortMode.value) {
+    exitSortMode();
+  }
 });
 </script>
 

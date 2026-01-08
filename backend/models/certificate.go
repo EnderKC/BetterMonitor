@@ -107,3 +107,37 @@ func ParseAccountConfig(account *CertificateAccount) (map[string]string, error) 
 	}
 	return result, nil
 }
+
+// GetExpiringCertificates 获取即将到期的证书
+// daysThreshold: 距离到期天数阈值（如30天）
+func GetExpiringCertificates(daysThreshold int) ([]ManagedCertificate, error) {
+	var certs []ManagedCertificate
+	thresholdTime := time.Now().AddDate(0, 0, daysThreshold)
+
+	if err := DB.Where("status = ? AND expiry <= ? AND expiry > ?", "有效", thresholdTime, time.Now()).
+		Order("expiry ASC").
+		Find(&certs).Error; err != nil {
+		return nil, err
+	}
+	return certs, nil
+}
+
+// UpdateCertificateStatus 更新证书状态和到期时间
+func UpdateCertificateStatus(serverID uint, certID uint, status string, expiry time.Time, certPath string, keyPath string) error {
+	updates := map[string]interface{}{
+		"status":           status,
+		"expiry":           expiry,
+		"certificate_path": certPath,
+		"key_path":         keyPath,
+	}
+	return DB.Model(&ManagedCertificate{}).
+		Where("server_id = ? AND id = ?", serverID, certID).
+		Updates(updates).Error
+}
+
+// UpdateCertificateRenewalStatus 更新证书续期状态（仅更新状态字段）
+func UpdateCertificateRenewalStatus(serverID uint, certID uint, status string) error {
+	return DB.Model(&ManagedCertificate{}).
+		Where("server_id = ? AND id = ?", serverID, certID).
+		Update("status", status).Error
+}

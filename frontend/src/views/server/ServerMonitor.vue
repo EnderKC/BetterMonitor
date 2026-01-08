@@ -470,16 +470,16 @@ const updateCharts = () => {
                 type: 'linear',
                 x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(24, 144, 255, 0.6)' },
-                  { offset: 1, color: 'rgba(24, 144, 255, 0.1)' }
+                  { offset: 0, color: 'rgba(0, 122, 255, 0.4)' },
+                  { offset: 1, color: 'rgba(0, 122, 255, 0.05)' }
                 ]
               }
             },
-            lineStyle: { width: 2, color: '#1890ff' },
-            itemStyle: { color: '#1890ff' },
+            lineStyle: { width: 3, color: '#007AFF' },
+            itemStyle: { color: '#007AFF', borderWidth: 2, borderColor: '#fff' },
             smooth: true,
             symbol: 'circle',
-            symbolSize: 5,
+            symbolSize: 8,
             showSymbol: false
           }],
           grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
@@ -534,16 +534,16 @@ const updateCharts = () => {
                 type: 'linear',
                 x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(250, 84, 28, 0.6)' },
-                  { offset: 1, color: 'rgba(250, 84, 28, 0.1)' }
+                  { offset: 0, color: 'rgba(255, 149, 0, 0.4)' },
+                  { offset: 1, color: 'rgba(255, 149, 0, 0.05)' }
                 ]
               }
             },
-            lineStyle: { width: 2, color: '#fa541c' },
-            itemStyle: { color: '#fa541c' },
+            lineStyle: { width: 3, color: '#FF9500' },
+            itemStyle: { color: '#FF9500', borderWidth: 2, borderColor: '#fff' },
             smooth: true,
             symbol: 'circle',
-            symbolSize: 5,
+            symbolSize: 8,
             showSymbol: false
           }],
           grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
@@ -598,16 +598,16 @@ const updateCharts = () => {
                 type: 'linear',
                 x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(82, 196, 26, 0.6)' },
-                  { offset: 1, color: 'rgba(82, 196, 26, 0.1)' }
+                  { offset: 0, color: 'rgba(52, 199, 89, 0.4)' },
+                  { offset: 1, color: 'rgba(52, 199, 89, 0.05)' }
                 ]
               }
             },
-            lineStyle: { width: 2, color: '#52c41a' },
-            itemStyle: { color: '#52c41a' },
+            lineStyle: { width: 3, color: '#34C759' },
+            itemStyle: { color: '#34C759', borderWidth: 2, borderColor: '#fff' },
             smooth: true,
             symbol: 'circle',
-            symbolSize: 5,
+            symbolSize: 8,
             showSymbol: false
           }],
           grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
@@ -677,16 +677,16 @@ const updateCharts = () => {
                   type: 'linear',
                   x: 0, y: 0, x2: 0, y2: 1,
                   colorStops: [
-                    { offset: 0, color: 'rgba(24, 144, 255, 0.6)' },
-                    { offset: 1, color: 'rgba(24, 144, 255, 0.1)' }
+                    { offset: 0, color: 'rgba(0, 122, 255, 0.4)' },
+                    { offset: 1, color: 'rgba(0, 122, 255, 0.05)' }
                   ]
                 }
               },
-              lineStyle: { width: 2, color: '#1890ff' },
-              itemStyle: { color: '#1890ff' },
+              lineStyle: { width: 3, color: '#007AFF' },
+              itemStyle: { color: '#007AFF', borderWidth: 2, borderColor: '#fff' },
               smooth: true,
               symbol: 'circle',
-              symbolSize: 5,
+              symbolSize: 8,
               showSymbol: false
             },
             {
@@ -698,16 +698,16 @@ const updateCharts = () => {
                   type: 'linear',
                   x: 0, y: 0, x2: 0, y2: 1,
                   colorStops: [
-                    { offset: 0, color: 'rgba(250, 84, 28, 0.6)' },
-                    { offset: 1, color: 'rgba(250, 84, 28, 0.1)' }
+                    { offset: 0, color: 'rgba(255, 149, 0, 0.4)' },
+                    { offset: 1, color: 'rgba(255, 149, 0, 0.05)' }
                   ]
                 }
               },
-              lineStyle: { width: 2, color: '#fa541c' },
-              itemStyle: { color: '#fa541c' },
+              lineStyle: { width: 3, color: '#FF9500' },
+              itemStyle: { color: '#FF9500', borderWidth: 2, borderColor: '#fff' },
               smooth: true,
               symbol: 'circle',
-              symbolSize: 5,
+              symbolSize: 8,
               showSymbol: false
             }
           ],
@@ -773,33 +773,33 @@ const updateCharts = () => {
               name: '1分钟',
               type: 'line',
               data: monitorData.load.load1.map(item => item.value),
-              lineStyle: { width: 2, color: '#1890ff' },
-              itemStyle: { color: '#1890ff' },
+              lineStyle: { width: 3, color: '#007AFF' },
+              itemStyle: { color: '#007AFF', borderWidth: 2, borderColor: '#fff' },
               smooth: true,
               symbol: 'circle',
-              symbolSize: 5,
+              symbolSize: 8,
               showSymbol: false
             },
             {
               name: '5分钟',
               type: 'line',
               data: monitorData.load.load5.map(item => item.value),
-              lineStyle: { width: 2, color: '#fa541c' },
-              itemStyle: { color: '#fa541c' },
+              lineStyle: { width: 3, color: '#FF9500' },
+              itemStyle: { color: '#FF9500', borderWidth: 2, borderColor: '#fff' },
               smooth: true,
               symbol: 'circle',
-              symbolSize: 5,
+              symbolSize: 8,
               showSymbol: false
             },
             {
               name: '15分钟',
               type: 'line',
               data: monitorData.load.load15.map(item => item.value),
-              lineStyle: { width: 2, color: '#52c41a' },
-              itemStyle: { color: '#52c41a' },
+              lineStyle: { width: 3, color: '#34C759' },
+              itemStyle: { color: '#34C759', borderWidth: 2, borderColor: '#fff' },
               smooth: true,
               symbol: 'circle',
-              symbolSize: 5,
+              symbolSize: 8,
               showSymbol: false
             }
           ],
@@ -1585,55 +1585,80 @@ onUnmounted(() => {
 }
 
 .chart-card {
-  border: 1px solid #f0f0f0;
-  border-radius: 4px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.chart-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
 }
 
 .chart-header {
-  margin-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 0;
+  border-bottom: none;
+  display: flex;
+  justify-content: center;
 }
 
 .chart-header h3 {
   margin: 0;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
+  color: #1d1d1f;
+  letter-spacing: -0.01em;
 }
 
 .chart-container {
-  height: 250px;
+  height: 300px;
+  width: 100%;
 }
 
-/* 添加无数据状态的样式 */
 .no-data-container {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 500px;
+  min-height: 400px;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  margin-top: 24px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 
 <style>
-/* Dark mode adaptation */
-.dark .server-monitor-container {
-  background: transparent;
-}
-
+/* Dark Mode Adaptation - Global Styles */
 .dark .chart-card {
-  background: #1f1f1f;
-  border: 1px solid #303030;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(30, 30, 30, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
-.dark .chart-header {
-  border-bottom: 1px solid #303030;
+.dark .chart-card:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  background: rgba(40, 40, 40, 0.7);
 }
 
 .dark .chart-header h3 {
-  color: #e0e0e0;
+  color: #f5f5f7;
+}
+
+.dark .no-data-container {
+  background: rgba(30, 30, 30, 0.4);
 }
 
 .dark .no-data-container .ant-empty-description {

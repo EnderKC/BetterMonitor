@@ -1651,6 +1651,10 @@ func HandleNginxCommand(action string, params map[string]interface{}) (string, e
 	case "openresty_install":
 		result, err = handleOpenRestyInstallAction()
 
+	case "openresty_install_logs":
+		sessionID := getStringParam(params["session_id"])
+		result, err = handleInstallLogsAction(sessionID)
+
 	case "certificate_content":
 		result, err = handleCertificateContentAction(params)
 
@@ -1971,19 +1975,30 @@ func handleOpenRestyInstallAction() (interface{}, error) {
 		return nil, fmt.Errorf("检测到系统Nginx正在运行，请先停止或卸载系统中的Nginx服务，以避免与容器占用80/443端口冲突")
 	}
 
+	// 生成安装会话ID
+	sessionID := fmt.Sprintf("install-%d", time.Now().Unix())
+	logger := NewInstallLogger(sessionID)
+
 	go func() {
+		defer logger.Close()
+
 		bgClient, err := nginx.NewNginxClient(nil)
 		if err != nil {
-			fmt.Printf("OpenResty安装失败（初始化客户端）: %v\n", err)
+			logger.Log(fmt.Sprintf("❌ 初始化客户端失败: %v", err))
 			return
 		}
 		defer bgClient.Close()
 
-		if err := bgClient.InstallOpenResty(); err != nil {
-			fmt.Printf("OpenResty安装失败: %v\n", err)
+		logger.Log("开始安装 OpenResty...")
+		logger.Log("")
+
+		if err := bgClient.InstallOpenRestyWithLogger(logger.Log); err != nil {
+			logger.Log(fmt.Sprintf("❌ 安装失败: %v", err))
 			return
 		}
-		fmt.Println("OpenResty安装完成，可以刷新状态检查")
+
+		logger.Log("")
+		logger.Log("安装完成！您可以关闭此窗口并刷新页面。")
 	}()
 
 	return map[string]interface{}{
@@ -1992,7 +2007,36 @@ func handleOpenRestyInstallAction() (interface{}, error) {
 		"mode":           "installing",
 		"native_running": nativeRunning,
 		"native_version": nativeVersion,
-		"message":        "OpenResty安装任务已启动，请稍后刷新状态",
+		"session_id":     sessionID,
+		"message":        "OpenResty安装任务已启动",
+	}, nil
+}
+
+func handleInstallLogsAction(sessionID string) (interface{}, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("缺少session_id参数")
+	}
+
+	logger := GetInstallLogger(sessionID)
+	if logger == nil {
+		return map[string]interface{}{
+			"logs":   []string{},
+			"status": "not_found",
+		}, nil
+	}
+
+	// 获取日志和完成状态
+	logs := logger.GetLogs()
+	completed := logger.IsCompleted()
+
+	status := "running"
+	if completed {
+		status = "completed"
+	}
+
+	return map[string]interface{}{
+		"logs":   logs,
+		"status": status,
 	}, nil
 }
 

@@ -432,6 +432,11 @@ func GetContainerFileList(c *gin.Context) {
 		return
 	}
 
+	if !isValidFilePath(path) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
+		return
+	}
+
 	result, err := requestContainerFileListViaWebSocket(server.ID, containerID, path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取容器文件列表失败: %v", err)})
@@ -455,6 +460,11 @@ func GetContainerDirectoryChildren(c *gin.Context) {
 
 	if !server.Online {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
+		return
+	}
+
+	if !isValidFilePath(path) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的目录路径"})
 		return
 	}
 
@@ -649,8 +659,20 @@ func UploadContainerFile(c *gin.Context) {
 		return
 	}
 
-	targetPath := filepath.Join(path, header.Filename)
+	filename := strings.TrimSpace(header.Filename)
+	filename = strings.ReplaceAll(filename, "\\", "/")
+	filename = filepath.Base(filename)
+	if filename == "" || filename == "." || filename == "/" || filename == ".." {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件名"})
+		return
+	}
+
+	targetPath := filepath.Join(path, filename)
 	targetPath = filepath.Clean(targetPath)
+	if !isValidFilePath(targetPath) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
+		return
+	}
 
 	if err := uploadContainerFileViaWebSocket(server.ID, containerID, targetPath, fileContent); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("上传文件失败: %v", err)})

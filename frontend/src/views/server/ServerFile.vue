@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, defineComponent, nextTick, watch } from 'vue';
+import { ref, reactive, onMounted, computed, defineComponent, nextTick, watch, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message, Modal, Tree, Table } from 'ant-design-vue';
 import {
@@ -20,7 +20,8 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  EnterOutlined
+  EnterOutlined,
+  CodeOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import { getToken } from '../../utils/auth';
@@ -28,6 +29,10 @@ import { getToken } from '../../utils/auth';
 import { useServerStore } from '../../stores/serverStore';
 // 导入CodeMirror相关组件
 import { Codemirror } from 'vue-codemirror';
+// 导入 xterm
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
 import { javascript } from '@codemirror/lang-javascript';
 import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
@@ -140,6 +145,16 @@ const createFormState = reactive({
 // 路径跳转
 const pathJumpModalVisible = ref(false);
 const jumpToPath = ref('');
+
+// 终端相关
+const terminalModalVisible = ref(false);
+const terminalRef = ref<HTMLElement | null>(null);
+const terminal = ref<Terminal | null>(null);
+const fitAddon = ref<FitAddon | null>(null);
+let terminalWs: WebSocket | null = null;
+let terminalDataDisposable: { dispose: () => void } | null = null;
+const terminalWorkingDir = ref<string>('/');
+const terminalSessionId = ref<string>(''); // 存储终端会话ID
 
 // 计算服务器是否在线 (使用全局状态)
 const isServerOnline = computed(() => {
@@ -949,6 +964,193 @@ const goBack = () => {
   router.push(`/admin/servers/${serverId.value}`);
 };
 
+// 打开终端弹窗
+const openTerminal = async () => {
+  if (!isServerOnline.value) {
+    message.warning('服务器离线，无法打开终端');
+    return;
+  }
+
+  try {
+    // 使用固定的会话ID，避免创建多个临时会话
+    const fixedSessionId = `file-manager-temp-${serverId.value}`;
+
+    // 先尝试删除旧会话（如果存在）
+    try {
+      await request.delete(`/servers/${serverId.value}/terminal/sessions/${fixedSessionId}`);
+      console.log('已删除旧的文件管理器终端会话');
+    } catch (error) {
+      // 如果会话不存在，删除会失败，这是正常的，忽略错误
+    }
+
+    // 创建新的临时终端会话
+    const response = await request.post(`/servers/${serverId.value}/terminal/sessions`, {
+      id: fixedSessionId,
+      name: `文件管理器临时终端`,
+      cwd: currentPath.value
+    });
+
+    if (response.data && response.data.id) {
+      terminalSessionId.value = response.data.id;
+      terminalWorkingDir.value = currentPath.value;
+      terminalModalVisible.value = true;
+
+      nextTick(() => {
+        initTerminal();
+      });
+    } else {
+      message.error('创建终端会话失败');
+    }
+  } catch (error: any) {
+    console.error('创建终端会话失败:', error);
+    message.error(error.response?.data?.error || '创建终端会话失败');
+  }
+};
+
+// 初始化终端
+const initTerminal = () => {
+  if (!terminalRef.value) return;
+
+  // 创建终端实例
+  terminal.value = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", "Lucida Console", monospace',
+    theme: {
+      background: '#1e1e1e',
+      foreground: '#d4d4d4',
+    },
+    rows: 24,
+    cols: 100
+  });
+
+  fitAddon.value = new FitAddon();
+  terminal.value.loadAddon(fitAddon.value);
+  terminal.value.open(terminalRef.value);
+  fitAddon.value.fit();
+
+  // 连接WebSocket
+  connectTerminalWs();
+};
+
+// 连接终端WebSocket
+const connectTerminalWs = () => {
+  if (!terminal.value) return;
+
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsHost = window.location.host;
+  const token = getToken();
+
+  // 使用已创建的会话ID
+  if (!terminalSessionId.value) {
+    message.error('终端会话ID不存在');
+    return;
+  }
+
+  // WebSocket URL 需要包含 session 参数
+  terminalWs = new WebSocket(
+    `${wsProtocol}//${wsHost}/api/servers/${serverId.value}/ws?token=${token}&session=${terminalSessionId.value}`
+  );
+
+  terminalWs.onopen = () => {
+    console.log('Terminal WebSocket connected');
+    terminal.value?.write(`正在连接到文件管理器终端...\r\n`);
+
+    // 发送 cd 命令切换到当前目录
+    setTimeout(() => {
+      const cdCommand = {
+        type: 'shell_command',
+        payload: {
+          type: 'input',
+          data: `cd ${terminalWorkingDir.value}\n`,
+          session: terminalSessionId.value
+        }
+      };
+      terminalWs?.send(JSON.stringify(cdCommand));
+    }, 500);
+  };
+
+  terminalWs.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'shell_response') {
+        // 接收终端输出
+        let outputData;
+        if (data.payload) {
+          outputData = data.payload.data;
+        } else {
+          outputData = data.data;
+        }
+        terminal.value?.write(outputData);
+      } else if (data.type === 'shell_error') {
+        terminal.value?.write(`\r\n\x1b[31m错误: ${data.error}\x1b[0m\r\n`);
+      } else if (data.type === 'welcome') {
+        terminal.value?.write(`连接成功！\r\n`);
+      }
+    } catch (e) {
+      // 如果不是JSON，直接写入终端
+      terminal.value?.write(event.data);
+    }
+  };
+
+  terminalWs.onerror = (error) => {
+    console.error('Terminal WebSocket error:', error);
+    message.error('终端连接失败');
+  };
+
+  terminalWs.onclose = () => {
+    console.log('Terminal WebSocket closed');
+  };
+
+  // 监听终端输入
+  terminalDataDisposable = terminal.value.onData((data: string) => {
+    if (terminalWs?.readyState === WebSocket.OPEN) {
+      terminalWs.send(JSON.stringify({
+        type: 'shell_command',
+        payload: {
+          type: 'input',
+          data: data,
+          session: terminalSessionId.value
+        }
+      }));
+    }
+  });
+};
+
+// 关闭终端
+const closeTerminal = async () => {
+  // 清理终端
+  terminalDataDisposable?.dispose();
+  terminal.value?.dispose();
+  terminal.value = null;
+  fitAddon.value = null;
+
+  // 关闭WebSocket
+  if (terminalWs) {
+    terminalWs.close();
+    terminalWs = null;
+  }
+
+  // 删除临时会话
+  if (terminalSessionId.value) {
+    try {
+      await request.delete(`/servers/${serverId.value}/terminal/sessions/${terminalSessionId.value}`);
+      console.log('临时终端会话已删除');
+    } catch (error) {
+      console.error('删除终端会话失败:', error);
+    }
+    terminalSessionId.value = '';
+  }
+
+  terminalModalVisible.value = false;
+};
+
+// 组件卸载时清理
+onBeforeUnmount(() => {
+  closeTerminal();
+});
+
 // 获取对应语言的扩展
 const getLanguageExtension = (lang: string) => {
   switch (lang) {
@@ -1108,6 +1310,10 @@ const customRow = (record: any) => {
             <ReloadOutlined />
           </a-button>
 
+          <a-button class="action-btn" @click="openTerminal" title="在当前目录打开终端">
+            <CodeOutlined />
+          </a-button>
+
           <a-button class="action-btn" @click="goBack">
             退出
           </a-button>
@@ -1241,6 +1447,14 @@ const customRow = (record: any) => {
           <a-textarea v-model:value="createFormState.content" :rows="5" placeholder="可选" />
         </a-form-item>
       </a-form>
+    </a-modal>
+
+    <!-- 终端对话框 -->
+    <a-modal v-model:open="terminalModalVisible" :title="`终端 - ${terminalWorkingDir}`" @cancel="closeTerminal"
+      :footer="null" :width="900" :maskClosable="false" class="macos-modal terminal-modal">
+      <div class="terminal-container">
+        <div ref="terminalRef" class="terminal-wrapper"></div>
+      </div>
     </a-modal>
   </div>
 </template>
@@ -1814,5 +2028,38 @@ const customRow = (record: any) => {
 
 .editor-modal .ant-modal-body {
   padding: 20px 24px;
+}
+
+/* Terminal Modal Styles */
+.terminal-container {
+  height: 500px;
+  background-color: #1e1e1e;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.terminal-wrapper {
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+}
+
+:global(.terminal-modal .ant-modal-body) {
+  padding: 0;
+}
+
+:global(.terminal-modal .ant-modal-content) {
+  background: #1e1e1e;
+}
+
+:global(.terminal-modal .ant-modal-header) {
+  background: #2d2d2d;
+  border-bottom: 1px solid #333;
+}
+
+:global(.terminal-modal .ant-modal-title) {
+  color: #ccc;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 13px;
 }
 </style>

@@ -179,6 +179,7 @@ func SetupRoutes(r *gin.Engine) {
 			auth.GET("/servers/:id/websites", controllers.ListWebsites)
 			auth.GET("/servers/:id/nginx/openresty/status", controllers.OpenRestyStatus)
 			auth.POST("/servers/:id/nginx/openresty/install", controllers.InstallOpenResty)
+			auth.GET("/servers/:id/nginx/openresty/install-logs", controllers.GetOpenRestyInstallLogs)
 			auth.POST("/servers/:id/websites", controllers.ApplyWebsiteConfig)
 			auth.POST("/servers/:id/websites/ssl", controllers.IssueWebsiteCertificate)
 			auth.POST("/servers/:id/nginx/declarative/apply", controllers.ApplyWebsiteConfig)
@@ -188,6 +189,7 @@ func SetupRoutes(r *gin.Engine) {
 			auth.DELETE("/servers/:id/cert/accounts/:account_id", controllers.DeleteCertificateAccount)
 			auth.GET("/servers/:id/certificates", controllers.ListManagedCertificates)
 			auth.GET("/servers/:id/certificates/:cert_id/content", controllers.GetCertificateContent)
+			auth.POST("/servers/:id/certificates/:cert_id/renew", controllers.RenewCertificate)
 			auth.DELETE("/servers/:id/certificates/:cert_id", controllers.DeleteManagedCertificate)
 
 			// 需要管理员权限的路由

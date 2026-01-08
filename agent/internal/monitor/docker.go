@@ -19,6 +19,33 @@ import (
 	"github.com/user/server-ops-agent/pkg/logger"
 )
 
+func sanitizeComposeProjectName(projectName string) (string, error) {
+	name := strings.TrimSpace(projectName)
+	if name == "" {
+		return "", fmt.Errorf("Compose项目名不能为空")
+	}
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("Compose项目名无效")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return "", fmt.Errorf("Compose项目名不能包含路径分隔符")
+	}
+	if strings.Contains(name, "..") {
+		return "", fmt.Errorf("Compose项目名不能包含 ..")
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return "", fmt.Errorf("Compose项目名包含非法字符: %q", r)
+		}
+	}
+	return name, nil
+}
+
 // ContainerInfo 容器信息
 type ContainerInfo struct {
 	ID         string   `json:"id"`
@@ -364,6 +391,19 @@ func (dm *DockerManager) RestartContainer(containerID string, timeout int) error
 
 // RemoveContainer 删除容器
 func (dm *DockerManager) RemoveContainer(containerID string, force bool) error {
+	// 如果不是强制删除，先检查容器状态
+	if !force {
+		containerJSON, err := dm.client.ContainerInspect(dm.ctx, containerID)
+		if err != nil {
+			return fmt.Errorf("检查容器状态失败: %v", err)
+		}
+
+		// 如果容器正在运行，拒绝删除
+		if containerJSON.State.Running {
+			return fmt.Errorf("容器正在运行中，无法删除。请先停止容器或使用强制删除")
+		}
+	}
+
 	options := container.RemoveOptions{
 		Force:         force,
 		RemoveVolumes: false,
@@ -531,6 +571,11 @@ func (dm *DockerManager) GetComposes() ([]ComposeInfo, error) {
 
 // GetComposeConfig 获取Compose项目配置内容
 func (dm *DockerManager) GetComposeConfig(projectName string) (string, error) {
+	projectName, err := sanitizeComposeProjectName(projectName)
+	if err != nil {
+		return "", err
+	}
+
 	// 检查配置文件
 	projectPath := filepath.Join(dm.composeDir, projectName)
 	configFile := filepath.Join(projectPath, "docker-compose.yml")
@@ -553,6 +598,11 @@ func (dm *DockerManager) GetComposeConfig(projectName string) (string, error) {
 
 // ComposeUp 启动Compose项目
 func (dm *DockerManager) ComposeUp(projectName string) error {
+	projectName, err := sanitizeComposeProjectName(projectName)
+	if err != nil {
+		return err
+	}
+
 	// 检查配置文件
 	projectPath := filepath.Join(dm.composeDir, projectName)
 	configFile := filepath.Join(projectPath, "docker-compose.yml")
@@ -577,6 +627,11 @@ func (dm *DockerManager) ComposeUp(projectName string) error {
 
 // ComposeDown 停止Compose项目
 func (dm *DockerManager) ComposeDown(projectName string) error {
+	projectName, err := sanitizeComposeProjectName(projectName)
+	if err != nil {
+		return err
+	}
+
 	// 检查配置文件
 	projectPath := filepath.Join(dm.composeDir, projectName)
 	configFile := filepath.Join(projectPath, "docker-compose.yml")
@@ -601,6 +656,11 @@ func (dm *DockerManager) ComposeDown(projectName string) error {
 
 // RemoveCompose 删除Compose项目
 func (dm *DockerManager) RemoveCompose(projectName string) error {
+	projectName, err := sanitizeComposeProjectName(projectName)
+	if err != nil {
+		return err
+	}
+
 	projectPath := filepath.Join(dm.composeDir, projectName)
 
 	// 首先停止项目
@@ -619,6 +679,11 @@ func (dm *DockerManager) RemoveCompose(projectName string) error {
 
 // CreateCompose 创建Compose项目
 func (dm *DockerManager) CreateCompose(projectName string, content string) error {
+	projectName, err := sanitizeComposeProjectName(projectName)
+	if err != nil {
+		return err
+	}
+
 	// 创建项目目录
 	projectPath := filepath.Join(dm.composeDir, projectName)
 	if err := os.MkdirAll(projectPath, 0755); err != nil {

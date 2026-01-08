@@ -39,6 +39,13 @@ func startAlertService() *services.AlertService {
 	return alertService
 }
 
+// 启动证书自动续期服务
+func startCertificateRenewalService() *services.CertificateRenewalService {
+	renewalService := services.GetCertificateRenewalService()
+	go renewalService.Start()
+	return renewalService
+}
+
 // 启动数据清理服务
 func startDataCleanupService() {
 	// 每天凌晨3点执行数据清理
@@ -115,6 +122,10 @@ func main() {
 	// 启动预警服务
 	alertService := startAlertService()
 	defer alertService.Stop()
+
+	// 启动证书自动续期服务
+	renewalService := startCertificateRenewalService()
+	defer renewalService.Stop()
 
 	// 启动数据清理服务
 	startDataCleanupService()

@@ -25,12 +25,27 @@ const themeConfig = computed(() => ({
 <template>
   <ConfigProvider :locale="zhCN" :theme="themeConfig">
     <div class="modern-ui">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
     </div>
   </ConfigProvider>
 </template>
 
 <style>
+/* Fade Transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 :root {
   /* macOS Color Palette */
   --primary-color: #007AFF;

@@ -345,6 +345,13 @@ func (c *NginxClient) InstallOpenResty() error {
 	return c.ensureContainer()
 }
 
+// InstallOpenRestyWithLogger 带日志输出的安装
+func (c *NginxClient) InstallOpenRestyWithLogger(logFunc func(string)) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ensureContainerWithLogger(logFunc)
+}
+
 func (c *NginxClient) ensureContainer() error {
 	if err := c.ensureDirectories(); err != nil {
 		return err
@@ -417,6 +424,97 @@ func (c *NginxClient) ensureContainer() error {
 	return nil
 }
 
+func (c *NginxClient) ensureContainerWithLogger(logFunc func(string)) error {
+	logFunc("[1/6] 检查并创建目录...")
+	if err := c.ensureDirectories(); err != nil {
+		return err
+	}
+	logFunc("✓ 目录创建完成")
+
+	logFunc("[2/6] 生成Nginx基础配置...")
+	if err := c.ensureBaseConfig(); err != nil {
+		return err
+	}
+	logFunc("✓ 配置文件生成完成")
+
+	if c.containerID != "" {
+		inspect, err := c.docker.ContainerInspect(c.ctx, c.containerID)
+		if err == nil && inspect.State != nil && inspect.State.Running {
+			logFunc("✓ OpenResty容器已在运行")
+			return nil
+		}
+	}
+
+	logFunc("[3/6] 检查现有容器...")
+	filtersArgs := filters.NewArgs()
+	filtersArgs.Add("name", c.containerName)
+	containers, err := c.docker.ContainerList(c.ctx, container.ListOptions{
+		All:     true,
+		Filters: filtersArgs,
+	})
+	if err != nil {
+		return fmt.Errorf("列举OpenResty容器失败: %w", err)
+	}
+
+	if len(containers) == 0 {
+		logFunc("[4/6] 拉取OpenResty镜像 (这可能需要几分钟)...")
+		if err := c.ensureImageWithLogger(logFunc); err != nil {
+			return err
+		}
+		logFunc("✓ 镜像拉取完成")
+
+		logFunc("[5/6] 创建OpenResty容器...")
+		resp, err := c.docker.ContainerCreate(
+			c.ctx,
+			&container.Config{
+				Image: c.image,
+			},
+			&container.HostConfig{
+				Binds: []string{
+					fmt.Sprintf("%s:%s", c.hostPaths.Conf, c.containerPaths.Conf),
+					fmt.Sprintf("%s:%s", c.hostPaths.Logs, c.containerPaths.Logs),
+					fmt.Sprintf("%s:%s", c.hostPaths.WWW, c.containerPaths.WWW),
+					fmt.Sprintf("%s:%s", c.hostPaths.SSL, c.containerPaths.SSL),
+				},
+				NetworkMode: "host",
+				RestartPolicy: container.RestartPolicy{
+					Name: "always",
+				},
+			},
+			nil,
+			nil,
+			c.containerName,
+		)
+		if err != nil {
+			return fmt.Errorf("创建OpenResty容器失败: %w", err)
+		}
+		c.containerID = resp.ID
+		logFunc("✓ 容器创建完成")
+	} else {
+		c.containerID = containers[0].ID
+		logFunc("✓ 找到已存在的容器")
+	}
+
+	logFunc("[6/6] 启动OpenResty容器...")
+	inspect, err := c.docker.ContainerInspect(c.ctx, c.containerID)
+	if err != nil {
+		return fmt.Errorf("Inspect容器失败: %w", err)
+	}
+
+	if !inspect.State.Running {
+		if err := c.docker.ContainerStart(c.ctx, c.containerID, container.StartOptions{}); err != nil {
+			return fmt.Errorf("启动OpenResty容器失败: %w", err)
+		}
+		logFunc("✓ 容器启动成功")
+	} else {
+		logFunc("✓ 容器已在运行")
+	}
+
+	logFunc("")
+	logFunc("🎉 OpenResty 安装完成！")
+	return nil
+}
+
 func (c *NginxClient) ensureImage() error {
 	reader, err := c.docker.ImagePull(c.ctx, c.image, imagetypes.PullOptions{})
 	if err != nil {
@@ -424,6 +522,53 @@ func (c *NginxClient) ensureImage() error {
 	}
 	defer reader.Close()
 	_, _ = io.Copy(io.Discard, reader)
+	return nil
+}
+
+func (c *NginxClient) ensureImageWithLogger(logFunc func(string)) error {
+	reader, err := c.docker.ImagePull(c.ctx, c.image, imagetypes.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("拉取OpenResty镜像失败: %w", err)
+	}
+	defer reader.Close()
+
+	// 解析Docker pull的JSON进度输出
+	decoder := json.NewDecoder(reader)
+	layerStatus := make(map[string]string)
+
+	for {
+		var progress struct {
+			Status         string `json:"status"`
+			ID             string `json:"id"`
+			ProgressDetail struct {
+				Current int64 `json:"current"`
+				Total   int64 `json:"total"`
+			} `json:"progressDetail"`
+		}
+
+		if err := decoder.Decode(&progress); err != nil {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+
+		// 只显示关键状态变化
+		if progress.ID != "" {
+			key := progress.ID
+			if progress.Status != layerStatus[key] {
+				layerStatus[key] = progress.Status
+				if progress.Status == "Pulling fs layer" {
+					logFunc(fmt.Sprintf("  下载镜像层: %s", progress.ID))
+				} else if progress.Status == "Download complete" {
+					logFunc(fmt.Sprintf("  ✓ 完成: %s", progress.ID))
+				}
+			}
+		} else if progress.Status != "" && !strings.Contains(progress.Status, "Pulling") {
+			logFunc(fmt.Sprintf("  %s", progress.Status))
+		}
+	}
+
 	return nil
 }
 

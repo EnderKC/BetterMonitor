@@ -385,40 +385,51 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
     <template #footer>
       <a-button type="primary" @click="closeProcessDetail">关闭</a-button>
     </template>
-    <div v-if="currentProcess">
-      <div class="detail-row">
-        <div class="detail-label">名称:</div>
-        <div class="detail-value">{{ currentProcess.name || '-' }}</div>
+    <div v-if="currentProcess" class="process-detail-grid">
+      <div class="detail-item full-width">
+        <div class="detail-label">名称</div>
+        <div class="detail-value highlight">{{ currentProcess.name || '-' }}</div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">PID:</div>
-        <div class="detail-value">{{ currentProcess.pid || '-' }}</div>
+
+      <div class="detail-item">
+        <div class="detail-label">PID</div>
+        <div class="detail-value mono">{{ currentProcess.pid || '-' }}</div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">用户:</div>
+
+      <div class="detail-item">
+        <div class="detail-label">用户</div>
         <div class="detail-value">{{ currentProcess.username || '-' }}</div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">CPU使用率:</div>
+
+      <div class="detail-item">
+        <div class="detail-label">CPU使用率</div>
         <div class="detail-value">{{ currentProcess.cpu_percent ? `${currentProcess.cpu_percent.toFixed(2)}%` : '-' }}
         </div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">内存使用:</div>
+
+      <div class="detail-item">
+        <div class="detail-label">内存使用</div>
         <div class="detail-value">{{ currentProcess.memory_rss ? formatMemorySize(currentProcess.memory_rss) : '-' }}
         </div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">状态:</div>
-        <div class="detail-value">{{ currentProcess.status || '-' }}</div>
+
+      <div class="detail-item">
+        <div class="detail-label">状态</div>
+        <div class="detail-value">
+          <a-tag :color="currentProcess.status === 'running' ? 'success' : 'default'">
+            {{ currentProcess.status === 'running' ? '运行中' : currentProcess.status }}
+          </a-tag>
+        </div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">启动时间:</div>
+
+      <div class="detail-item">
+        <div class="detail-label">启动时间</div>
         <div class="detail-value">{{ currentProcess.create_time ? new Date(currentProcess.create_time *
           1000).toLocaleString() : '-' }}</div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">监听端口:</div>
+
+      <div class="detail-item full-width">
+        <div class="detail-label">监听端口</div>
         <div class="detail-value">
           <template v-if="currentProcess.ports && Array.isArray(currentProcess.ports) && currentProcess.ports.length">
             <a-tag v-for="port in currentProcess.ports" :key="port" color="blue" style="margin-right: 5px">
@@ -428,9 +439,10 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
           <template v-else>-</template>
         </div>
       </div>
-      <div class="detail-row">
-        <div class="detail-label">命令行:</div>
-        <div class="detail-value" style="word-break: break-all">{{ currentProcess.cmd || '-' }}</div>
+
+      <div class="detail-item full-width">
+        <div class="detail-label">命令行</div>
+        <div class="detail-value cmd-text">{{ currentProcess.cmd || '-' }}</div>
       </div>
     </div>
   </a-modal>
@@ -449,21 +461,21 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 .filter-bar {
   margin-bottom: 16px;
   padding: 16px;
-  background: var(--card-bg);
+  background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 16px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
 }
 
 .process-list {
-  background: var(--card-bg);
+  background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 16px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
   overflow: hidden;
 }
 
@@ -480,28 +492,57 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 /* 详情样式 */
-.detail-row {
-  display: flex;
-  margin-bottom: 16px;
-  padding: 12px;
+/* 详情样式优化 */
+.process-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  padding: 8px;
+}
+
+.detail-item {
   background: rgba(0, 0, 0, 0.02);
-  border-radius: 10px;
-  line-height: 24px;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-item.full-width {
+  grid-column: span 2;
 }
 
 .detail-label {
-  width: 120px;
-  font-weight: 600;
-  flex-shrink: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
+  color: #8e8e93;
+  font-weight: 500;
 }
 
 .detail-value {
-  flex: 1;
-  color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
+  color: #1d1d1f;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.detail-value.highlight {
+  font-size: 16px;
+  font-weight: 600;
+  color: #007aff;
+}
+
+.detail-value.mono {
   font-family: "SF Mono", Menlo, monospace;
+}
+
+.detail-value.cmd-text {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 8px;
+  border-radius: 8px;
+  margin-top: 4px;
 }
 
 /* 表格样式优化 */
@@ -581,5 +622,101 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 :deep(.ant-checkbox-wrapper) {
   font-size: 13px;
   color: var(--text-primary);
+}
+</style>
+
+<style>
+/* Global Dark Mode Styles for ServerProcess */
+.dark .filter-bar,
+.dark .process-list {
+  background: rgba(30, 30, 30, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.dark .ant-table-thead>tr>th {
+  background: rgba(40, 40, 40, 0.6) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #f5f5f7 !important;
+}
+
+.dark .ant-table-tbody>tr>td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: #f5f5f7 !important;
+}
+
+.dark .ant-table-tbody>tr:hover>td {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .process-name {
+  color: #0a84ff !important;
+}
+
+.dark .process-name:hover {
+  color: #409cff !important;
+}
+
+/* Modal Dark Mode */
+.dark .ant-modal-content {
+  background: rgba(40, 40, 40, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .ant-modal-header {
+  background: rgba(50, 50, 50, 0.6) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.dark .ant-modal-title {
+  color: #f5f5f7 !important;
+}
+
+.dark .ant-modal-footer {
+  background: rgba(50, 50, 50, 0.3) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.dark .ant-modal-close {
+  color: #f5f5f7 !important;
+}
+
+.dark .detail-item {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .detail-label {
+  color: #8e8e93;
+}
+
+.dark .detail-value {
+  color: #f5f5f7;
+}
+
+.dark .detail-value.highlight {
+  color: #0a84ff;
+}
+
+.dark .detail-value.cmd-text {
+  background: rgba(0, 0, 0, 0.2);
+  color: #f5f5f7;
+}
+
+/* Input Dark Mode */
+.dark .ant-input {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #f5f5f7 !important;
+}
+
+.dark .ant-input:focus {
+  border-color: #0a84ff !important;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2) !important;
+}
+
+.dark .ant-checkbox-wrapper {
+  color: #f5f5f7 !important;
 }
 </style>
