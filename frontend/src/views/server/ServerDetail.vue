@@ -1752,24 +1752,6 @@ const updateMonitorData = (data: any) => {
   font-size: 14px;
 }
 
-/* Dark Mode Overrides */
-:global(.dark) .ios-header {
-  background: rgba(20, 20, 20, 0.85);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-:global(.dark) .overview-card,
-:global(.dark) .chart-card {
-  background: rgba(30, 30, 30, 0.6);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(.dark) .overview-card:hover,
-:global(.dark) .chart-card:hover {
-  background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(22, 119, 255, 0.4);
-}
-
 @media (max-width: 768px) {
   .overview-grid {
     grid-template-columns: 1fr !important;
@@ -1790,5 +1772,26 @@ const updateMonitorData = (data: any) => {
     overflow-x: auto;
     padding-bottom: 4px;
   }
+}
+
+</style>
+
+<style>
+/* Dark Mode Overrides */
+.dark .ios-header {
+  background: rgba(43, 42, 42, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dark .overview-card,
+.dark .chart-card {
+  background: rgba(52, 51, 51, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .overview-card:hover,
+.dark .chart-card:hover {
+  background: rgba(40, 40, 40, 0.8);
+  border-color: rgba(22, 119, 255, 0.4);
 }
 </style>
