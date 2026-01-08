@@ -25,6 +25,7 @@ const routes: Array<RouteRecordRaw> = [
     meta: {
       title: '探针',
       requiresAuth: false,
+      keepAlive: true,
     },
   },
   {
@@ -66,6 +67,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '服务器管理',
           requiresAuth: true,
+          keepAlive: true,
         },
       },
       {

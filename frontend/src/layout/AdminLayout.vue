@@ -91,8 +91,8 @@ onMounted(() => {
         <h2 class="gradient-text">{{ collapsed ? 'BM' : 'Better Monitor' }}</h2>
       </div>
 
-      <a-menu v-model:selectedKeys="selectedKeys" v-model:openKeys="openKeys" mode="inline" :theme="isDark ? 'dark' : 'light'"
-        class="modern-menu">
+      <a-menu v-model:selectedKeys="selectedKeys" v-model:openKeys="openKeys" mode="inline"
+        :theme="isDark ? 'dark' : 'light'" class="modern-menu">
         <a-menu-item key="/admin/servers" @click="goToServers">
           <template #icon>
             <DesktopOutlined />
@@ -196,11 +196,14 @@ onMounted(() => {
       <!-- 内容 -->
       <a-layout-content class="modern-content">
         <div class="content-wrapper">
-          <router-view v-slot="{ Component }">
-            <transition name="fade">
-              <keep-alive include="ServerList,Dashboard">
-                <component :is="Component" :key="route.fullPath" />
+          <router-view v-slot="{ Component, route }">
+            <transition name="slide-fade" mode="out-in">
+              <keep-alive>
+                <component :is="Component" :key="route.fullPath" v-if="route.meta.keepAlive" />
               </keep-alive>
+            </transition>
+            <transition name="slide-fade" mode="out-in">
+              <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive" />
             </transition>
           </router-view>
         </div>
@@ -391,7 +394,8 @@ onMounted(() => {
 
 /* Footer */
 .modern-footer {
-  line-height: 1.1; /* 这样可以和左侧选择栏下面的线对齐 */
+  line-height: 1.1;
+  /* 这样可以和左侧选择栏下面的线对齐 */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -466,16 +470,20 @@ onMounted(() => {
 }
 
 /* Transitions */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
+.slide-fade-enter-active,
+.slide-fade-leave-active {
+  transition: all 0.3s ease;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+.slide-fade-enter-from {
   opacity: 0;
+  transform: translateY(10px);
 }
 
+.slide-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
 </style>
 
 <style>
@@ -547,7 +555,7 @@ onMounted(() => {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
-.dark .footer-right{
+.dark .footer-right {
   color: var(--text-primary);
 }
 

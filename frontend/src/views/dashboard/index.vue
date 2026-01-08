@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+defineOptions({
+  name: 'Dashboard'
+});
+
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated, computed } from 'vue';
+
 import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
@@ -531,16 +536,17 @@ const resetRefreshTimer = () => {
   }, refreshInterval);
 };
 
-onMounted(async () => {
+const startDashboard = async () => {
   await settingsStore.loadPublicSettings();
   fetchServers();
   connectLifeProbesWS();
   resetRefreshTimer();
-});
+};
 
-onUnmounted(() => {
+const stopDashboard = () => {
   if (timer !== null) {
     clearInterval(timer);
+    timer = null;
   }
 
   Object.values(wsConnections.value).forEach(ws => {
@@ -575,6 +581,22 @@ onUnmounted(() => {
     lifeProbesWS.value.close();
     lifeProbesWS.value = null;
   }
+};
+
+onMounted(() => {
+  startDashboard();
+});
+
+onActivated(() => {
+  startDashboard();
+});
+
+onDeactivated(() => {
+  stopDashboard();
+});
+
+onUnmounted(() => {
+  stopDashboard();
 });
 
 // 格式化文件大小
@@ -1005,7 +1027,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
                     target="_blank" class="server-link" @click.stop>
                     <LinkOutlined />
                   </a>
-                  <div class="server-ip-wrapper" v-if="server.display_ip && (isLoggedIn || !server.display_ip.includes('*'))">
+                  <div class="server-ip-wrapper"
+                    v-if="server.display_ip && (isLoggedIn || !server.display_ip.includes('*'))">
                     <a-tooltip :title="server.display_ip">
                       <span class="server-ip-tag">{{ server.display_ip }}</span>
                     </a-tooltip>
@@ -1255,7 +1278,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 /* 确保tooltip根节点也能正确收缩 */
-.server-ip-wrapper > * {
+.server-ip-wrapper>* {
   min-width: 0;
   max-width: 100%;
 }
@@ -1854,5 +1877,4 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   background: rgba(40, 40, 40, 0.8);
   border-color: rgba(255, 255, 255, 0.15);
 }
-
 </style>
