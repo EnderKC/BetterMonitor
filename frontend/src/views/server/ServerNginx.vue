@@ -16,6 +16,7 @@ import {
   SearchOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import CodeEditor from '../../components/server/CodeEditor.vue';
 
 interface RawSite {
   primary_domain: string;
@@ -926,7 +927,7 @@ const openSiteDirectory = (item: WebsiteItem) => {
   router.push({
     name: 'ServerFile',
     params: { id: serverId.value },
-    query: { path: target }
+    query: { path: target, from: 'nginx' }
   });
 };
 
@@ -1152,11 +1153,14 @@ watch(installLogs, () => {
   }, 100);
 });
 
+const goBack = () => {
+  router.push(`/admin/servers/${serverId.value}`);
+};
 </script>
 
 <template>
   <div class="website-page">
-    <a-page-header title="网站管理" :sub-title="serverInfo.name || ''" class="page-header" @back="router.back">
+    <a-page-header title="网站管理" :sub-title="serverInfo.name || ''" class="page-header" @back="goBack">
       <template #extra>
         <a-button type="primary" @click="refreshData" :loading="openRestyChecking || websitesLoading">
           <template #icon>
@@ -1443,10 +1447,7 @@ watch(installLogs, () => {
           </a-col>
           <a-col :span="16">
             <a-form-item label="PHP版本">
-              <a-select
-                v-model:value="websiteForm.phpVersion"
-                :disabled="!websiteForm.phpEnable"
-                allow-clear
+              <a-select v-model:value="websiteForm.phpVersion" :disabled="!websiteForm.phpEnable" allow-clear
                 placeholder="请先启用PHP">
                 <a-select-option value="8.2">PHP 8.2</a-select-option>
                 <a-select-option value="8.1">PHP 8.1</a-select-option>
@@ -1458,11 +1459,7 @@ watch(installLogs, () => {
         </a-row>
 
         <a-form-item label="索引文件">
-          <a-select
-            v-model:value="websiteForm.index"
-            mode="tags"
-            placeholder="输入文件名后回车"
-            :token-separators="[',', ' ']">
+          <a-select v-model:value="websiteForm.index" mode="tags" placeholder="输入文件名后回车" :token-separators="[',', ' ']">
           </a-select>
           <div class="form-hint">默认: index.php, index.html</div>
         </a-form-item>
@@ -1470,10 +1467,7 @@ watch(installLogs, () => {
         <div class="form-section-title">高级配置</div>
 
         <a-form-item label="文件上传大小限制">
-          <a-select
-            v-model:value="websiteForm.clientMaxBodySizePreset"
-            placeholder="默认（不设置）"
-            style="width: 100%;">
+          <a-select v-model:value="websiteForm.clientMaxBodySizePreset" placeholder="默认（不设置）" style="width: 100%;">
             <a-select-option value="default">默认（不设置，使用 Nginx 默认值 1M）</a-select-option>
             <a-select-option value="0">不限制（0）</a-select-option>
             <a-select-option value="10m">10M</a-select-option>
@@ -1483,12 +1477,9 @@ watch(installLogs, () => {
             <a-select-option value="1g">1G</a-select-option>
             <a-select-option value="custom">自定义…</a-select-option>
           </a-select>
-          <a-input
-            v-if="websiteForm.clientMaxBodySizePreset === 'custom'"
-            v-model:value="websiteForm.clientMaxBodySizeCustom"
-            placeholder="例如：10m / 100m / 1g / 0"
-            style="margin-top: 8px;"
-          />
+          <a-input v-if="websiteForm.clientMaxBodySizePreset === 'custom'"
+            v-model:value="websiteForm.clientMaxBodySizeCustom" placeholder="例如：10m / 100m / 1g / 0"
+            style="margin-top: 8px;" />
           <div class="form-hint">
             控制客户端请求体（文件上传）的最大大小。支持格式：0（无限制）或 数字+单位（k/m/g），如 10m、100m、1g。
           </div>
@@ -1537,11 +1528,13 @@ watch(installLogs, () => {
             <div style="background: rgba(0,0,0,0.02); padding: 8px; border-radius: 4px; font-size: 12px;">
               <div v-if="websiteForm.sslCertificatePath" style="margin-bottom: 4px;">
                 <span style="color: #666;">证书: </span>
-                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{ websiteForm.sslCertificatePath }}</code>
+                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{
+                  websiteForm.sslCertificatePath }}</code>
               </div>
               <div v-if="websiteForm.sslCertificateKeyPath">
                 <span style="color: #666;">私钥: </span>
-                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{ websiteForm.sslCertificateKeyPath }}</code>
+                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{
+                  websiteForm.sslCertificateKeyPath }}</code>
               </div>
             </div>
           </a-form-item>
@@ -1553,36 +1546,23 @@ watch(installLogs, () => {
     </a-modal>
 
     <!-- 高级设置：直接编辑nginx配置 -->
-    <a-modal
-      v-model:open="advancedSettingsVisible"
-      title="高级设置 - 直接编辑nginx配置"
-      width="800px"
-      :confirm-loading="advancedSettingsSaving"
-      @ok="saveAdvancedSettings"
-      @cancel="advancedSettingsVisible = false"
+    <a-modal v-model:open="advancedSettingsVisible" title="高级设置 - 直接编辑nginx配置" width="800px"
+      :confirm-loading="advancedSettingsSaving" @ok="saveAdvancedSettings" @cancel="advancedSettingsVisible = false"
       class="glass-modal">
       <div v-if="advancedSettingsLoading" style="text-align: center; padding: 40px;">
         <a-spin size="large" />
         <div style="margin-top: 16px;">加载配置文件中...</div>
       </div>
       <div v-else>
-        <a-alert
-          message="注意事项"
-          description="直接编辑nginx配置文件需要谨慎操作。保存后系统会自动测试配置并重载nginx，如果配置错误将自动回滚。"
-          type="warning"
-          show-icon
-          style="margin-bottom: 16px;"
-        />
+        <a-alert message="注意事项" description="直接编辑nginx配置文件需要谨慎操作。保存后系统会自动测试配置并重载nginx，如果配置错误将自动回滚。" type="warning"
+          show-icon style="margin-bottom: 16px;" />
         <a-form-item label="域名" style="margin-bottom: 16px;">
           <a-input :value="advancedSettingsConfig.domain" disabled />
         </a-form-item>
         <a-form-item label="Nginx配置">
-          <a-textarea
-            v-model:value="advancedSettingsConfig.content"
-            :rows="20"
-            placeholder="编辑nginx配置..."
-            style="font-family: 'Courier New', monospace; font-size: 13px;"
-          />
+          <div class="nginx-editor-container">
+            <CodeEditor v-model:value="advancedSettingsConfig.content" filename="nginx.conf" />
+          </div>
         </a-form-item>
       </div>
     </a-modal>
@@ -2441,5 +2421,16 @@ watch(installLogs, () => {
 .dark .form-section-title {
   color: #e0e0e0;
   border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.nginx-editor-container {
+  height: 500px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dark .nginx-editor-container {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 </style>

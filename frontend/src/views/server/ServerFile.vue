@@ -961,6 +961,11 @@ watch(
 
 // 返回服务器详情页
 const goBack = () => {
+  const from = route.query.from;
+  if (from === 'nginx') {
+    router.push(`/admin/servers/${serverId.value}/nginx`);
+    return;
+  }
   router.push(`/admin/servers/${serverId.value}`);
 };
 

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { message } from 'ant-design-vue';
-import { getToken, clearLoginInfo } from './auth';
+import { getToken, clearLoginInfo, isTokenExpired } from './auth';
 import router from '../router';
 
 // 创建axios实例
@@ -15,6 +15,12 @@ service.interceptors.request.use(
     // 添加token到请求头
     const token = getToken();
     if (token) {
+      // 检查token是否过期或格式错误
+      if (isTokenExpired(token)) {
+        clearLoginInfo();
+        router.push('/login');
+        return Promise.reject(new Error('Token expired or invalid'));
+      }
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -29,20 +35,20 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   (response) => {
     console.log('请求成功响应:', response.config.url, response.data);
-    
+
     // 直接返回响应数据，不做任何转换
     return response.data;
   },
   (error) => {
     console.error('请求错误:', error.config?.url, error);
-    
+
     // 处理错误响应
     const response = error.response;
-    
+
     if (response) {
       const { status, data } = response;
       console.error('错误响应状态:', status, '响应数据:', data);
-      
+
       // 处理常见的错误
       switch (status) {
         case 400:
@@ -68,7 +74,7 @@ service.interceptors.response.use(
     } else {
       message.error('网络错误，请检查网络连接');
     }
-    
+
     return Promise.reject(error);
   }
 );

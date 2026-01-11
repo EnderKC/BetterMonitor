@@ -1257,7 +1257,7 @@ const updateMonitorData = (data: any) => {
               {{ serverInfo.name }}
               <span v-if="serverInfo.hostname && serverInfo.hostname !== '未知'" class="hostname-tag">{{
                 serverInfo.hostname
-              }}</span>
+                }}</span>
             </h1>
             <div class="server-meta">
               <span class="meta-item">{{ serverInfo.ip }}</span>
@@ -1773,7 +1773,6 @@ const updateMonitorData = (data: any) => {
     padding-bottom: 4px;
   }
 }
-
 </style>
 
 <style>
@@ -1793,5 +1792,10 @@ const updateMonitorData = (data: any) => {
 .dark .chart-card:hover {
   background: rgba(40, 40, 40, 0.8);
   border-color: rgba(22, 119, 255, 0.4);
+}
+
+.dark .ios-alert {
+  background: rgba(52, 51, 51, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 </style>
