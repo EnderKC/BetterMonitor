@@ -5,7 +5,6 @@ import service from '../utils/request';
 // 设置接口定义
 interface SystemSettings {
   ui_refresh_interval?: string;
-  heartbeat_interval?: string;
   monitor_interval?: string;
   data_retention_days?: number;
   life_data_retention_days?: number;
@@ -18,7 +17,6 @@ interface SystemSettings {
 export const useSettingsStore = defineStore('settings', () => {
   // 默认值
   const uiRefreshInterval = ref('10s');
-  const heartbeatInterval = ref('10s');
   const monitorInterval = ref('30s');
   const dataRetentionDays = ref(7);
   const lifeDataRetentionDays = ref(7);
@@ -26,7 +24,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const agentReleaseRepo = ref('');
   const agentReleaseChannel = ref('stable');
   const agentReleaseMirror = ref('');
-  
+
   // 是否已加载设置
   const loaded = ref(false);
 
@@ -61,19 +59,15 @@ export const useSettingsStore = defineStore('settings', () => {
       
       if (settings) {
         console.log('加载的系统设置:', settings);
-        
+
         if (settings.ui_refresh_interval !== undefined) {
           uiRefreshInterval.value = settings.ui_refresh_interval;
         }
-        
-        if (settings.heartbeat_interval !== undefined) {
-          heartbeatInterval.value = settings.heartbeat_interval;
-        }
-        
+
         if (settings.monitor_interval !== undefined) {
           monitorInterval.value = settings.monitor_interval;
         }
-        
+
         if (settings.data_retention_days !== undefined) {
           dataRetentionDays.value = settings.data_retention_days;
         }
@@ -137,15 +131,11 @@ export const useSettingsStore = defineStore('settings', () => {
     if (settings.ui_refresh_interval !== undefined) {
       uiRefreshInterval.value = settings.ui_refresh_interval;
     }
-    
-    if (settings.heartbeat_interval !== undefined) {
-      heartbeatInterval.value = settings.heartbeat_interval;
-    }
-    
+
     if (settings.monitor_interval !== undefined) {
       monitorInterval.value = settings.monitor_interval;
     }
-    
+
     if (settings.data_retention_days !== undefined) {
       dataRetentionDays.value = settings.data_retention_days;
     }
@@ -178,7 +168,6 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     uiRefreshInterval,
-    heartbeatInterval,
     monitorInterval,
     dataRetentionDays,
     lifeDataRetentionDays,

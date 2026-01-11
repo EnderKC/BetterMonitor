@@ -114,10 +114,7 @@ func (a *App) Start() error {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// 启动心跳协程
-	go a.heartbeatLoop()
-
-	// 启动监控协程
+	// 启动监控协程（监控数据上报同时承担心跳功能）
 	go a.monitorLoop()
 
 	a.log.Info("Agent已启动")
@@ -200,23 +197,6 @@ func (a *App) startInitMode() error {
 
 	a.log.Info("Agent已停止")
 	return nil
-}
-
-// 心跳循环
-func (a *App) heartbeatLoop() {
-	ticker := time.NewTicker(a.config.HeartbeatInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := a.client.SendHeartbeat(); err != nil {
-				a.log.Error("发送心跳失败: %v", err)
-			}
-		case <-a.ctx.Done():
-			return
-		}
-	}
 }
 
 // 监控循环

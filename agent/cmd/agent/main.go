@@ -389,55 +389,8 @@ func main() {
 	// 创建一个配置更新通道
 	configUpdateCh := make(chan struct{}, 1)
 
-	// 启动心跳任务
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		heartbeatTicker := time.NewTicker(cfg.HeartbeatInterval)
-		defer heartbeatTicker.Stop()
-
-		// 心跳失败计数
-		var failedHeartbeats int
-		maxFailedHeartbeats := 3 // 连续失败3次触发重连
-
-		for {
-			select {
-			case <-heartbeatTicker.C:
-				// 发送心跳
-				if cfg.ServerID > 0 && cfg.SecretKey != "" {
-					if err := client.SendHeartbeat(); err != nil {
-						log.Error("发送心跳失败: %s", err)
-						failedHeartbeats++
-
-						// 连续心跳失败达到阈值，触发重连
-						if failedHeartbeats >= maxFailedHeartbeats {
-							log.Warn("连续 %d 次心跳失败，触发WebSocket重连", failedHeartbeats)
-							failedHeartbeats = 0 // 重置失败计数
-
-							// 通知连接状态变化
-							if notifyReconnect() {
-								log.Debug("已通知连接监控处理重连")
-							}
-						}
-					} else {
-						// 心跳成功，重置失败计数
-						if failedHeartbeats > 0 {
-							log.Debug("心跳恢复正常")
-							failedHeartbeats = 0
-						}
-					}
-				}
-			case <-configUpdateCh:
-				// 重置心跳间隔
-				heartbeatTicker.Reset(cfg.HeartbeatInterval)
-				log.Info("已更新心跳间隔为: %s", cfg.HeartbeatInterval)
-			case <-stopCh:
-				return
-			}
-		}
-	}()
-
-	// 启动监控任务
+	// 启动监控任务（同时承担心跳功能）
+	// 监控数据上报时会更新 LastHeartbeat，因此不需要单独的心跳机制
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

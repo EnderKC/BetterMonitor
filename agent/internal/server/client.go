@@ -21,17 +21,15 @@ import (
 	"github.com/user/server-ops-agent/config"
 	"github.com/user/server-ops-agent/internal/monitor"
 	"github.com/user/server-ops-agent/pkg/logger"
-	"github.com/user/server-ops-agent/pkg/version"
 )
 
 // Client 与服务器通信的客户端
 type Client struct {
-	cfg               *config.Config
-	log               *logger.Logger
-	httpClient        *http.Client
-	wsConn            *websocket.Conn
-	lastHeartbeatTime time.Time // 添加最后心跳时间字段
-	secretKey         string    // 服务器密钥
+	cfg        *config.Config
+	log        *logger.Logger
+	httpClient *http.Client
+	wsConn     *websocket.Conn
+	secretKey  string // 服务器密钥
 
 	// WebSocket连接状态管理
 	wsConnected      bool
@@ -97,64 +95,6 @@ func (c *Client) triggerReconnect() {
 	}
 	c.log.Debug("请求WebSocket重连")
 	handler()
-}
-
-// SendHeartbeat 发送心跳消息
-func (c *Client) SendHeartbeat() error {
-	if c.cfg.ServerID == 0 || c.secretKey == "" {
-		return fmt.Errorf("未配置服务器ID或密钥")
-	}
-
-	c.log.Debug("通过WebSocket发送心跳...")
-
-	c.wsMutex.Lock()
-	wsConnected := c.wsConnected && c.wsConn != nil
-	c.wsMutex.Unlock()
-
-	if !wsConnected {
-		c.log.Warn("WebSocket未连接，无法发送心跳")
-		c.triggerReconnect()
-		return fmt.Errorf("WebSocket未连接")
-	}
-
-	heartbeatMsg := struct {
-		Type      string `json:"type"`
-		Timestamp int64  `json:"timestamp"`
-		Status    string `json:"status"`
-		Version   string `json:"version"`
-		IsReply   bool   `json:"is_reply"`
-	}{
-		Type:      "heartbeat",
-		Timestamp: time.Now().Unix(),
-		Status:    "online",
-		Version:   version.Version,
-		IsReply:   false, // 标记为主动发送的心跳，非回复
-	}
-
-	if err := c.writeJSON(heartbeatMsg); err != nil {
-		c.log.Warn("通过WebSocket发送心跳失败: %v", err)
-
-		// 如果发送失败，标记连接断开并触发重连
-		c.wsMutex.Lock()
-		c.wsConnected = false
-		if c.wsConn != nil {
-			c.wsConn.Close()
-			c.wsConn = nil
-		}
-		c.wsMutex.Unlock()
-
-		c.triggerReconnect()
-
-		return fmt.Errorf("WebSocket心跳发送失败: %w", err)
-	}
-
-	// 更新最后心跳时间
-	c.wsMutex.Lock()
-	c.lastHeartbeatTime = time.Now()
-	c.wsMutex.Unlock()
-
-	c.log.Debug("通过WebSocket发送心跳成功")
-	return nil
 }
 
 // SendMonitorData 发送监控数据
@@ -305,30 +245,6 @@ func (c *Client) ConnectWebSocket() error {
 		c.wsConnected = true // 设置连接状态
 		c.log.Info("WebSocket连接成功: %s", url)
 
-		// 立即发送一次心跳消息，确保服务器收到agent在线状态
-		heartbeatMsg := struct {
-			Type      string `json:"type"`
-			Timestamp int64  `json:"timestamp"`
-			Status    string `json:"status"`
-			Version   string `json:"version"`
-			IsReply   bool   `json:"is_reply"`
-		}{
-			Type:      "heartbeat",
-			Timestamp: time.Now().Unix(),
-			Status:    "online",
-			Version:   version.Version,
-			IsReply:   false, // 标记为主动发送的心跳，非回复
-		}
-
-		// 这里我们已经持有wsMutex锁，所以可以直接使用wsConn而不用writeJSON
-		// 这样可以避免死锁（因为writeJSON也会尝试获取这个锁）
-		if err := c.wsConn.WriteJSON(heartbeatMsg); err != nil {
-			c.log.Warn("发送初始心跳消息失败: %v", err)
-		} else {
-			c.log.Info("发送初始心跳消息成功")
-			c.lastHeartbeatTime = time.Now()
-		}
-
 		// 开始监听消息
 		go c.handleWebSocketMessages()
 
@@ -400,47 +316,6 @@ func (c *Client) handleWebSocketMessages() {
 
 		// 根据消息类型使用不同的结构体解析
 		switch baseMsg.Type {
-		case "heartbeat":
-			// 解析并处理心跳消息
-			var heartbeatMsg struct {
-				Type      string `json:"type"`
-				Timestamp int64  `json:"timestamp"`
-				Status    string `json:"status,omitempty"`
-				IsReply   bool   `json:"is_reply,omitempty"` // 添加标记是否为回复的字段
-			}
-			if err := json.Unmarshal(message, &heartbeatMsg); err != nil {
-				c.log.Error("解析心跳消息失败: %v", err)
-				continue
-			}
-
-			// 更新最后心跳时间
-			c.lastHeartbeatTime = time.Now()
-
-			// 只有当不是回复时才回应心跳
-			if !heartbeatMsg.IsReply {
-				// 构造响应心跳消息
-				replyMsg := struct {
-					Type      string `json:"type"`
-					Timestamp int64  `json:"timestamp"`
-					Status    string `json:"status"`
-					Version   string `json:"version"`
-					IsReply   bool   `json:"is_reply"` // 添加标记是否为回复的字段
-				}{
-					Type:      "heartbeat",
-					Timestamp: time.Now().Unix(),
-					Status:    "online",
-					Version:   version.Version,
-					IsReply:   true, // 标记为回复
-				}
-
-				// 发送响应心跳
-				c.wsWriteMutex.Lock()
-				if err := c.wsConn.WriteJSON(replyMsg); err != nil {
-					c.log.Error("发送响应心跳失败: %v", err)
-				}
-				c.wsWriteMutex.Unlock()
-			}
-
 		case "terminal_input":
 			// 处理终端输入
 			var termMsg struct {
@@ -2307,7 +2182,6 @@ func (c *Client) FetchSettings() error {
 		// 服务器返回的配置
 		ServerID            uint   `json:"server_id"`
 		SecretKey           string `json:"secret_key"`
-		HeartbeatInterval   string `json:"heartbeat_interval"`
 		MonitorInterval     string `json:"monitor_interval"`
 		AgentReleaseRepo    string `json:"agent_release_repo"`
 		AgentReleaseChannel string `json:"agent_release_channel"`
@@ -2330,20 +2204,6 @@ func (c *Client) FetchSettings() error {
 		c.log.Info("检测到Secret Key更新，旧值: %s, 新值: %s", c.secretKey, response.SecretKey)
 		c.secretKey = response.SecretKey
 		configChanged = true
-	}
-
-	// 解析心跳间隔值
-	if response.HeartbeatInterval != "" {
-		heartbeatInterval, err := time.ParseDuration(response.HeartbeatInterval)
-		if err != nil {
-			c.log.Error("解析心跳间隔失败: %s", err)
-		} else if heartbeatInterval != c.cfg.HeartbeatInterval {
-			c.log.Info("更新心跳间隔: %s -> %s", c.cfg.HeartbeatInterval, heartbeatInterval)
-			c.cfg.HeartbeatInterval = heartbeatInterval
-			configChanged = true
-		}
-	} else {
-		c.log.Warn("服务器返回的心跳间隔为空")
 	}
 
 	// 解析监控间隔值

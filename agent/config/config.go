@@ -17,9 +17,8 @@ type Config struct {
 	SecretKey     string `mapstructure:"secret_key"`
 	RegisterToken string `mapstructure:"register_token"`
 
-	// 心跳和监控设置
-	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
-	MonitorInterval   time.Duration `mapstructure:"monitor_interval"`
+	// 监控设置
+	MonitorInterval time.Duration `mapstructure:"monitor_interval"`
 
 	// 日志设置
 	LogLevel string `mapstructure:"log_level"`
@@ -46,7 +45,6 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("server_id", 0)
 	v.SetDefault("secret_key", "")
 	v.SetDefault("register_token", "")
-	v.SetDefault("heartbeat_interval", "10s")
 	v.SetDefault("monitor_interval", "30s")
 	v.SetDefault("log_level", "info")
 	v.SetDefault("log_file", "./agent.log")
@@ -93,13 +91,6 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	// 解析时间间隔
-	heartbeatInterval, err := time.ParseDuration(v.GetString("heartbeat_interval"))
-	if err == nil {
-		config.HeartbeatInterval = heartbeatInterval
-	} else {
-		config.HeartbeatInterval = 10 * time.Second
-	}
-
 	monitorInterval, err := time.ParseDuration(v.GetString("monitor_interval"))
 	if err == nil {
 		config.MonitorInterval = monitorInterval
@@ -113,7 +104,6 @@ func LoadConfig(configPath string) (*Config, error) {
 	fmt.Printf("ServerID: %d\n", config.ServerID)
 	fmt.Printf("SecretKey: %s\n", config.SecretKey)
 	fmt.Printf("RegisterToken: %s\n", config.RegisterToken)
-	fmt.Printf("HeartbeatInterval: %s\n", config.HeartbeatInterval)
 	fmt.Printf("MonitorInterval: %s\n", config.MonitorInterval)
 	fmt.Printf("LogLevel: %s\n", config.LogLevel)
 	fmt.Printf("LogFile: %s\n", config.LogFile)
@@ -135,7 +125,6 @@ func SaveConfig(config *Config, configPath string) error {
 	v.Set("server_id", config.ServerID)
 	v.Set("secret_key", config.SecretKey)
 	v.Set("register_token", config.RegisterToken)
-	v.Set("heartbeat_interval", config.HeartbeatInterval.String())
 	v.Set("monitor_interval", config.MonitorInterval.String())
 	v.Set("log_level", config.LogLevel)
 	v.Set("log_file", config.LogFile)

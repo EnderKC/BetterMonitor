@@ -23,7 +23,6 @@ type Server struct {
 	LastHeartbeat   time.Time `json:"last_heartbeat"`                         // 最后心跳时间
 	Online          bool      `json:"online" gorm:"default:false"`            // 是否在线
 	SecretKey       string    `json:"secret_key" gorm:"type:varchar(64)"`     // 密钥
-	RegisterToken   string    `json:"-" gorm:"type:varchar(64)"`              // 注册令牌
 	UserID          uint      `json:"user_id" gorm:"default:0"`               // 所属用户ID
 	Tags            string    `json:"tags" gorm:"type:varchar(255)"`          // 标签，用逗号分隔
 	Description     string    `json:"description" gorm:"type:text"`           // 描述
