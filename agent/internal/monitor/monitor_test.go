@@ -19,8 +19,10 @@ func TestNewMonitor(t *testing.T) {
 	// 验证监控器创建成功
 	assert.NotNil(t, monitor)
 	assert.Equal(t, logger, monitor.log)
-	assert.Empty(t, monitor.lastNetStats)
-	assert.True(t, monitor.lastNetTime.IsZero())
+	assert.Equal(t, uint64(0), monitor.lastReportBytesRecv)
+	assert.Equal(t, uint64(0), monitor.lastReportBytesSent)
+	assert.True(t, monitor.lastReportTime.IsZero())
+	assert.False(t, monitor.hasLastReport)
 }
 
 func TestGetSystemInfo(t *testing.T) {
@@ -194,7 +196,8 @@ func TestNetworkStatsCaching(t *testing.T) {
 	assert.NotNil(t, data1)
 	
 	// 验证网络统计信息被缓存
-	assert.False(t, monitor.lastNetTime.IsZero())
+	assert.False(t, monitor.lastReportTime.IsZero())
+	assert.True(t, monitor.hasLastReport)
 	
 	// 再次获取监控数据
 	data2, err2 := monitor.GetMonitorData()
