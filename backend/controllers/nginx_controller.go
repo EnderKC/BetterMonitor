@@ -787,6 +787,177 @@ func ListWebsites(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// GetWebsiteDetail 获取单个网站的详细配置
+func GetWebsiteDetail(c *gin.Context) {
+	serverID := c.Param("id")
+	domain := c.Param("domain")
+
+	id, err := strconv.Atoi(serverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
+		return
+	}
+
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少域名参数"})
+		return
+	}
+
+	var server models.Server
+	if err := models.DB.First(&server, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
+		return
+	}
+
+	models.CheckServerStatus(&server)
+	if !server.Online {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
+		return
+	}
+
+	// 向Agent请求网站详情
+	message := map[string]interface{}{
+		"type": "nginx_command",
+		"payload": map[string]interface{}{
+			"action": "nginx_site_detail",
+			"domain": domain,
+		},
+	}
+
+	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取网站详情失败: %v", err)})
+		return
+	}
+
+	var result interface{}
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GetWebsiteNginxConfig 获取网站的原始nginx配置文件内容
+func GetWebsiteNginxConfig(c *gin.Context) {
+	serverID := c.Param("id")
+	domain := c.Param("domain")
+
+	id, err := strconv.Atoi(serverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
+		return
+	}
+
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少域名参数"})
+		return
+	}
+
+	var server models.Server
+	if err := models.DB.First(&server, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
+		return
+	}
+
+	models.CheckServerStatus(&server)
+	if !server.Online {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
+		return
+	}
+
+	// 向Agent请求原始配置文件
+	message := map[string]interface{}{
+		"type": "nginx_command",
+		"payload": map[string]interface{}{
+			"action": "nginx_get_raw_config",
+			"domain": domain,
+		},
+	}
+
+	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取配置文件失败: %v", err)})
+		return
+	}
+
+	var result interface{}
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// SaveWebsiteNginxConfig 保存网站的nginx配置文件
+func SaveWebsiteNginxConfig(c *gin.Context) {
+	serverID := c.Param("id")
+	domain := c.Param("domain")
+
+	id, err := strconv.Atoi(serverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
+		return
+	}
+
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少域名参数"})
+		return
+	}
+
+	var server models.Server
+	if err := models.DB.First(&server, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
+		return
+	}
+
+	models.CheckServerStatus(&server)
+	if !server.Online {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
+		return
+	}
+
+	// 获取请求体
+	var reqBody struct {
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求参数"})
+		return
+	}
+
+	if reqBody.Content == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "配置内容不能为空"})
+		return
+	}
+
+	// 向Agent发送保存配置的命令
+	message := map[string]interface{}{
+		"type": "nginx_command",
+		"payload": map[string]interface{}{
+			"action":  "nginx_save_raw_config",
+			"domain":  domain,
+			"content": reqBody.Content,
+		},
+	}
+
+	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置失败: %v", err)})
+		return
+	}
+
+	var result interface{}
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // OpenRestyStatus 查看节点OpenResty安装状态
 func OpenRestyStatus(c *gin.Context) {
 	serverID := c.Param("id")

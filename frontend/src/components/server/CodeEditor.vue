@@ -1,14 +1,7 @@
 <template>
   <div class="code-editor-wrapper">
-    <Codemirror
-      v-model="internalValue"
-      :extensions="extensions"
-      :style="{ height: '100%', width: '100%' }"
-      :autofocus="true"
-      :indent-with-tab="true"
-      :tab-size="2"
-      @change="handleChange"
-    />
+    <Codemirror v-model="internalValue" :extensions="extensions" :style="{ height: '100%', width: '100%' }"
+      :autofocus="true" :indent-with-tab="true" :tab-size="2" @change="handleChange" />
   </div>
 </template>
 
@@ -29,6 +22,8 @@ import { java } from '@codemirror/lang-java';
 import { cpp } from '@codemirror/lang-cpp';
 import { php } from '@codemirror/lang-php';
 import { rust } from '@codemirror/lang-rust';
+import { StreamLanguage } from '@codemirror/language';
+import { nginx } from '@codemirror/legacy-modes/mode/nginx';
 
 const props = defineProps<{
   value: string;
@@ -84,6 +79,9 @@ const detectLanguage = (filename: string) => {
       return php();
     case 'rs':
       return rust();
+    case 'conf':
+    case 'nginx':
+      return StreamLanguage.define(nginx);
     default:
       return null;
   }
@@ -91,7 +89,7 @@ const detectLanguage = (filename: string) => {
 
 const extensions = computed(() => {
   const exts = [basicSetup, vscodeDark];
-  
+
   if (props.language) {
     // If language is explicitly provided
     // (This part would need a mapping if language is a string)
@@ -99,7 +97,7 @@ const extensions = computed(() => {
     const langExt = detectLanguage(props.filename);
     if (langExt) exts.push(langExt);
   }
-  
+
   return exts;
 });
 

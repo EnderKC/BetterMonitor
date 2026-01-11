@@ -16,12 +16,21 @@ import {
   SearchOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import CodeEditor from '../../components/server/CodeEditor.vue';
 
 interface RawSite {
   primary_domain: string;
   extra_domains?: string[];
   root_dir: string;
+  // 新格式: 结构化的PHP配置
+  php?: {
+    enable: boolean;
+    version?: string;
+  };
+  // 旧格式: 兼容后端(逐步废弃)
   php_version?: string;
+  // 索引文件列表
+  index?: string[];
   proxy?: {
     enable: boolean;
     pass: string;
@@ -34,6 +43,7 @@ interface RawSite {
     certificate_key?: string;
   };
   http_challenge_dir?: string;
+  client_max_body_size?: string;  // 文件上传大小限制
   labels?: Record<string, string>;
   updated_at?: string;
 }
@@ -120,6 +130,8 @@ const websiteForm = reactive({
   domain: '',
   extraDomains: [] as string[],
   rootDir: '/www/sites/example',
+  // PHP配置: 开关控制版本选择
+  phpEnable: false,
   phpVersion: undefined as string | undefined,
   proxyEnable: false,
   proxyPass: '',
@@ -127,8 +139,25 @@ const websiteForm = reactive({
   enableHTTPS: true,
   forceSSL: true,
   httpChallengeDir: '/www/common',
-  indexText: 'index.php,index.html',
-  certificateId: undefined as number | undefined
+  // 索引文件列表
+  index: ['index.php', 'index.html'] as string[],
+  certificateId: undefined as number | undefined,
+  // SSL证书路径(仅用于显示回显)
+  sslCertificatePath: '',
+  sslCertificateKeyPath: '',
+  // 文件上传大小限制 (nginx: client_max_body_size)
+  // 'default': 不下发该字段(使用nginx默认值); 其他预设值或'custom'(使用自定义输入)
+  clientMaxBodySizePreset: 'default' as string,
+  clientMaxBodySizeCustom: ''
+});
+
+// 高级设置模态框
+const advancedSettingsVisible = ref(false);
+const advancedSettingsLoading = ref(false);
+const advancedSettingsSaving = ref(false);
+const advancedSettingsConfig = reactive({
+  domain: '',
+  content: ''
 });
 
 const sslModalVisible = ref(false);
@@ -527,6 +556,7 @@ const resetWebsiteForm = () => {
   websiteForm.domain = '';
   websiteForm.extraDomains = [];
   websiteForm.rootDir = '/www/sites/example';
+  websiteForm.phpEnable = false;
   websiteForm.phpVersion = undefined;
   websiteForm.proxyEnable = false;
   websiteForm.proxyPass = '';
@@ -534,8 +564,12 @@ const resetWebsiteForm = () => {
   websiteForm.enableHTTPS = true;
   websiteForm.forceSSL = true;
   websiteForm.httpChallengeDir = '/www/common';
-  websiteForm.indexText = 'index.php,index.html';
+  websiteForm.index = ['index.php', 'index.html'];
   websiteForm.certificateId = undefined;
+  websiteForm.sslCertificatePath = '';
+  websiteForm.sslCertificateKeyPath = '';
+  websiteForm.clientMaxBodySizePreset = 'default';
+  websiteForm.clientMaxBodySizeCustom = '';
 };
 
 const openCreateWebsite = () => {
@@ -547,16 +581,62 @@ const openCreateWebsite = () => {
 const openEditWebsite = (item: WebsiteItem) => {
   editingWebsite.value = item;
   resetWebsiteForm();
+
+  // 基础信息回显
   websiteForm.domain = item.site.primary_domain || '';
   websiteForm.extraDomains = [...(item.site.extra_domains || [])];
   websiteForm.rootDir = item.site.root_dir || '';
-  websiteForm.phpVersion = item.site.php_version || undefined;
+
+  // PHP配置回显: 智能判断是否启用
+  // 优先使用新格式php.enable，若无则根据是否有版本号来判断
+  const phpEnable =
+    item.site.php?.enable ??
+    (!!item.site.php?.version || !!item.site.php_version);
+
+  websiteForm.phpEnable = phpEnable;
+  websiteForm.phpVersion = phpEnable
+    ? (item.site.php?.version || item.site.php_version || undefined)
+    : undefined;
+
+  // 反向代理配置回显
   websiteForm.proxyEnable = item.site.proxy?.enable || false;
   websiteForm.proxyPass = item.site.proxy?.pass || '';
   websiteForm.proxyWebsocket = item.site.proxy?.websocket || false;
+
+  // HTTPS配置回显
   websiteForm.enableHTTPS = item.site.enable_https;
   websiteForm.forceSSL = item.site.force_ssl;
   websiteForm.httpChallengeDir = item.site.http_challenge_dir || '/www/common';
+
+  // 索引文件回显
+  websiteForm.index = item.site.index && item.site.index.length > 0
+    ? [...item.site.index]
+    : ['index.php', 'index.html'];
+
+  // SSL证书路径回显(仅用于显示)
+  websiteForm.sslCertificatePath = item.site.ssl?.certificate || '';
+  websiteForm.sslCertificateKeyPath = item.site.ssl?.certificate_key || '';
+
+  // 文件上传大小限制回显
+  const clientMaxBodySize = item.site.client_max_body_size?.trim() || '';
+  if (!clientMaxBodySize) {
+    // 未设置: 使用默认
+    websiteForm.clientMaxBodySizePreset = 'default';
+    websiteForm.clientMaxBodySizeCustom = '';
+  } else {
+    // 检查是否匹配预设值
+    const presets = ['0', '10m', '50m', '100m', '500m', '1g'];
+    const normalized = clientMaxBodySize.toLowerCase();
+    if (presets.includes(normalized)) {
+      websiteForm.clientMaxBodySizePreset = normalized;
+      websiteForm.clientMaxBodySizeCustom = '';
+    } else {
+      // 自定义值
+      websiteForm.clientMaxBodySizePreset = 'custom';
+      websiteForm.clientMaxBodySizeCustom = clientMaxBodySize;
+    }
+  }
+
   websiteDrawerVisible.value = true;
 };
 
@@ -585,27 +665,73 @@ const buildWebsitePayload = () => {
   const extra = sanitizeDomainList(websiteForm.extraDomains);
   const allDomains = sanitizeDomainList([domain, ...extra]);
 
+  // 索引文件处理: 去重、trim、过滤空串
+  const indexFiles = Array.from(new Set(
+    websiteForm.index
+      .map(item => item.trim())
+      .filter(item => !!item)
+  ));
+
   const config: Record<string, any> = {
     primary_domain: domain,
     extra_domains: extra,
     root_dir: websiteForm.rootDir.trim(),
-    index: websiteForm.indexText
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => !!item),
+    // 确保索引文件至少有默认值
+    index: indexFiles.length > 0 ? indexFiles : ['index.php', 'index.html'],
     proxy: {
       enable: websiteForm.proxyEnable,
       pass: websiteForm.proxyPass.trim(),
       websocket: websiteForm.proxyWebsocket
     },
     enable_https: websiteForm.enableHTTPS,
-    force_ssl: websiteForm.forceSSL,
+    // 强制HTTPS必须在HTTPS启用时才有效
+    force_ssl: websiteForm.enableHTTPS && websiteForm.forceSSL,
     http_challenge_dir: websiteForm.httpChallengeDir.trim()
   };
 
-  if (websiteForm.phpVersion) {
-    config.php_version = websiteForm.phpVersion;
+  // 文件上传大小限制: 未设置时不下发该字段(让nginx使用默认值)
+  const preset = websiteForm.clientMaxBodySizePreset;
+  let clientMaxBodySize = '';
+
+  if (preset === 'custom') {
+    // 自定义模式: 使用用户输入
+    clientMaxBodySize = websiteForm.clientMaxBodySizeCustom.trim();
+    if (!clientMaxBodySize) {
+      throw new Error('请输入文件上传大小限制（例如：10m、100m、1g 或 0）');
+    }
+  } else if (preset && preset !== 'default') {
+    // 预设值模式: 直接使用选中的预设值
+    clientMaxBodySize = preset;
   }
+  // default模式: 保持空字符串，不下发该字段
+
+  // 格式校验与下发
+  if (clientMaxBodySize) {
+    const sizePattern = /^(0|[1-9]\d*)([kKmMgG])?$/;
+    if (!sizePattern.test(clientMaxBodySize)) {
+      throw new Error('上传大小限制格式不正确（示例：10m、100m、1g 或 0）');
+    }
+    // 统一转小写后发送给后端
+    config.client_max_body_size = clientMaxBodySize.toLowerCase();
+  }
+
+  // PHP配置: 只有启用时才下发版本信息
+  if (websiteForm.phpEnable && websiteForm.phpVersion) {
+    config.php = {
+      enable: true,
+      version: websiteForm.phpVersion
+    };
+    // 兼容旧后端: 同时发送php_version
+    config.php_version = websiteForm.phpVersion;
+  } else {
+    // PHP未启用: 明确标记为禁用，不发送版本信息
+    config.php = {
+      enable: false
+    };
+    // 不发送php_version字段
+  }
+
+  // SSL证书配置: 只在HTTPS启用时才有效
   if (websiteForm.enableHTTPS && websiteForm.certificateId) {
     config.certificate_id = websiteForm.certificateId;
   }
@@ -631,6 +757,49 @@ const submitWebsite = async () => {
     message.error(msg);
   } finally {
     websiteSaving.value = false;
+  }
+};
+
+// 打开高级设置(直接编辑nginx配置文件)
+const openAdvancedSettings = async (item: WebsiteItem) => {
+  const domain = item.site.primary_domain;
+  advancedSettingsConfig.domain = domain;
+  advancedSettingsConfig.content = '';
+  advancedSettingsVisible.value = true;
+  advancedSettingsLoading.value = true;
+
+  try {
+    // 获取原始nginx配置
+    const response = await request.get(`/servers/${serverId.value}/websites/${encodeURIComponent(domain)}/nginx`);
+    advancedSettingsConfig.content = response.content || '';
+  } catch (error: any) {
+    message.error('获取配置文件失败: ' + (error?.message || '未知错误'));
+    advancedSettingsVisible.value = false;
+  } finally {
+    advancedSettingsLoading.value = false;
+  }
+};
+
+// 保存高级设置
+const saveAdvancedSettings = async () => {
+  if (!advancedSettingsConfig.content.trim()) {
+    message.error('配置内容不能为空');
+    return;
+  }
+
+  advancedSettingsSaving.value = true;
+  try {
+    await request.put(
+      `/servers/${serverId.value}/websites/${encodeURIComponent(advancedSettingsConfig.domain)}/nginx`,
+      { content: advancedSettingsConfig.content }
+    );
+    message.success('配置保存成功并已重载nginx');
+    advancedSettingsVisible.value = false;
+    await fetchWebsites();
+  } catch (error: any) {
+    message.error('保存配置失败: ' + (error?.message || '未知错误'));
+  } finally {
+    advancedSettingsSaving.value = false;
   }
 };
 
@@ -758,7 +927,7 @@ const openSiteDirectory = (item: WebsiteItem) => {
   router.push({
     name: 'ServerFile',
     params: { id: serverId.value },
-    query: { path: target }
+    query: { path: target, from: 'nginx' }
   });
 };
 
@@ -984,11 +1153,14 @@ watch(installLogs, () => {
   }, 100);
 });
 
+const goBack = () => {
+  router.push(`/admin/servers/${serverId.value}`);
+};
 </script>
 
 <template>
   <div class="website-page">
-    <a-page-header title="网站管理" :sub-title="serverInfo.name || ''" class="page-header" @back="router.back">
+    <a-page-header title="网站管理" :sub-title="serverInfo.name || ''" class="page-header" @back="goBack">
       <template #extra>
         <a-button type="primary" @click="refreshData" :loading="openRestyChecking || websitesLoading">
           <template #icon>
@@ -1132,9 +1304,12 @@ watch(installLogs, () => {
                   {{ record.site.updated_at ? new Date(record.site.updated_at).toLocaleString() : '未知' }}
                 </template>
               </a-table-column>
-              <a-table-column title="操作" key="actions" :width="120">
+              <a-table-column title="操作" key="actions" :width="180">
                 <template #default="{ record }">
-                  <a-button type="link" size="small" @click="openEditWebsite(record)">配置</a-button>
+                  <a-space>
+                    <a-button type="link" size="small" @click="openEditWebsite(record)">配置</a-button>
+                    <a-button type="link" size="small" @click="openAdvancedSettings(record)">高级设置</a-button>
+                  </a-space>
                 </template>
               </a-table-column>
             </a-table>
@@ -1265,9 +1440,15 @@ watch(installLogs, () => {
           <a-input v-model:value="websiteForm.rootDir" placeholder="/www/sites/example" />
         </a-form-item>
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :span="8">
+            <a-form-item label="启用PHP">
+              <a-switch v-model:checked="websiteForm.phpEnable" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="16">
             <a-form-item label="PHP版本">
-              <a-select v-model:value="websiteForm.phpVersion" allow-clear placeholder="选择PHP版本（可选）">
+              <a-select v-model:value="websiteForm.phpVersion" :disabled="!websiteForm.phpEnable" allow-clear
+                placeholder="请先启用PHP">
                 <a-select-option value="8.2">PHP 8.2</a-select-option>
                 <a-select-option value="8.1">PHP 8.1</a-select-option>
                 <a-select-option value="8.0">PHP 8.0</a-select-option>
@@ -1275,14 +1456,34 @@ watch(installLogs, () => {
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :span="12">
-            <a-form-item label="索引文件">
-              <a-input v-model:value="websiteForm.indexText" />
-            </a-form-item>
-          </a-col>
         </a-row>
 
+        <a-form-item label="索引文件">
+          <a-select v-model:value="websiteForm.index" mode="tags" placeholder="输入文件名后回车" :token-separators="[',', ' ']">
+          </a-select>
+          <div class="form-hint">默认: index.php, index.html</div>
+        </a-form-item>
+
         <div class="form-section-title">高级配置</div>
+
+        <a-form-item label="文件上传大小限制">
+          <a-select v-model:value="websiteForm.clientMaxBodySizePreset" placeholder="默认（不设置）" style="width: 100%;">
+            <a-select-option value="default">默认（不设置，使用 Nginx 默认值 1M）</a-select-option>
+            <a-select-option value="0">不限制（0）</a-select-option>
+            <a-select-option value="10m">10M</a-select-option>
+            <a-select-option value="50m">50M</a-select-option>
+            <a-select-option value="100m">100M</a-select-option>
+            <a-select-option value="500m">500M</a-select-option>
+            <a-select-option value="1g">1G</a-select-option>
+            <a-select-option value="custom">自定义…</a-select-option>
+          </a-select>
+          <a-input v-if="websiteForm.clientMaxBodySizePreset === 'custom'"
+            v-model:value="websiteForm.clientMaxBodySizeCustom" placeholder="例如：10m / 100m / 1g / 0"
+            style="margin-top: 8px;" />
+          <div class="form-hint">
+            控制客户端请求体（文件上传）的最大大小。支持格式：0（无限制）或 数字+单位（k/m/g），如 10m、100m、1g。
+          </div>
+        </a-form-item>
 
         <a-row :gutter="16">
           <a-col :span="8">
@@ -1322,11 +1523,48 @@ watch(installLogs, () => {
             </div>
             <div class="form-hint">证书托管在节点本地，可被多个站点复用。</div>
           </a-form-item>
+          <!-- SSL证书路径回显 -->
+          <a-form-item v-if="websiteForm.sslCertificatePath || websiteForm.sslCertificateKeyPath" label="当前证书路径">
+            <div style="background: rgba(0,0,0,0.02); padding: 8px; border-radius: 4px; font-size: 12px;">
+              <div v-if="websiteForm.sslCertificatePath" style="margin-bottom: 4px;">
+                <span style="color: #666;">证书: </span>
+                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{
+                  websiteForm.sslCertificatePath }}</code>
+              </div>
+              <div v-if="websiteForm.sslCertificateKeyPath">
+                <span style="color: #666;">私钥: </span>
+                <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;">{{
+                  websiteForm.sslCertificateKeyPath }}</code>
+              </div>
+            </div>
+          </a-form-item>
           <a-form-item label="HTTP验证目录">
             <a-input v-model:value="websiteForm.httpChallengeDir" />
           </a-form-item>
         </template>
       </a-form>
+    </a-modal>
+
+    <!-- 高级设置：直接编辑nginx配置 -->
+    <a-modal v-model:open="advancedSettingsVisible" title="高级设置 - 直接编辑nginx配置" width="800px"
+      :confirm-loading="advancedSettingsSaving" @ok="saveAdvancedSettings" @cancel="advancedSettingsVisible = false"
+      class="glass-modal">
+      <div v-if="advancedSettingsLoading" style="text-align: center; padding: 40px;">
+        <a-spin size="large" />
+        <div style="margin-top: 16px;">加载配置文件中...</div>
+      </div>
+      <div v-else>
+        <a-alert message="注意事项" description="直接编辑nginx配置文件需要谨慎操作。保存后系统会自动测试配置并重载nginx，如果配置错误将自动回滚。" type="warning"
+          show-icon style="margin-bottom: 16px;" />
+        <a-form-item label="域名" style="margin-bottom: 16px;">
+          <a-input :value="advancedSettingsConfig.domain" disabled />
+        </a-form-item>
+        <a-form-item label="Nginx配置">
+          <div class="nginx-editor-container">
+            <CodeEditor v-model:value="advancedSettingsConfig.content" filename="nginx.conf" />
+          </div>
+        </a-form-item>
+      </div>
     </a-modal>
 
     <a-modal v-model:open="sslModalVisible" title="申请SSL证书" :confirm-loading="sslLoading" @ok="submitSSL"
@@ -2183,5 +2421,16 @@ watch(installLogs, () => {
 .dark .form-section-title {
   color: #e0e0e0;
   border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.nginx-editor-container {
+  height: 500px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dark .nginx-editor-container {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 </style>

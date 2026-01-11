@@ -19,9 +19,8 @@ type LifeProbeRetentionConfig struct {
 // SystemSettings 存储全局系统设置
 type SystemSettings struct {
 	gorm.Model
-	// 心跳和监控设置 (Agent)
-	HeartbeatInterval string `json:"heartbeat_interval" gorm:"default:'10s'"` // 心跳上报间隔
-	MonitorInterval   string `json:"monitor_interval" gorm:"default:'30s'"`   // 监控数据上报间隔
+	// 监控设置 (Agent)
+	MonitorInterval string `json:"monitor_interval" gorm:"default:'30s'"` // 监控数据上报间隔
 
 	// 前端设置
 	UIRefreshInterval string `json:"ui_refresh_interval" gorm:"default:'10s'"` // 探针页面数据刷新间隔
@@ -77,7 +76,6 @@ func (s *SystemSettings) SetLifeProbeRetention(config *LifeProbeRetentionConfig)
 
 // 默认设置值
 var defaultSettings = SystemSettings{
-	HeartbeatInterval: "10s",
 	MonitorInterval:   "30s",
 	UIRefreshInterval: "10s",
 	ChartHistoryHours: 24,
@@ -116,12 +114,7 @@ func ParseDuration(duration string) (time.Duration, error) {
 // SaveSettings 保存系统设置
 func SaveSettings(settings *SystemSettings) error {
 	// 验证Duration格式
-	_, err := time.ParseDuration(settings.HeartbeatInterval)
-	if err != nil {
-		return errors.New("无效的心跳间隔格式: " + err.Error())
-	}
-
-	_, err = time.ParseDuration(settings.MonitorInterval)
+	_, err := time.ParseDuration(settings.MonitorInterval)
 	if err != nil {
 		return errors.New("无效的监控间隔格式: " + err.Error())
 	}

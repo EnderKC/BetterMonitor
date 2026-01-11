@@ -49,7 +49,6 @@ const ensureAdminAccess = async () => {
 
 // 设置表单
 const form = reactive({
-  heartbeat_interval: '10s',
   monitor_interval: '30s',
   ui_refresh_interval: '10s',
   chart_history_hours: 24,
@@ -104,7 +103,6 @@ const loadSettings = async () => {
   loading.value = true;
   try {
     const settings = await service.get<{
-      heartbeat_interval?: string;
       monitor_interval?: string;
       ui_refresh_interval?: string;
       chart_history_hours?: number;
@@ -117,10 +115,6 @@ const loadSettings = async () => {
     }>('admin/settings');
 
     // 设置表单值
-    if (settings.heartbeat_interval !== undefined) {
-      form.heartbeat_interval = settings.heartbeat_interval;
-    }
-
     if (settings.monitor_interval !== undefined) {
       form.monitor_interval = settings.monitor_interval;
     }
@@ -168,15 +162,9 @@ const loadSettings = async () => {
 
 // 表单验证
 const validateForm = () => {
-  // 检查心跳间隔
-  if (!form.heartbeat_interval) {
-    message.error('请选择心跳上报间隔');
-    return false;
-  }
-
   // 检查监控间隔
   if (!form.monitor_interval) {
-    message.error('请选择设备状态上报间隔');
+    message.error('请选择监控数据上报间隔');
     return false;
   }
 
@@ -247,7 +235,6 @@ onMounted(async () => {
 
   // 先加载settingsStore的值（如果已有）
   if (settingsStore.loaded) {
-    form.heartbeat_interval = settingsStore.heartbeatInterval;
     form.monitor_interval = settingsStore.monitorInterval;
     form.ui_refresh_interval = settingsStore.uiRefreshInterval;
     form.chart_history_hours = settingsStore.chartHistoryHours;
@@ -309,14 +296,9 @@ onMounted(async () => {
             <div class="card-body">
               <a-form layout="vertical" class="ios-form">
                 <div class="form-section">
-                  <a-form-item label="心跳上报间隔">
-                    <a-select v-model:value="form.heartbeat_interval" :options="durationOptions" class="ios-select" />
-                    <div class="form-help">Agent向服务器发送心跳的时间间隔，用于检测服务器是否在线</div>
-                  </a-form-item>
-
-                  <a-form-item label="设备状态上报间隔">
+                  <a-form-item label="监控数据上报间隔">
                     <a-select v-model:value="form.monitor_interval" :options="durationOptions" class="ios-select" />
-                    <div class="form-help">Agent向服务器上报CPU、内存、磁盘等状态的时间间隔</div>
+                    <div class="form-help">Agent向服务器上报监控数据（CPU、内存、磁盘等）的时间间隔</div>
                   </a-form-item>
                 </div>
 

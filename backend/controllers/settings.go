@@ -80,7 +80,6 @@ func GetAgentSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":               true,
 		"server_id":             server.ID,
-		"heartbeat_interval":    settings.HeartbeatInterval,
 		"monitor_interval":      settings.MonitorInterval,
 		"agent_release_repo":    settings.AgentReleaseRepo,
 		"agent_release_channel": settings.AgentReleaseChannel,

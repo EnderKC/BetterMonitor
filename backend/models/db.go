@@ -101,7 +101,6 @@ func InitDB() error {
 	if settingsCount == 0 {
 		// 创建默认系统设置
 		settings := SystemSettings{
-			HeartbeatInterval: "10s",
 			MonitorInterval:   "30s",
 			UIRefreshInterval: "10s",
 			DataRetentionDays: 7,

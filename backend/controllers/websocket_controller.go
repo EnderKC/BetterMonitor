@@ -96,8 +96,7 @@ const (
 	TypeDockerCommand   = "docker_command"
 	TypeNginxCommand    = "nginx_command"
 	TypeError           = "error"
-	TypeMonitor         = "monitor"   // 监控数据类型
-	TypeHeartbeat       = "heartbeat" // 心跳消息类型
+	TypeMonitor         = "monitor" // 监控数据类型
 	TypeSystemInfo      = "system_info"
 )
 
@@ -623,35 +622,6 @@ func handlePublicWebSocket(conn *SafeConn, server *models.Server, interrupt chan
 			sendErrorMessage(conn, "消息格式错误")
 			continue
 		}
-
-		// 对于公开WebSocket，只处理心跳消息
-		if msg.Type == TypeHeartbeat {
-			log.Printf("服务器 %d 的WebSocket收到心跳消息", server.ID)
-
-			// 解析详细的心跳消息
-			var heartbeatMsg struct {
-				Type      string `json:"type"`
-				Timestamp int64  `json:"timestamp"`
-				Status    string `json:"status,omitempty"`
-				IsReply   bool   `json:"is_reply,omitempty"` // 标记是否为回复
-			}
-			if err := json.Unmarshal(message, &heartbeatMsg); err != nil {
-				log.Printf("解析详细心跳消息失败: %v", err)
-			}
-
-			// 不再从前端WebSocket心跳更新服务器状态
-			// 只有当不是心跳回复时才发送响应
-			if !heartbeatMsg.IsReply {
-				if updatedServer, err := models.GetServerByID(server.ID); err == nil {
-					server = updatedServer
-				}
-				if err := sendHeartbeatReply(conn, server); err != nil {
-					log.Printf("发送服务器 %d 的心跳回复失败: %v", server.ID, err)
-				}
-			} else {
-				log.Printf("收到心跳回复消息，不再发送响应")
-			}
-		}
 	}
 
 	log.Printf("服务器 %d 的WebSocket处理循环结束", server.ID)
@@ -775,32 +745,6 @@ func sendInitialMonitorData(conn *SafeConn, server *models.Server) error {
 		return sendNoMonitorData(conn)
 	}
 	return sendMonitorDataMessage(conn, server, monitor)
-}
-
-func sendHeartbeatReply(conn *SafeConn, server *models.Server) error {
-	monitor, err := getLatestMonitorRecord(server.ID)
-	if err != nil {
-		log.Printf("获取服务器 %d 的最新监控数据失败: %v", server.ID, err)
-	}
-
-	heartbeatReply := struct {
-		Type      string                 `json:"type"`
-		Timestamp int64                  `json:"timestamp"`
-		Status    string                 `json:"status"`
-		IsReply   bool                   `json:"is_reply"`
-		Data      map[string]interface{} `json:"data,omitempty"`
-	}{
-		Type:      TypeHeartbeat,
-		Timestamp: time.Now().Unix(),
-		Status:    server.Status,
-		IsReply:   true,
-	}
-
-	if monitor != nil {
-		heartbeatReply.Data = buildMonitorData(server, monitor)
-	}
-
-	return conn.WriteJSON(heartbeatReply)
 }
 
 // WebSocketHandler 处理WebSocket连接
@@ -994,13 +938,6 @@ func handleMonitorWebSocket(conn *SafeConn, server *models.Server, interrupt cha
 			log.Printf("解析WebSocket消息错误: %v", err)
 			sendErrorMessage(conn, "消息格式错误")
 			continue
-		}
-
-		// 仅处理心跳消息
-		if msg.Type == TypeHeartbeat {
-			if err := sendHeartbeatReply(conn, server); err != nil {
-				log.Printf("发送监控心跳回复失败: %v", err)
-			}
 		}
 	}
 }
@@ -1348,56 +1285,6 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			} else {
 				// 如果当前连接是用户连接且收到shell_response，这可能是意外情况
 				log.Printf("用户连接收到Shell响应消息，这可能是意外情况")
-			}
-		case TypeHeartbeat:
-			// 客户端发送的心跳消息，立即处理并回复
-			log.Printf("收到心跳消息，服务器ID: %d", server.ID)
-
-			// 解析详细的心跳消息
-			var heartbeatMsg struct {
-				Type      string `json:"type"`
-				Timestamp int64  `json:"timestamp"`
-				Status    string `json:"status,omitempty"`
-				Version   string `json:"version,omitempty"`
-				IsReply   bool   `json:"is_reply,omitempty"` // 标记是否为回复
-			}
-			if err := json.Unmarshal(message, &heartbeatMsg); err != nil {
-				log.Printf("解析详细心跳消息失败: %v", err)
-			}
-
-			// 更新服务器状态为在线
-			status := "online"
-			if heartbeatMsg.Status != "" {
-				status = heartbeatMsg.Status
-			}
-
-			// 使用统一的方法更新服务器状态和心跳时间
-			if err := models.UpdateServerHeartbeatAndStatus(server.ID, status); err != nil {
-				log.Printf("更新服务器状态失败: %v", err)
-			} else {
-				log.Printf("服务器 %d 状态已更新为在线", server.ID)
-				// 更新本地server对象，保持状态一致
-				server.Status = status
-				server.Online = true
-				server.LastHeartbeat = time.Now()
-			}
-
-			// 如果心跳中包含版本信息，则同步更新数据库中的Agent版本
-			if version := strings.TrimSpace(heartbeatMsg.Version); version != "" {
-				if err := models.UpdateServerAgentVersion(server.ID, version); err != nil {
-					log.Printf("更新服务器 %d Agent版本失败: %v", server.ID, err)
-				} else {
-					server.AgentVersion = version
-					log.Printf("服务器 %d Agent版本已更新为 %s", server.ID, version)
-				}
-			}
-
-			if !heartbeatMsg.IsReply {
-				if err := sendHeartbeatReply(conn, server); err != nil {
-					log.Printf("发送心跳回复失败: %v", err)
-				}
-			} else {
-				log.Printf("收到心跳回复消息，不再发送响应")
 			}
 		case TypeProcessResponse, TypeProcessKillResp:
 			// 处理进程相关响应

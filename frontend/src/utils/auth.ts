@@ -59,4 +59,25 @@ export function clearLoginInfo(): void {
   console.log('清除所有登录信息');
   removeToken();
   removeUser();
+}
+
+// 检查Token是否过期
+export function isTokenExpired(token: string): boolean {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+
+    const payload = JSON.parse(jsonPayload);
+    if (payload.exp) {
+      // exp is in seconds, Date.now() is in ms
+      return Date.now() >= payload.exp * 1000;
+    }
+    return false;
+  } catch (e) {
+    console.error('Token解析失败:', e);
+    return true; // 解析失败视为过期/无效
+  }
 } 

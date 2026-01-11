@@ -47,19 +47,20 @@ type SSLConfig struct {
 
 // ServerBlock 表示 server {...}
 type ServerBlock struct {
-	Listen        []string        `json:"listen"`
-	ServerNames   []string        `json:"server_names"`
-	Root          string          `json:"root"`
-	Index         []string        `json:"index"`
-	AccessLog     string          `json:"access_log"`
-	ErrorLog      string          `json:"error_log"`
-	Proxy         *ProxyConfig    `json:"proxy"`
-	PHP           *PHPConfig      `json:"php"`
-	Locations     []LocationBlock `json:"locations"`
-	SSL           *SSLConfig      `json:"ssl"`
-	ForceSSL      bool            `json:"force_ssl"`
-	ChallengeRoot string          `json:"challenge_root"`
-	Extra         []Directive     `json:"extra"`
+	Listen            []string        `json:"listen"`
+	ServerNames       []string        `json:"server_names"`
+	Root              string          `json:"root"`
+	Index             []string        `json:"index"`
+	AccessLog         string          `json:"access_log"`
+	ErrorLog          string          `json:"error_log"`
+	Proxy             *ProxyConfig    `json:"proxy"`
+	PHP               *PHPConfig      `json:"php"`
+	Locations         []LocationBlock `json:"locations"`
+	SSL               *SSLConfig      `json:"ssl"`
+	ForceSSL          bool            `json:"force_ssl"`
+	ChallengeRoot     string          `json:"challenge_root"`
+	ClientMaxBodySize string          `json:"client_max_body_size"` // 文件上传大小限制
+	Extra             []Directive     `json:"extra"`
 }
 
 // NginxConfig 表示一个完整的nginx配置文件
@@ -147,6 +148,10 @@ server {
 
 	{{- if .ErrorLog }}
 	error_log {{ .ErrorLog }};
+	{{- end }}
+
+	{{- if .ClientMaxBodySize }}
+	client_max_body_size {{ .ClientMaxBodySize }};
 	{{- end }}
 
 	location ^~ /.well-known/acme-challenge/ {

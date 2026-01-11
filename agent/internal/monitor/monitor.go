@@ -37,32 +37,39 @@ type SystemInfo struct {
 
 // MonitorData 监控数据结构
 type MonitorData struct {
-	CPUUsage       float64 `json:"cpu_usage"`
-	MemoryUsed     uint64  `json:"memory_used"`
-	MemoryTotal    uint64  `json:"memory_total"`
-	DiskUsed       uint64  `json:"disk_used"`
-	DiskTotal      uint64  `json:"disk_total"`
-	NetworkIn      float64 `json:"network_in"`
-	NetworkOut     float64 `json:"network_out"`
-	LoadAvg1       float64 `json:"load_avg_1"`
-	LoadAvg5       float64 `json:"load_avg_5"`
-	LoadAvg15      float64 `json:"load_avg_15"`
-	SwapUsed       uint64  `json:"swap_used"`
-	SwapTotal      uint64  `json:"swap_total"`
-	BootTime       uint64  `json:"boot_time"`
-	Latency        float64 `json:"latency"`         // 延迟(ms)
-	PacketLoss     float64 `json:"packet_loss"`     // 丢包率(%)
-	Processes      int     `json:"processes"`       // 进程数
-	TCPConnections int     `json:"tcp_connections"` // TCP连接数
-	UDPConnections int     `json:"udp_connections"` // UDP连接数
+	CPUUsage        float64 `json:"cpu_usage"`
+	MemoryUsed      uint64  `json:"memory_used"`
+	MemoryTotal     uint64  `json:"memory_total"`
+	DiskUsed        uint64  `json:"disk_used"`
+	DiskTotal       uint64  `json:"disk_total"`
+	NetworkIn       float64 `json:"network_in"`        // 网络入站速率(bytes/s) - 用于展示曲线
+	NetworkOut      float64 `json:"network_out"`       // 网络出站速率(bytes/s) - 用于展示曲线
+	NetworkInDelta  uint64  `json:"network_in_delta"`  // 采样窗口内的入站字节增量(bytes) - 用于准确累加总量
+	NetworkOutDelta uint64  `json:"network_out_delta"` // 采样窗口内的出站字节增量(bytes) - 用于准确累加总量
+	SampleDuration  uint64  `json:"sample_duration"`   // 实际采样时长(ms) - 确保速率计算准确
+	LoadAvg1        float64 `json:"load_avg_1"`
+	LoadAvg5        float64 `json:"load_avg_5"`
+	LoadAvg15       float64 `json:"load_avg_15"`
+	SwapUsed        uint64  `json:"swap_used"`
+	SwapTotal       uint64  `json:"swap_total"`
+	BootTime        uint64  `json:"boot_time"`
+	Latency         float64 `json:"latency"`         // 延迟(ms)
+	PacketLoss      float64 `json:"packet_loss"`     // 丢包率(%)
+	Processes       int     `json:"processes"`       // 进程数
+	TCPConnections  int     `json:"tcp_connections"` // TCP连接数
+	UDPConnections  int     `json:"udp_connections"` // UDP连接数
 }
 
 // Monitor 系统监控器
 type Monitor struct {
-	log          *logger.Logger
-	lastNetStats []net.IOCountersStat
-	lastNetTime  time.Time
-	serverURL    string // 后端服务器URL，用于ping检测
+	log       *logger.Logger
+	serverURL string // 后端服务器URL，用于ping检测
+
+	// 用于计算上报周期内的流量增量（准确的总流量统计）
+	lastReportBytesRecv uint64    // 上次上报时的系统累计接收字节数
+	lastReportBytesSent uint64    // 上次上报时的系统累计发送字节数
+	lastReportTime      time.Time // 上次上报时间
+	hasLastReport       bool      // 是否有上次上报的基线数据
 }
 
 // New 创建一个新的监控器
@@ -346,45 +353,89 @@ func (m *Monitor) GetMonitorData() (*MonitorData, error) {
 			loadAvg1, loadAvg5, loadAvg15)
 	}
 
-	// 获取网络IO - 需要两次采样计算速率
-	// 这里添加一个小的延迟来获取更准确的网络速率
+	// 获取网络IO - 基于上报周期计算准确的流量增量和平均速率
+	// 重要设计说明：
+	// 1. Delta 必须覆盖整个上报周期（例如 30 秒），而不是短暂采样窗口（200ms）
+	// 2. 使用系统累计计数器的差值，确保不会遗漏任何流量
+	// 3. 速率基于上报周期的平均值，适合折线图展示
 	var networkIn, networkOut float64 = 0, 0
+	var networkInDelta, networkOutDelta uint64 = 0, 0
+	var sampleDuration uint64 = 0
 
-	// 第一次采样
-	netStats1, err := net.IOCounters(false)
+	// 获取当前系统网络累计计数器
+	now := time.Now()
+	netStats, err := net.IOCounters(false)
 	if err != nil {
-		m.log.Warn("获取网络IO信息失败: %v，将使用默认值或历史值", err)
+		m.log.Warn("获取网络IO信息失败: %v，本次上报流量数据为0", err)
+		// 获取失败时，delta 和速率保持为 0
+	} else if len(netStats) > 0 {
+		currentBytesRecv := netStats[0].BytesRecv
+		currentBytesSent := netStats[0].BytesSent
 
-		// 尝试使用历史值
-		if len(m.lastNetStats) > 0 && !m.lastNetTime.IsZero() {
-			timeDiff := time.Since(m.lastNetTime).Seconds()
-			if timeDiff > 0 && timeDiff < 60 { // 只在合理的时间范围内使用历史值
-				networkIn = float64(m.lastNetStats[0].BytesRecv) / timeDiff
-				networkOut = float64(m.lastNetStats[0].BytesSent) / timeDiff
+		// 检查是否有上次上报的基线数据
+		if !m.hasLastReport {
+			// 第一次上报：建立基线，但不产生 delta
+			// 原因：没有"上一次"可以做差，delta 为 0 是正确的
+			m.lastReportBytesRecv = currentBytesRecv
+			m.lastReportBytesSent = currentBytesSent
+			m.lastReportTime = now
+			m.hasLastReport = true
+			m.log.Info("初始化网络流量基线 (入站=%d B, 出站=%d B)", currentBytesRecv, currentBytesSent)
+			// networkInDelta/OutDelta/sampleDuration 保持为 0
+		} else {
+			// 计算自上次上报以来的时间间隔
+			reportInterval := now.Sub(m.lastReportTime)
+			reportIntervalSec := reportInterval.Seconds()
+
+			// 防御性检查：确保时间间隔合理
+			if reportIntervalSec <= 0 {
+				m.log.Warn("上报时间间隔异常 (<=0)，跳过本次流量计算")
+				// 保持 delta 和速率为 0，但不更新基线
+			} else if reportIntervalSec > 300 {
+				// 超过 5 分钟，可能是断线重连或系统时钟问题
+				m.log.Warn("上报时间间隔过长 (%.1f 秒)，重置基线避免异常大值", reportIntervalSec)
+				// 重置基线，本次 delta 为 0
+				m.lastReportBytesRecv = currentBytesRecv
+				m.lastReportBytesSent = currentBytesSent
+				m.lastReportTime = now
+			} else {
+				// 正常情况：计算上报周期内的流量增量
+				sampleDuration = uint64(reportInterval / time.Millisecond)
+
+				// 处理计数器回绕/重置
+				// 说明：
+				// - 操作系统网卡计数器在重启、接口重置、驱动问题时可能回退
+				// - 如果检测到回退（当前值 < 上次值），本次 delta 置 0
+				// - 同时重置基线到当前值，避免下次继续回退
+				if currentBytesRecv >= m.lastReportBytesRecv {
+					networkInDelta = currentBytesRecv - m.lastReportBytesRecv
+				} else {
+					networkInDelta = 0
+					m.log.Warn("检测到入站计数器回退 (上次:%d 当前:%d)，可能是网卡重置，本次增量置0",
+						m.lastReportBytesRecv, currentBytesRecv)
+				}
+
+				if currentBytesSent >= m.lastReportBytesSent {
+					networkOutDelta = currentBytesSent - m.lastReportBytesSent
+				} else {
+					networkOutDelta = 0
+					m.log.Warn("检测到出站计数器回退 (上次:%d 当前:%d)，可能是网卡重置，本次增量置0",
+						m.lastReportBytesSent, currentBytesSent)
+				}
+
+				// 计算上报周期内的平均速率 (字节/秒)
+				// 注意：这是平均值，不是瞬时值，但对于 30 秒周期的折线图已经足够平滑
+				networkIn = float64(networkInDelta) / reportIntervalSec
+				networkOut = float64(networkOutDelta) / reportIntervalSec
+
+				// 更新基线到当前值（无论是否回退都要更新）
+				m.lastReportBytesRecv = currentBytesRecv
+				m.lastReportBytesSent = currentBytesSent
+				m.lastReportTime = now
+
+				m.log.Debug("网络IO统计: 周期=%.1fs, 入站增量=%d B (速率=%.2f B/s), 出站增量=%d B (速率=%.2f B/s)",
+					reportIntervalSec, networkInDelta, networkIn, networkOutDelta, networkOut)
 			}
-		}
-	} else if len(netStats1) > 0 {
-		// 小延迟后再次采样
-		time.Sleep(200 * time.Millisecond)
-
-		// 第二次采样
-		netStats2, err := net.IOCounters(false)
-		if err != nil {
-			m.log.Warn("获取第二次网络IO信息失败: %v", err)
-		} else if len(netStats2) > 0 {
-			// 计算速率 (字节/秒)
-			timeDiff := 0.2 // 200ms = 0.2s
-			bytesIn := netStats2[0].BytesRecv - netStats1[0].BytesRecv
-			bytesOut := netStats2[0].BytesSent - netStats1[0].BytesSent
-			networkIn = float64(bytesIn) / timeDiff
-			networkOut = float64(bytesOut) / timeDiff
-
-			// 更新上次的网络信息，用于下次可能的历史值计算
-			m.lastNetStats = netStats2
-			m.lastNetTime = time.Now()
-
-			m.log.Debug("网络IO: 入站=%.2f 字节/秒, 出站=%.2f 字节/秒",
-				networkIn, networkOut)
 		}
 	}
 
@@ -454,24 +505,27 @@ func (m *Monitor) GetMonitorData() (*MonitorData, error) {
 
 	// 构造监控数据
 	return &MonitorData{
-		CPUUsage:       cpuUsage,
-		MemoryUsed:     memoryUsed,
-		MemoryTotal:    memoryTotal,
-		DiskUsed:       diskUsed,
-		DiskTotal:      diskTotal,
-		NetworkIn:      networkIn,
-		NetworkOut:     networkOut,
-		LoadAvg1:       loadAvg1,
-		LoadAvg5:       loadAvg5,
-		LoadAvg15:      loadAvg15,
-		SwapUsed:       swapUsed,
-		SwapTotal:      swapTotal,
-		BootTime:       bootTime,
-		Latency:        latency,
-		PacketLoss:     packetLoss,
-		Processes:      processCount,
-		TCPConnections: tcpCount,
-		UDPConnections: udpCount,
+		CPUUsage:        cpuUsage,
+		MemoryUsed:      memoryUsed,
+		MemoryTotal:     memoryTotal,
+		DiskUsed:        diskUsed,
+		DiskTotal:       diskTotal,
+		NetworkIn:       networkIn,
+		NetworkOut:      networkOut,
+		NetworkInDelta:  networkInDelta,
+		NetworkOutDelta: networkOutDelta,
+		SampleDuration:  sampleDuration,
+		LoadAvg1:        loadAvg1,
+		LoadAvg5:        loadAvg5,
+		LoadAvg15:       loadAvg15,
+		SwapUsed:        swapUsed,
+		SwapTotal:       swapTotal,
+		BootTime:        bootTime,
+		Latency:         latency,
+		PacketLoss:      packetLoss,
+		Processes:       processCount,
+		TCPConnections:  tcpCount,
+		UDPConnections:  udpCount,
 	}, nil
 }
 
