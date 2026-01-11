@@ -1645,6 +1645,19 @@ func HandleNginxCommand(action string, params map[string]interface{}) (string, e
 	case "nginx_sites_list":
 		result, err = handleSitesListAction()
 
+	case "nginx_site_detail":
+		domain := getStringParam(params["domain"])
+		result, err = handleSiteDetailAction(domain)
+
+	case "nginx_get_raw_config":
+		domain := getStringParam(params["domain"])
+		result, err = handleGetRawConfigAction(domain)
+
+	case "nginx_save_raw_config":
+		domain := getStringParam(params["domain"])
+		content := getStringParam(params["content"])
+		result, err = handleSaveRawConfigAction(domain, content)
+
 	case "openresty_status":
 		result, err = handleOpenRestyStatusAction()
 
@@ -1893,6 +1906,72 @@ func handleSitesListAction() (interface{}, error) {
 	}
 
 	return sites, nil
+}
+
+func handleSiteDetailAction(domain string) (interface{}, error) {
+	if domain == "" {
+		return nil, fmt.Errorf("缺少域名参数")
+	}
+
+	client, err := nginx.NewNginxClient(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	site, err := client.GetSiteDetail(domain)
+	if err != nil {
+		return nil, err
+	}
+
+	return site, nil
+}
+
+func handleGetRawConfigAction(domain string) (interface{}, error) {
+	if domain == "" {
+		return nil, fmt.Errorf("缺少域名参数")
+	}
+
+	client, err := nginx.NewNginxClient(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	content, err := client.GetRawConfig(domain)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"domain":  domain,
+		"content": content,
+	}, nil
+}
+
+func handleSaveRawConfigAction(domain, content string) (interface{}, error) {
+	if domain == "" {
+		return nil, fmt.Errorf("缺少域名参数")
+	}
+	if content == "" {
+		return nil, fmt.Errorf("配置内容不能为空")
+	}
+
+	client, err := nginx.NewNginxClient(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	if err := client.SaveRawConfig(domain, content); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"success": true,
+		"message": "配置保存成功并已重载nginx",
+		"domain":  domain,
+	}, nil
 }
 
 func handleOpenRestyStatusAction() (interface{}, error) {

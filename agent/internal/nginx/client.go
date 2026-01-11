@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -26,18 +27,19 @@ import (
 
 // SiteConfig 声明式站点配置
 type SiteConfig struct {
-	PrimaryDomain    string            `json:"primary_domain"`
-	ExtraDomains     []string          `json:"extra_domains"`
-	RootDir          string            `json:"root_dir"`
-	Index            []string          `json:"index"`
-	PHPVersion       string            `json:"php_version"`
-	Proxy            ProxyConfig       `json:"proxy"`
-	EnableHTTPS      bool              `json:"enable_https"`
-	ForceSSL         bool              `json:"force_ssl"`
-	SSL              SSLPaths          `json:"ssl"`
-	HTTPChallengeDir string            `json:"http_challenge_dir"`
-	Labels           map[string]string `json:"labels,omitempty"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	PrimaryDomain     string            `json:"primary_domain"`
+	ExtraDomains      []string          `json:"extra_domains"`
+	RootDir           string            `json:"root_dir"`
+	Index             []string          `json:"index"`
+	PHPVersion        string            `json:"php_version"`
+	Proxy             ProxyConfig       `json:"proxy"`
+	EnableHTTPS       bool              `json:"enable_https"`
+	ForceSSL          bool              `json:"force_ssl"`
+	SSL               SSLPaths          `json:"ssl"`
+	HTTPChallengeDir  string            `json:"http_challenge_dir"`
+	ClientMaxBodySize string            `json:"client_max_body_size"` // 文件上传大小限制，如"10m", "100m"
+	Labels            map[string]string `json:"labels,omitempty"`
+	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
 // SSLPaths 存储证书路径
@@ -315,6 +317,67 @@ func (c *NginxClient) ListSites() ([]SiteSummary, error) {
 	})
 
 	return sites, nil
+}
+
+// GetSiteDetail 获取单个站点的详细配置
+func (c *NginxClient) GetSiteDetail(domain string) (*SiteSummary, error) {
+	if domain == "" {
+		return nil, fmt.Errorf("域名不能为空")
+	}
+
+	// 域名规范化和安全验证
+	domain = strings.ToLower(strings.TrimSpace(domain))
+
+	// 防止路径穿越攻击: 域名不能包含路径分隔符
+	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
+		return nil, fmt.Errorf("域名格式无效: 包含非法字符")
+	}
+
+	if err := c.ensureDirectories(); err != nil {
+		return nil, err
+	}
+
+	// 读取站点元数据JSON文件
+	metaPath := c.siteMetadataPath(domain)
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("站点 %s 不存在", domain)
+		}
+		return nil, fmt.Errorf("读取站点配置失败: %w", err)
+	}
+
+	var site SiteConfig
+	if err := json.Unmarshal(data, &site); err != nil {
+		return nil, fmt.Errorf("解析站点配置失败: %w", err)
+	}
+
+	// 确保必要字段有默认值
+	if len(site.Index) == 0 {
+		site.Index = []string{"index.php", "index.html"}
+	}
+	// 确保SSL字段至少为空字符串(避免前端显示undefined)
+	if site.SSL.Certificate == "" {
+		site.SSL.Certificate = ""
+	}
+	if site.SSL.CertificateKey == "" {
+		site.SSL.CertificateKey = ""
+	}
+
+	// 转换容器路径为宿主机路径
+	hostDir := site.RootDir
+	if converted, convErr := c.hostPathFromContainer(site.RootDir); convErr == nil && converted != "" {
+		hostDir = converted
+	}
+
+	summary := &SiteSummary{
+		SiteConfig:  site,
+		Type:        determineSiteType(site),
+		Certificate: c.buildCertificateInfo(&site),
+		HostRootDir: hostDir,
+	}
+
+	return summary, nil
 }
 
 // GetRuntimeState 返回OpenResty容器是否存在以及运行状态
@@ -822,6 +885,385 @@ func (c *NginxClient) siteMetadataPath(domain string) string {
 	return filepath.Join(c.hostPaths.Meta, fmt.Sprintf("%s.json", sanitizeName(domain)))
 }
 
+// GetRawConfig 获取网站的原始nginx配置文件内容
+func (c *NginxClient) GetRawConfig(domain string) (string, error) {
+	if domain == "" {
+		return "", fmt.Errorf("域名不能为空")
+	}
+
+	// 域名规范化和安全验证
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
+		return "", fmt.Errorf("域名格式无效: 包含非法字符")
+	}
+
+	// 获取配置文件路径
+	configPath := c.siteConfigPath(domain)
+
+	// 读取配置文件
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("站点 %s 的配置文件不存在", domain)
+		}
+		return "", fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	return string(data), nil
+}
+
+const allowWidePermEnv = "NGINX_ALLOW_WIDE_PERMISSIONS"
+
+// validateExistingFilePerms 校验已存在文件的权限：禁止组/其他可写(0022)；可用环境变量放宽
+func (c *NginxClient) validateExistingFilePerms(path string) error {
+	// 使用Lstat而非Stat，显式拒绝symlink
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("获取文件信息失败 %s: %w", path, err)
+	}
+
+	// 显式拒绝symlink
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("配置路径不安全: %s 是符号链接", path)
+	}
+
+	// 仅对常规文件做权限判断；拒绝目录/设备等特殊文件
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("配置路径不是常规文件: %s (mode=%s)", path, fi.Mode().String())
+	}
+
+	perm := fi.Mode().Perm()
+	if perm&0022 == 0 {
+		return nil
+	}
+
+	if os.Getenv(allowWidePermEnv) == "1" {
+		if c.log != nil {
+			c.log.Warn("检测到过宽权限，仍继续（%s=1）：path=%s perm=%04o", allowWidePermEnv, path, uint32(perm))
+		}
+		return nil
+	}
+
+	return fmt.Errorf("不安全的文件权限：%s perm=%04o（group/other 可写）；请修复权限或设置 %s=1 放宽", path, uint32(perm), allowWidePermEnv)
+}
+
+// fsyncDir 对目录执行fsync，失败时返回错误
+func (c *NginxClient) fsyncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("fsync目录失败（打开目录失败）：dir=%s err=%w", dir, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && c.log != nil {
+			c.log.Warn("关闭目录fd失败：dir=%s err=%v", dir, closeErr)
+		}
+	}()
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fsync目录失败：dir=%s err=%w", dir, err)
+	}
+	return nil
+}
+
+// renameAndFsync 执行原子重命名并fsync目录
+func (c *NginxClient) renameAndFsync(oldPath, newPath string) error {
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return err
+	}
+	// Fsync目标目录（新目录项创建处）
+	if err := c.fsyncDir(filepath.Dir(newPath)); err != nil {
+		return err
+	}
+	// 如果源和目标在不同目录，也fsync源目录（旧目录项删除处）
+	oldDir := filepath.Dir(oldPath)
+	newDir := filepath.Dir(newPath)
+	if oldDir != newDir {
+		if err := c.fsyncDir(oldDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SaveRawConfig 保存网站的nginx配置文件(包含备份、校验和reload)
+// 采用"替换→测试→回滚"模式，确保测试阶段使用的是新配置
+func (c *NginxClient) SaveRawConfig(domain, content string) error {
+	if domain == "" {
+		return fmt.Errorf("域名不能为空")
+	}
+	if content == "" {
+		return fmt.Errorf("配置内容不能为空")
+	}
+
+	// 域名规范化和安全验证
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
+		return fmt.Errorf("域名格式无效: 包含非法字符")
+	}
+
+	configPath := c.siteConfigPath(domain)
+
+	// 并发保护：使用文件锁防止并发编辑冲突
+	lockPath := configPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("创建锁文件失败: %w", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("获取文件锁失败: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+	// symlink安全检查：防止通过符号链接写入任意位置
+	if fi, err := os.Lstat(configPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("配置路径不安全: %s 是符号链接", configPath)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("检查配置文件失败: %w", err)
+	}
+
+	// 获取原文件的权限信息，用于新文件继承
+	originalPerm := os.FileMode(0644)
+	originalUID, originalGID := -1, -1
+	originalExists := false
+
+	if fi, err := os.Stat(configPath); err == nil {
+		originalExists = true
+		originalPerm = fi.Mode().Perm()
+		if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
+			originalUID = int(stat.Uid)
+			originalGID = int(stat.Gid)
+		}
+		// 【修改点2】权限检查：禁止过宽权限（group/other可写）
+		if err := c.validateExistingFilePerms(configPath); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("读取配置文件信息失败: %w", err)
+	}
+
+	dir := filepath.Dir(configPath)
+	basename := filepath.Base(configPath)
+
+	// 创建临时文件（在同一目录下，确保Rename是原子操作）
+	tempFile, err := os.CreateTemp(dir, basename+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建临时配置文件失败: %w", err)
+	}
+	tempPath := tempFile.Name()
+	tempClosed := false
+
+	// 确保临时文件在所有失败路径都被清理
+	defer func() {
+		if !tempClosed {
+			tempFile.Close()
+		}
+		os.Remove(tempPath)
+	}()
+
+	// 写入新内容到临时文件
+	if _, err := io.WriteString(tempFile, content); err != nil {
+		return fmt.Errorf("写入临时配置文件失败: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		return fmt.Errorf("同步临时配置文件失败: %w", err)
+	}
+
+	// 设置临时文件的权限和属主（在Close之前，使用fd级别操作）
+	if err := syscall.Fchmod(int(tempFile.Fd()), uint32(originalPerm)); err != nil {
+		return fmt.Errorf("设置临时配置文件权限失败: %w", err)
+	}
+	if originalUID >= 0 && originalGID >= 0 {
+		if err := syscall.Fchown(int(tempFile.Fd()), originalUID, originalGID); err != nil {
+			return fmt.Errorf("设置临时配置文件属主失败: %w", err)
+		}
+	}
+
+	// 元数据变更后再次Sync，确保权限落盘
+	if err := tempFile.Sync(); err != nil {
+		return fmt.Errorf("同步临时配置文件元数据失败: %w", err)
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("关闭临时配置文件失败: %w", err)
+	}
+	tempClosed = true
+
+	// 创建备份（用于回滚）
+	backupPath := configPath + ".backup"
+	backupCreated := false
+
+	if originalExists {
+		// 检查备份路径是否安全
+		if fi, err := os.Lstat(backupPath); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("备份路径不安全: %s 是符号链接", backupPath)
+			}
+			// 【修改点3】如果备份文件已存在，检查其权限
+			if err := c.validateExistingFilePerms(backupPath); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("检查备份文件失败: %w", err)
+		}
+
+		originalData, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("读取原配置失败: %w", err)
+		}
+
+		// 备份也使用临时文件+原子替换
+		backupTempFile, err := os.CreateTemp(dir, basename+".*.backup.tmp")
+		if err != nil {
+			return fmt.Errorf("创建备份临时文件失败: %w", err)
+		}
+		backupTempPath := backupTempFile.Name()
+		backupTempClosed := false
+
+		defer func() {
+			if !backupTempClosed {
+				backupTempFile.Close()
+			}
+			os.Remove(backupTempPath)
+		}()
+
+		if _, err := backupTempFile.Write(originalData); err != nil {
+			return fmt.Errorf("写入备份临时文件失败: %w", err)
+		}
+		if err := backupTempFile.Sync(); err != nil {
+			return fmt.Errorf("同步备份临时文件失败: %w", err)
+		}
+
+		// 设置备份文件的权限和属主（在Close之前，使用fd级别操作）
+		if err := syscall.Fchmod(int(backupTempFile.Fd()), uint32(originalPerm)); err != nil {
+			return fmt.Errorf("设置备份文件权限失败: %w", err)
+		}
+		if originalUID >= 0 && originalGID >= 0 {
+			if err := syscall.Fchown(int(backupTempFile.Fd()), originalUID, originalGID); err != nil {
+				return fmt.Errorf("设置备份文件属主失败: %w", err)
+			}
+		}
+
+		// 元数据变更后再次Sync，确保权限落盘
+		if err := backupTempFile.Sync(); err != nil {
+			return fmt.Errorf("同步备份文件元数据失败: %w", err)
+		}
+
+		if err := backupTempFile.Close(); err != nil {
+			return fmt.Errorf("关闭备份临时文件失败: %w", err)
+		}
+		backupTempClosed = true
+
+		// 【修改点6】原子重命名备份文件并fsync目录
+		if err := c.renameAndFsync(backupTempPath, backupPath); err != nil {
+			return fmt.Errorf("创建备份文件失败: %w", err)
+		}
+		backupCreated = true
+	}
+
+	// 回滚函数：从备份恢复配置文件
+	restoreFromBackup := func() error {
+		if !backupCreated {
+			return fmt.Errorf("无可用备份")
+		}
+
+		backupData, err := os.ReadFile(backupPath)
+		if err != nil {
+			return fmt.Errorf("读取备份失败: %w", err)
+		}
+
+		restoreTempFile, err := os.CreateTemp(dir, basename+".*.restore.tmp")
+		if err != nil {
+			return fmt.Errorf("创建回滚临时文件失败: %w", err)
+		}
+		restoreTempPath := restoreTempFile.Name()
+		restoreTempClosed := false
+
+		defer func() {
+			if !restoreTempClosed {
+				restoreTempFile.Close()
+			}
+			os.Remove(restoreTempPath)
+		}()
+
+		if _, err := restoreTempFile.Write(backupData); err != nil {
+			return fmt.Errorf("写入回滚临时文件失败: %w", err)
+		}
+		if err := restoreTempFile.Sync(); err != nil {
+			return fmt.Errorf("同步回滚临时文件失败: %w", err)
+		}
+
+		// 设置回滚文件的权限和属主（在Close之前，使用fd级别操作）
+		if err := syscall.Fchmod(int(restoreTempFile.Fd()), uint32(originalPerm)); err != nil {
+			return fmt.Errorf("设置回滚文件权限失败: %w", err)
+		}
+		if originalUID >= 0 && originalGID >= 0 {
+			if err := syscall.Fchown(int(restoreTempFile.Fd()), originalUID, originalGID); err != nil {
+				return fmt.Errorf("设置回滚文件属主失败: %w", err)
+			}
+		}
+
+		// 元数据变更后再次Sync，确保权限落盘
+		if err := restoreTempFile.Sync(); err != nil {
+			return fmt.Errorf("同步回滚文件元数据失败: %w", err)
+		}
+
+		if err := restoreTempFile.Close(); err != nil {
+			return fmt.Errorf("关闭回滚临时文件失败: %w", err)
+		}
+		restoreTempClosed = true
+
+		// 【修改点7】原子重命名回滚文件并fsync目录
+		if err := c.renameAndFsync(restoreTempPath, configPath); err != nil {
+			return fmt.Errorf("回滚替换配置文件失败: %w", err)
+		}
+		return nil
+	}
+
+	// 【关键】先替换再测试，确保nginx -t测试的是新配置
+	// 【修改点5】使用renameAndFsync提高崩溃一致性
+	if err := c.renameAndFsync(tempPath, configPath); err != nil {
+		return fmt.Errorf("替换配置文件失败: %w", err)
+	}
+
+	// 测试nginx配置（此时configPath已经是新配置）
+	if err := c.TestConfig(); err != nil {
+		// 测试失败，立即回滚
+		if backupCreated {
+			if rbErr := restoreFromBackup(); rbErr != nil {
+				return fmt.Errorf("nginx配置测试失败: %v (回滚失败: %w)", err, rbErr)
+			}
+		} else {
+			// 如果原本不存在配置文件，删除新创建的
+			os.Remove(configPath)
+		}
+		return fmt.Errorf("nginx配置测试失败: %w", err)
+	}
+
+	// Reload nginx（失败也必须回滚，保持磁盘与运行态一致）
+	if err := c.ReloadNginx(); err != nil {
+		if backupCreated {
+			if rbErr := restoreFromBackup(); rbErr != nil {
+				return fmt.Errorf("重载nginx失败: %v (回滚失败: %w)", err, rbErr)
+			}
+			// 回滚后再次尝试reload（best-effort）
+			c.ReloadNginx()
+		} else {
+			os.Remove(configPath)
+		}
+		return fmt.Errorf("重载nginx失败: %w", err)
+	}
+
+	// 成功后保留备份文件（用于审计和手动恢复）
+	return nil
+}
+
 // ResolveHostPath 将容器路径或宿主路径规范化为宿主机路径
 func (c *NginxClient) ResolveHostPath(path string) (string, error) {
 	if path == "" {
@@ -896,18 +1338,55 @@ func (site *SiteConfig) toServerBlock(paths ContainerPaths) *ServerBlock {
 		}
 	}
 
+	// 文件上传大小限制: 校验并规范化格式
+	clientMaxBodySize := strings.TrimSpace(site.ClientMaxBodySize)
+	if clientMaxBodySize != "" {
+		// 基础格式校验，防止注入和非法值
+		// 合法格式: "0"(无限制) 或 "数字+可选单位(k/m/g)"
+		// 例如: "0", "10m", "100m", "1g"
+		clientMaxBodySize = strings.ToLower(clientMaxBodySize)
+		valid := false
+
+		if clientMaxBodySize == "0" {
+			// 特殊值: 0表示不限制
+			valid = true
+		} else if len(clientMaxBodySize) > 0 && clientMaxBodySize[0] >= '1' && clientMaxBodySize[0] <= '9' {
+			// 数字开头，检查后续格式
+			i := 1
+			for i < len(clientMaxBodySize) && clientMaxBodySize[i] >= '0' && clientMaxBodySize[i] <= '9' {
+				i++
+			}
+			if i == len(clientMaxBodySize) {
+				// 纯数字，合法
+				valid = true
+			} else if i == len(clientMaxBodySize)-1 {
+				// 最后一位是单位
+				unit := clientMaxBodySize[i]
+				if unit == 'k' || unit == 'm' || unit == 'g' {
+					valid = true
+				}
+			}
+		}
+
+		// 非法值时清空，不输出该指令
+		if !valid {
+			clientMaxBodySize = ""
+		}
+	}
+
 	return &ServerBlock{
-		Listen:        listen,
-		ServerNames:   site.AllDomains(),
-		Root:          site.RootDir,
-		Index:         site.Index,
-		AccessLog:     filepath.Join(paths.Logs, fmt.Sprintf("%s.access.log", sanitizeName(site.PrimaryDomain))),
-		ErrorLog:      filepath.Join(paths.Logs, fmt.Sprintf("%s.error.log", sanitizeName(site.PrimaryDomain))),
-		Proxy:         proxyBlock,
-		PHP:           phpBlock,
-		SSL:           sslBlock,
-		ForceSSL:      site.ForceSSL && sslBlock != nil,
-		ChallengeRoot: site.HTTPChallengeDir,
+		Listen:            listen,
+		ServerNames:       site.AllDomains(),
+		Root:              site.RootDir,
+		Index:             site.Index,
+		AccessLog:         filepath.Join(paths.Logs, fmt.Sprintf("%s.access.log", sanitizeName(site.PrimaryDomain))),
+		ErrorLog:          filepath.Join(paths.Logs, fmt.Sprintf("%s.error.log", sanitizeName(site.PrimaryDomain))),
+		ClientMaxBodySize: clientMaxBodySize,
+		Proxy:             proxyBlock,
+		PHP:               phpBlock,
+		SSL:               sslBlock,
+		ForceSSL:          site.ForceSSL && sslBlock != nil,
+		ChallengeRoot:     site.HTTPChallengeDir,
 	}
 }
 
