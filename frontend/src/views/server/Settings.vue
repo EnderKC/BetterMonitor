@@ -67,6 +67,7 @@ const activeTab = ref('agent');
 
 // 持续时间选项
 const durationOptions = [
+  { value: '1s', label: '1秒' },
   { value: '5s', label: '5秒' },
   { value: '10s', label: '10秒' },
   { value: '15s', label: '15秒' },
