@@ -1,3 +1,5 @@
+//go:build !windows
+
 package nginx
 
 import (
@@ -14,7 +16,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -23,6 +24,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/user/server-ops-agent/pkg/logger"
+	"golang.org/x/sys/unix"
 )
 
 // SiteConfig 声明式站点配置
@@ -1014,10 +1016,18 @@ func (c *NginxClient) SaveRawConfig(domain, content string) error {
 	}
 	defer lockFile.Close()
 
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("获取文件锁失败: %w", err)
+	// 使用 EINTR 重试机制获取文件锁
+	for {
+		err := unix.Flock(int(lockFile.Fd()), unix.LOCK_EX)
+		if err == nil {
+			break
+		}
+		if err != unix.EINTR {
+			return fmt.Errorf("获取文件锁失败: %w", err)
+		}
+		// 如果是 EINTR，重试
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer unix.Flock(int(lockFile.Fd()), unix.LOCK_UN)
 
 	// symlink安全检查：防止通过符号链接写入任意位置
 	if fi, err := os.Lstat(configPath); err == nil {
@@ -1033,13 +1043,12 @@ func (c *NginxClient) SaveRawConfig(domain, content string) error {
 	originalUID, originalGID := -1, -1
 	originalExists := false
 
-	if fi, err := os.Stat(configPath); err == nil {
+	var statBuf unix.Stat_t
+	if err := unix.Stat(configPath, &statBuf); err == nil {
 		originalExists = true
-		originalPerm = fi.Mode().Perm()
-		if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-			originalUID = int(stat.Uid)
-			originalGID = int(stat.Gid)
-		}
+		originalPerm = os.FileMode(statBuf.Mode).Perm()
+		originalUID = int(statBuf.Uid)
+		originalGID = int(statBuf.Gid)
 		// 【修改点2】权限检查：禁止过宽权限（group/other可写）
 		if err := c.validateExistingFilePerms(configPath); err != nil {
 			return err
@@ -1076,11 +1085,11 @@ func (c *NginxClient) SaveRawConfig(domain, content string) error {
 	}
 
 	// 设置临时文件的权限和属主（在Close之前，使用fd级别操作）
-	if err := syscall.Fchmod(int(tempFile.Fd()), uint32(originalPerm)); err != nil {
+	if err := unix.Fchmod(int(tempFile.Fd()), uint32(originalPerm)); err != nil {
 		return fmt.Errorf("设置临时配置文件权限失败: %w", err)
 	}
 	if originalUID >= 0 && originalGID >= 0 {
-		if err := syscall.Fchown(int(tempFile.Fd()), originalUID, originalGID); err != nil {
+		if err := unix.Fchown(int(tempFile.Fd()), originalUID, originalGID); err != nil {
 			return fmt.Errorf("设置临时配置文件属主失败: %w", err)
 		}
 	}
@@ -1141,11 +1150,11 @@ func (c *NginxClient) SaveRawConfig(domain, content string) error {
 		}
 
 		// 设置备份文件的权限和属主（在Close之前，使用fd级别操作）
-		if err := syscall.Fchmod(int(backupTempFile.Fd()), uint32(originalPerm)); err != nil {
+		if err := unix.Fchmod(int(backupTempFile.Fd()), uint32(originalPerm)); err != nil {
 			return fmt.Errorf("设置备份文件权限失败: %w", err)
 		}
 		if originalUID >= 0 && originalGID >= 0 {
-			if err := syscall.Fchown(int(backupTempFile.Fd()), originalUID, originalGID); err != nil {
+			if err := unix.Fchown(int(backupTempFile.Fd()), originalUID, originalGID); err != nil {
 				return fmt.Errorf("设置备份文件属主失败: %w", err)
 			}
 		}
@@ -1200,11 +1209,11 @@ func (c *NginxClient) SaveRawConfig(domain, content string) error {
 		}
 
 		// 设置回滚文件的权限和属主（在Close之前，使用fd级别操作）
-		if err := syscall.Fchmod(int(restoreTempFile.Fd()), uint32(originalPerm)); err != nil {
+		if err := unix.Fchmod(int(restoreTempFile.Fd()), uint32(originalPerm)); err != nil {
 			return fmt.Errorf("设置回滚文件权限失败: %w", err)
 		}
 		if originalUID >= 0 && originalGID >= 0 {
-			if err := syscall.Fchown(int(restoreTempFile.Fd()), originalUID, originalGID); err != nil {
+			if err := unix.Fchown(int(restoreTempFile.Fd()), originalUID, originalGID); err != nil {
 				return fmt.Errorf("设置回滚文件属主失败: %w", err)
 			}
 		}

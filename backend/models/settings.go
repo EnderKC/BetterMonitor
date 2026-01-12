@@ -114,14 +114,20 @@ func ParseDuration(duration string) (time.Duration, error) {
 // SaveSettings 保存系统设置
 func SaveSettings(settings *SystemSettings) error {
 	// 验证Duration格式
-	_, err := time.ParseDuration(settings.MonitorInterval)
+	monitorInterval, err := time.ParseDuration(settings.MonitorInterval)
 	if err != nil {
 		return errors.New("无效的监控间隔格式: " + err.Error())
 	}
+	if monitorInterval < time.Second {
+		return errors.New("监控间隔不能小于1秒")
+	}
 
-	_, err = time.ParseDuration(settings.UIRefreshInterval)
+	uiRefreshInterval, err := time.ParseDuration(settings.UIRefreshInterval)
 	if err != nil {
 		return errors.New("无效的UI刷新间隔格式: " + err.Error())
+	}
+	if uiRefreshInterval < time.Second {
+		return errors.New("UI刷新间隔不能小于1秒")
 	}
 
 	var existingSettings SystemSettings
