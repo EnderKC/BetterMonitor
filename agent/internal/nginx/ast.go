@@ -93,6 +93,7 @@ func (sb *ServerBlock) templateData() map[string]interface{} {
 		"Index":         sb.Index,
 		"AccessLog":     sb.AccessLog,
 		"ErrorLog":      sb.ErrorLog,
+		"ClientMaxBodySize": sb.ClientMaxBodySize,
 		"Proxy":         sb.Proxy,
 		"PHP":           sb.PHP,
 		"Locations":     sb.Locations,
@@ -129,7 +130,15 @@ server {
 	server_name {{ join .ServerNames }};
 
 	{{- if .ForceSSL }}
+	# 避免 HTTP-01 校验被强制跳转到 HTTPS（首次签发时可能还没有证书）
+	set $bm_redirect_to_https 0;
 	if ($scheme = http) {
+		set $bm_redirect_to_https 1;
+	}
+	if ($request_uri ~ "^/\\.well-known/acme-challenge/") {
+		set $bm_redirect_to_https 0;
+	}
+	if ($bm_redirect_to_https = 1) {
 		return 301 https://$host$request_uri;
 	}
 	{{- end }}
@@ -178,7 +187,11 @@ server {
 	}
 	{{- else }}
 	location / {
+		{{- if .PHP }}
 		try_files $uri $uri/ /index.php$is_args$args;
+		{{- else }}
+		try_files $uri $uri/ =404;
+		{{- end }}
 	}
 	{{- end }}
 
@@ -202,6 +215,7 @@ server {
 	}
 	{{- end }}
 
+	{{- if .SSL }}
 	{{- if .SSL.Enabled }}
 	ssl_certificate {{ .SSL.Certificate }};
 	ssl_certificate_key {{ .SSL.CertificateKey }};
@@ -210,6 +224,7 @@ server {
 	ssl_protocols {{ join .SSL.Protocols }};
 	ssl_ciphers {{ join .SSL.Ciphers }};
 	ssl_prefer_server_ciphers on;
+	{{- end }}
 	{{- end }}
 
 	{{- range .Extra }}

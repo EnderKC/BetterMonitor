@@ -1419,6 +1419,9 @@ func determineSiteType(site SiteConfig) string {
 	if site.Proxy.Enable {
 		return "proxy"
 	}
+	if strings.TrimSpace(site.PHPVersion) != "" {
+		return "php"
+	}
 	return "static"
 }
 

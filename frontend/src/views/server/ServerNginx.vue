@@ -1020,6 +1020,9 @@ const siteTypeText = (type: string) => {
   if (type === 'proxy') {
     return '反向代理';
   }
+  if (type === 'php') {
+    return 'PHP网站';
+  }
   return '静态网站';
 };
 
