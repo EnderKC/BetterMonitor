@@ -34,6 +34,9 @@ SERVER_API_URL=""
 REGISTER_TOKEN=""
 HEARTBEAT_INTERVAL="10s"
 MONITOR_INTERVAL="30s"
+LOG_LEVEL="info"
+LOG_RETENTION_DAYS="14"
+LOG_ROTATE_SIZE="50M"
 TMP_DIR=""
 SUDO_CMD=""
 
@@ -52,6 +55,9 @@ usage() {
                           指定 release 通道 (默认: stable)
   --mirror <URL>          GitHub Release 下载镜像地址
   --token <TOKEN>         注册令牌，写入配置文件备用
+  --log-level <LEVEL>     日志等级(debug|info|warn|error) (默认: info；生产建议: error)
+  --log-retention-days <N>
+                          日志保留天数(通过 logrotate，默认: 14；例如: 7)
   --android-mode <auto|termux|root>
                           Android 安装模式（默认: auto；Termux/Root 可手动指定）
   -h, --help              显示帮助
@@ -246,6 +252,16 @@ parse_args() {
                 REGISTER_TOKEN="$2"
                 shift 2
                 ;;
+            --log-level)
+                [[ $# -ge 2 ]] || error "--log-level 需要一个参数"
+                LOG_LEVEL="$2"
+                shift 2
+                ;;
+            --log-retention-days)
+                [[ $# -ge 2 ]] || error "--log-retention-days 需要一个参数"
+                LOG_RETENTION_DAYS="$2"
+                shift 2
+                ;;
             --android-mode|--android)
                 [[ $# -ge 2 ]] || error "--android-mode 需要一个参数"
                 ANDROID_MODE="$2"
@@ -273,6 +289,18 @@ parse_args() {
             error "无效的 --android-mode: ${ANDROID_MODE}（可选: auto|termux|root）"
             ;;
     esac
+
+    case "${LOG_LEVEL}" in
+        debug|info|warn|warning|error|fatal)
+            ;;
+        *)
+            error "无效的 --log-level: ${LOG_LEVEL}（可选: debug|info|warn|error）"
+            ;;
+    esac
+
+    if [[ ! "${LOG_RETENTION_DAYS}" =~ ^[0-9]+$ ]] || [[ "${LOG_RETENTION_DAYS}" -le 0 ]]; then
+        error "无效的 --log-retention-days: ${LOG_RETENTION_DAYS}（需为正整数）"
+    fi
 }
 
 normalize_server_url() {
@@ -856,7 +884,7 @@ secret_key: "${SECRET_KEY}"
 register_token: "${REGISTER_TOKEN}"
 heartbeat_interval: "${HEARTBEAT_INTERVAL}"
 monitor_interval: "${MONITOR_INTERVAL}"
-log_level: "info"
+log_level: "${LOG_LEVEL}"
 log_file: "${LOG_DIR}/agent.log"
 enable_cpu_monitor: true
 enable_mem_monitor: true
@@ -868,6 +896,40 @@ update_mirror: "${DOWNLOAD_MIRROR}"
 EOF
 
     $SUDO_CMD chmod 600 "$CONFIG_FILE"
+}
+
+install_logrotate() {
+    # Android/Termux/Magisk 依赖环境不同，这里仅在常规 Linux 且存在 /etc/logrotate.d 时安装。
+    if [[ "$(detect_os)" != "linux" ]]; then
+        return
+    fi
+    if is_android; then
+        return
+    fi
+
+    if [[ ! -d "/etc/logrotate.d" ]]; then
+        return
+    fi
+
+    if ! command -v logrotate >/dev/null 2>&1; then
+        warn "未检测到 logrotate，日志文件可能会持续增长：${LOG_DIR}/agent.log"
+        return
+    fi
+
+    info "安装 logrotate 配置..."
+    $SUDO_CMD tee "/etc/logrotate.d/${SERVICE_NAME}" >/dev/null <<EOF
+${LOG_DIR}/agent.log {
+  daily
+  rotate ${LOG_RETENTION_DAYS}
+  maxage ${LOG_RETENTION_DAYS}
+  size ${LOG_ROTATE_SIZE}
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+}
+EOF
 }
 
 service_exists() {
@@ -1275,6 +1337,7 @@ main() {
     fetch_agent_settings
     download_agent
     create_config
+    install_logrotate
     install_service
     start_service
 
