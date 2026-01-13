@@ -42,6 +42,7 @@ COMPOSE_BIN=()
 JWT_SECRET="${JWT_SECRET:-}"
 ENV_LOADED_PATH=""
 LAST_BACKUP_FILE=""
+LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
 
 #==============================================================================
 # 工具函数
@@ -165,6 +166,35 @@ run_compose_cmd() {
     (cd "${INSTALL_DIR}" && "${COMPOSE_BIN[@]}" "$@")
 }
 
+install_logrotate() {
+    if [[ ! -d "/etc/logrotate.d" ]]; then
+        return
+    fi
+    if ! command -v logrotate &>/dev/null; then
+        print_warning "未检测到 logrotate，日志文件可能会持续增长：${LOGS_DIR}"
+        return
+    fi
+    if [[ ! "${LOG_RETENTION_DAYS}" =~ ^[0-9]+$ ]] || [[ "${LOG_RETENTION_DAYS}" -le 0 ]]; then
+        print_warning "LOG_RETENTION_DAYS 无效，跳过 logrotate 安装：${LOG_RETENTION_DAYS}"
+        return
+    fi
+
+    print_info "安装 logrotate 配置（保留 ${LOG_RETENTION_DAYS} 天）..."
+    cat > "/etc/logrotate.d/better-monitor" <<EOF
+${LOGS_DIR}/*.log ${LOGS_DIR}/*.stdout.log ${LOGS_DIR}/*.stderr.log {
+  daily
+  rotate ${LOG_RETENTION_DAYS}
+  maxage ${LOG_RETENTION_DAYS}
+  size 50M
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+}
+EOF
+}
+
 # 检查端口是否被占用
 check_port() {
     if netstat -tuln 2>/dev/null | grep -q ":${PORT} " || ss -tuln 2>/dev/null | grep -q ":${PORT} "; then
@@ -208,6 +238,11 @@ services:
     image: ${DOCKER_IMAGE}
     container_name: ${CONTAINER_NAME}
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     ports:
       - "${PORT}:3333"
     volumes:
@@ -323,6 +358,7 @@ install_dashboard() {
     # 创建配置文件
     create_docker_compose "${jwt_secret}"
     create_env_file "${jwt_secret}"
+    install_logrotate
 
     # 拉取镜像
     print_info "拉取 Docker 镜像..."
@@ -337,6 +373,8 @@ install_dashboard() {
         docker run -d \
             --name "${CONTAINER_NAME}" \
             --restart unless-stopped \
+            --log-opt max-size=10m \
+            --log-opt max-file=5 \
             -p "${PORT}:3333" \
             -v "${DATA_DIR}:/app/data:rw" \
             -v "${LOGS_DIR}:/app/logs:rw" \
@@ -406,6 +444,7 @@ upgrade_dashboard() {
         print_error "备份失败，已中止升级"
         exit 1
     fi
+    install_logrotate
 
     # 拉取最新镜像
     print_info "拉取最新镜像..."
@@ -437,6 +476,8 @@ upgrade_dashboard() {
         docker run -d \
             --name "${CONTAINER_NAME}" \
             --restart unless-stopped \
+            --log-opt max-size=10m \
+            --log-opt max-file=5 \
             -p "${PORT}:3333" \
             -v "${DATA_DIR}:/app/data:rw" \
             -v "${LOGS_DIR}:/app/logs:rw" \

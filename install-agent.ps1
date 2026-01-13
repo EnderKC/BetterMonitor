@@ -7,6 +7,7 @@ param(
   [string]$Repo = "EnderKC/BetterMonitor",
   [string]$Version = "latest",
   [string]$Channel = "stable",
+  [string]$LogLevel = "info",
 
   [string]$ServiceName = "BetterMonitorAgent",
   [string]$AssetName = "",
@@ -223,13 +224,14 @@ CHANNEL="$Channel"
 function Write-AgentConfig([string]$ConfigPath, [string]$LogPath) {
   $repo = $Repo
   $channel = $Channel
+  $lvl = $LogLevel
   @"
 server_url: '$ServerUrl'
 server_id: $ServerId
 secret_key: '$SecretKey'
 register_token: ''
 monitor_interval: '30s'
-log_level: 'info'
+log_level: '$lvl'
 log_file: '$LogPath'
 enable_cpu_monitor: true
 enable_mem_monitor: true
