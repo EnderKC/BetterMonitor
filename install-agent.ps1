@@ -67,9 +67,131 @@ function Resolve-Release([string]$repo, [string]$tag) {
   return Invoke-GitHubApi -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
 }
 
+function Resolve-ReleaseByChannel([string]$repo, [string]$tag, [string]$channel) {
+  if ($null -eq $channel) { $channel = "" }
+  $channel = $channel.Trim().ToLowerInvariant()
+  if ($channel -eq "") { $channel = "stable" }
+
+  if ($tag -ne "latest") {
+    return Resolve-Release -repo $repo -tag $tag
+  }
+
+  if ($channel -eq "stable") {
+    return Resolve-Release -repo $repo -tag "latest"
+  }
+
+  $list = Invoke-GitHubApi -Uri "https://api.github.com/repos/$repo/releases?per_page=20"
+  foreach ($r in $list) {
+    if ($r.draft) { continue }
+    switch ($channel) {
+      "prerelease" {
+        if ($r.prerelease) { return $r }
+      }
+      "nightly" {
+        $tagName = ""
+        if ($null -ne $r.tag_name) { $tagName = $r.tag_name.ToString() }
+        $relName = ""
+        if ($null -ne $r.name) { $relName = $r.name.ToString() }
+        $hay = ($tagName + " " + $relName).ToLowerInvariant()
+        if ($hay.Contains("nightly")) { return $r }
+      }
+      default {
+        return $r
+      }
+    }
+  }
+
+  if ($list.Count -gt 0) { return $list[0] }
+  Fail "No releases found in repo: $repo"
+}
+
 function Resolve-DownloadUrl([object]$release, [string]$assetName) {
   foreach ($a in $release.assets) {
     if ($a.name -eq $assetName) { return $a.browser_download_url }
+  }
+  return ""
+}
+
+function Find-Asset([object]$release, [string]$assetName) {
+  foreach ($a in $release.assets) {
+    if ($a.name -eq $assetName) { return $a }
+  }
+  return $null
+}
+
+function Get-ReleaseVersion([object]$release) {
+  $tagName = ""
+  if ($null -ne $release.tag_name) { $tagName = $release.tag_name.ToString() }
+  if ($tagName.StartsWith("v")) { return $tagName.Substring(1) }
+  return $tagName
+}
+
+function Resolve-AgentAsset([object]$release, [string]$arch, [string]$assetName) {
+  if ($assetName -ne "") {
+    $a = Find-Asset -release $release -assetName $assetName
+    if ($null -eq $a) { Fail "Asset not found in release: $assetName" }
+    return $a
+  }
+
+  $ver = Get-ReleaseVersion -release $release
+  $candidates = New-Object System.Collections.Generic.List[string]
+  if ($ver -ne "") {
+    $candidates.Add("better-monitor-agent-$ver-windows-$arch.exe") | Out-Null
+    $candidates.Add("better-monitor-agent-$ver-windows-$arch.zip") | Out-Null
+  }
+  $candidates.Add("better-monitor-agent-windows-$arch.exe") | Out-Null
+  $candidates.Add("better-monitor-agent-windows-$arch.zip") | Out-Null
+
+  foreach ($n in $candidates) {
+    $a = Find-Asset -release $release -assetName $n
+    if ($null -ne $a) { return $a }
+  }
+
+  foreach ($a in $release.assets) {
+    $n = ""
+    if ($null -ne $a.name) { $n = $a.name.ToString() }
+    $n = $n.ToLowerInvariant()
+    if ($n.Contains("better-monitor-agent") -and $n.Contains("windows-$arch")) {
+      if ($n.EndsWith(".exe") -or $n.EndsWith(".zip")) { return $a }
+    }
+  }
+
+  Fail "No suitable Windows asset found in release (arch=$arch)."
+}
+
+function Resolve-ChecksumAsset([object]$release, [string]$assetName) {
+  $candidates = @(
+    "$assetName.sha256",
+    "$assetName.sha256sum",
+    "$assetName.sha256.txt",
+    "$assetName.sha256sums",
+    "SHA256SUMS",
+    "sha256sums.txt",
+    "checksums.txt",
+    "sha256.txt"
+  )
+  foreach ($n in $candidates) {
+    $a = Find-Asset -release $release -assetName $n
+    if ($null -ne $a) { return $a }
+  }
+  return $null
+}
+
+function Parse-Sha256FromText([string]$text, [string]$assetName) {
+  foreach ($line in ($text -split "`r?`n")) {
+    $l = $line.Trim()
+    if ($l -eq "" -or $l.StartsWith("#")) { continue }
+
+    # formats:
+    #   <hash>  <file>
+    #   <hash> *<file>
+    #   <hash>
+    if ($l -match "^(?<hash>[0-9a-fA-F]{64})\\s+\\*?(?<file>.+)$") {
+      $file = $Matches["file"].Trim()
+      if ($file.StartsWith("./")) { $file = $file.Substring(2) }
+      if ($file -eq $assetName) { return $Matches["hash"] }
+    }
+    if ($l -match "^(?<hash>[0-9a-fA-F]{64})$") { return $Matches["hash"] }
   }
   return ""
 }
@@ -98,10 +220,33 @@ CHANNEL="$Channel"
 "@ | Set-Content -Path $EnvPath -Encoding UTF8
 }
 
+function Write-AgentConfig([string]$ConfigPath, [string]$LogPath) {
+  $repo = $Repo
+  $channel = $Channel
+  @"
+server_url: '$ServerUrl'
+server_id: $ServerId
+secret_key: '$SecretKey'
+register_token: ''
+monitor_interval: '30s'
+log_level: 'info'
+log_file: '$LogPath'
+enable_cpu_monitor: true
+enable_mem_monitor: true
+enable_disk_monitor: true
+enable_network_monitor: true
+update_repo: '$repo'
+update_channel: '$channel'
+update_mirror: ''
+"@ | Set-Content -Path $ConfigPath -Encoding UTF8
+}
+
 function Install-ScheduledTask([string]$AgentExe, [string]$WorkDir) {
   Write-Info "Installing scheduled task: $ServiceName"
 
-  $action = New-ScheduledTaskAction -Execute $AgentExe -WorkingDirectory $WorkDir
+  $configPath = Join-Path $WorkDir "agent.yaml"
+  $args = "--config `"$configPath`""
+  $action = New-ScheduledTaskAction -Execute $AgentExe -Argument $args -WorkingDirectory $WorkDir
 
   if (Is-Admin) {
     $trigger = New-ScheduledTaskTrigger -AtStartup
@@ -135,37 +280,69 @@ if ($InstallDir -eq "") {
 $workDir = $InstallDir
 $agentExe = Join-Path $InstallDir "better-monitor-agent.exe"
 $envFile = Join-Path $InstallDir "agent.env"
+$configFile = Join-Path $InstallDir "agent.yaml"
+$logFilePath = Join-Path $InstallDir "agent.log"
 
 Ensure-Directory $InstallDir
-
-if ($AssetName -eq "") {
-  $AssetName = "better-monitor-agent-windows-$arch.exe"
-}
 
 $downloadUrl = $DownloadUrl
 $release = $null
 
 if ($downloadUrl -eq "") {
-  $release = Resolve-Release -repo $Repo -tag $tag
-  $downloadUrl = Resolve-DownloadUrl -release $release -assetName $AssetName
-  if ($downloadUrl -eq "") {
-    Fail "Asset not found in release: $AssetName (repo=$Repo tag=$tag)"
-  }
+  $release = Resolve-ReleaseByChannel -repo $Repo -tag $tag -channel $Channel
+  $asset = Resolve-AgentAsset -release $release -arch $arch -assetName $AssetName
+  $AssetName = $asset.name
+  $downloadUrl = $asset.browser_download_url
 }
 
-$tmpExe = Join-Path ([System.IO.Path]::GetTempPath()) ("bm-agent-" + [Guid]::NewGuid().ToString("n") + ".exe")
-Download-File -Url $downloadUrl -OutFile $tmpExe
+$tmpPath = Join-Path ([System.IO.Path]::GetTempPath()) ("bm-agent-" + [Guid]::NewGuid().ToString("n"))
+$tmpDownload = $tmpPath + "-" + $AssetName
+Download-File -Url $downloadUrl -OutFile $tmpDownload
+
+# Extract if zip
+$tmpExe = $tmpDownload
+if ($tmpDownload.ToLowerInvariant().EndsWith(".zip")) {
+  $extractDir = $tmpPath + "-extract"
+  Ensure-Directory $extractDir
+  Expand-Archive -Path $tmpDownload -DestinationPath $extractDir -Force
+  $exe = Get-ChildItem -Path $extractDir -Recurse -File | Where-Object { $_.Name.ToLowerInvariant().EndsWith(".exe") } | Select-Object -First 1
+  if ($null -eq $exe) { Fail "No .exe found in archive: $AssetName" }
+  $tmpExe = $exe.FullName
+}
 
 if (-not $SkipVerify) {
-  Write-Warn "SHA256 verification not implemented in this version. Use -SkipVerify to continue."
+  $expected = $Sha256.Trim()
+  if ($expected -eq "") {
+    if ($null -ne $release -and $AssetName -ne "") {
+      $checksumAsset = Resolve-ChecksumAsset -release $release -assetName $AssetName
+      if ($null -ne $checksumAsset) {
+        $tmpChecksum = $tmpPath + "-" + $checksumAsset.name
+        Download-File -Url $checksumAsset.browser_download_url -OutFile $tmpChecksum
+        $text = Get-Content -Raw -Path $tmpChecksum
+        $expected = Parse-Sha256FromText -text $text -assetName $AssetName
+      }
+    }
+  }
+
+  if ($expected -ne "") {
+    $actual = (Get-FileHash -Path $tmpExe -Algorithm SHA256).Hash
+    if ($actual.ToLowerInvariant() -ne $expected.Trim().ToLowerInvariant()) {
+      Fail "SHA256 mismatch: expected=$expected actual=$actual"
+    }
+    Write-Info "SHA256 verified"
+  } else {
+    Write-Warn "No SHA256 provided/found; skipping verification (use -Sha256 <hash> or ensure release has SHA256SUMS)"
+  }
 }
 
 Move-Item -Force $tmpExe $agentExe
 
 Write-EnvFile -EnvPath $envFile
+Write-AgentConfig -ConfigPath $configFile -LogPath $logFilePath
 
 Write-Info "Installed: $agentExe"
 Write-Info "Config: $envFile"
+Write-Info "Agent config: $configFile"
 
 if ($UseScheduledTask) {
   Install-ScheduledTask -AgentExe $agentExe -WorkDir $workDir
