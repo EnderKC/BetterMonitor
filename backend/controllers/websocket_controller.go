@@ -1160,6 +1160,13 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				server.CPUModel = cpuModel
 			}
 
+			if agentVersion, ok := systemInfoData["agent_version"].(string); ok {
+				agentVersion = strings.TrimSpace(agentVersion)
+				if agentVersion != "" {
+					server.AgentVersion = agentVersion
+				}
+			}
+
 			if memoryTotal, ok := systemInfoData["memory_total"].(float64); ok && memoryTotal > 0 {
 				server.MemoryTotal = int64(memoryTotal)
 			}
@@ -1185,6 +1192,7 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				"arch":         server.Arch,
 				"cpu_cores":    server.CPUCores,
 				"cpu_model":    server.CPUModel,
+				"agent_version": server.AgentVersion,
 				"memory_total": server.MemoryTotal,
 				"disk_total":   server.DiskTotal,
 			}

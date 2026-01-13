@@ -110,6 +110,18 @@ require_python() {
     error "未找到 python3/python，请先安装后再执行脚本"
 }
 
+github_token() {
+    if [[ -n "${AGENT_RELEASE_GITHUB_TOKEN:-}" ]]; then
+        echo "${AGENT_RELEASE_GITHUB_TOKEN}"
+        return 0
+    fi
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        echo "${GITHUB_TOKEN}"
+        return 0
+    fi
+    return 1
+}
+
 is_android() {
     # Android 常见特征：getprop 命令、ANDROID_* 环境变量、/system 目录结构等。
     if command -v getprop >/dev/null 2>&1; then
@@ -200,34 +212,42 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --server-id)
+                [[ $# -ge 2 ]] || error "--server-id 需要一个参数"
                 SERVER_ID="$2"
                 shift 2
                 ;;
             --secret-key)
+                [[ $# -ge 2 ]] || error "--secret-key 需要一个参数"
                 SECRET_KEY="$2"
                 shift 2
                 ;;
             --server)
+                [[ $# -ge 2 ]] || error "--server 需要一个参数"
                 SERVER_URL="$2"
                 shift 2
                 ;;
             --repo)
+                [[ $# -ge 2 ]] || error "--repo 需要一个参数"
                 GITHUB_REPO="$2"
                 shift 2
                 ;;
             --channel)
+                [[ $# -ge 2 ]] || error "--channel 需要一个参数"
                 RELEASE_CHANNEL="$2"
                 shift 2
                 ;;
             --mirror)
+                [[ $# -ge 2 ]] || error "--mirror 需要一个参数"
                 DOWNLOAD_MIRROR="$2"
                 shift 2
                 ;;
             --token|--register-token)
+                [[ $# -ge 2 ]] || error "--token 需要一个参数"
                 REGISTER_TOKEN="$2"
                 shift 2
                 ;;
             --android-mode|--android)
+                [[ $# -ge 2 ]] || error "--android-mode 需要一个参数"
                 ANDROID_MODE="$2"
                 shift 2
                 ;;
@@ -581,12 +601,107 @@ if selected is None:
 if selected is None:
     raise SystemExit("未找到匹配的 Release 资产")
 
+# best-effort: find checksum asset (common naming conventions)
+selected_name = selected.get("name") or ""
+checksum = None
+checksum_candidates = [
+    selected_name + ".sha256",
+    selected_name + ".sha256sum",
+    selected_name + ".sha256.txt",
+    selected_name + ".sha256sums",
+]
+generic_candidates = [
+    "SHA256SUMS",
+    "sha256sums.txt",
+    "checksums.txt",
+    "sha256.txt",
+]
+
+def find_asset_by_name(n):
+    for a in assets:
+        if (a.get("name") or "") == n:
+            return a
+    return None
+
+for n in checksum_candidates:
+    checksum = find_asset_by_name(n)
+    if checksum is not None:
+        break
+if checksum is None:
+    for n in generic_candidates:
+        checksum = find_asset_by_name(n)
+        if checksum is not None:
+            break
+
 print("|".join([
     tag or "",
     selected.get("name") or "",
-    selected.get("browser_download_url") or ""
+    selected.get("browser_download_url") or "",
+    (checksum.get("name") or "") if checksum else "",
+    (checksum.get("browser_download_url") or "") if checksum else "",
 ]))
 '
+}
+
+sha256sum_file() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+        return 0
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+        return 0
+    fi
+    return 1
+}
+
+verify_download_checksum() {
+    local checksum_file="$1"
+    local asset_name="$2"
+    local downloaded_file="$3"
+
+    if ! command -v awk >/dev/null 2>&1; then
+        warn "缺少 awk，跳过校验"
+        return 0
+    fi
+
+    local expected=""
+    expected="$(awk -v n="$asset_name" '
+        BEGIN { found=0 }
+        $0 ~ /^[[:space:]]*#/ { next }
+        NF>=2 {
+          f=$2
+          gsub(/^[*]/,"",f)
+          gsub(/^[.][\\/]/,"",f)
+          if (f==n) { print $1; found=1; exit }
+        }
+        NF>=1 && found==0 && $1 ~ /^[0-9a-fA-F]{64}$/ { print $1; found=1; exit }
+    ' "$checksum_file" 2>/dev/null || true)"
+
+    expected="$(echo -n "$expected" | tr -d ' \t\r\n')"
+    if [[ -z "$expected" ]]; then
+        warn "未能从校验文件中解析 SHA256（将跳过校验）"
+        return 0
+    fi
+
+    local actual=""
+    if ! actual="$(sha256sum_file "$downloaded_file" 2>/dev/null)"; then
+        warn "缺少 sha256sum/shasum，跳过校验"
+        return 0
+    fi
+
+    actual="$(echo -n "$actual" | tr -d ' \t\r\n')"
+    if [[ -z "$actual" ]]; then
+        warn "计算 SHA256 失败（将跳过校验）"
+        return 0
+    fi
+
+    if [[ "${expected,,}" != "${actual,,}" ]]; then
+        error "SHA256 校验失败：expected=${expected} actual=${actual}"
+    fi
+
+    info "SHA256 校验通过"
 }
 
 install_binary() {
@@ -603,23 +718,46 @@ install_binary() {
     $SUDO_CMD chmod 0755 "$dst" || true
 }
 
+install_binary_atomic() {
+    local src="$1"
+    local dst="$2"
+    local tmp="${dst}.tmp.$$"
+
+    if command -v install >/dev/null 2>&1; then
+        if $SUDO_CMD install -m 0755 "$src" "$tmp" >/dev/null 2>&1; then
+            $SUDO_CMD mv -f "$tmp" "$dst"
+            return 0
+        fi
+    fi
+
+    $SUDO_CMD cp "$src" "$tmp"
+    $SUDO_CMD chmod 0755 "$tmp" || true
+    $SUDO_CMD mv -f "$tmp" "$dst"
+}
+
 download_agent() {
-    local os arch asset_info tag asset_name asset_url download_url
+    local os arch asset_info tag asset_name asset_url checksum_name checksum_url download_url
     os="$(detect_os)"
     arch="$(detect_arch)"
     info "检测到系统: ${os}/${arch}"
 
     local releases_json
+    local auth_header=()
+    if token="$(github_token 2>/dev/null)"; then
+        auth_header=(-H "Authorization: Bearer ${token}")
+    fi
+
     releases_json=$(curl -fsSL \
         -H "Accept: application/vnd.github+json" \
         -H "User-Agent: better-monitor-agent-installer" \
+        "${auth_header[@]}" \
         "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
         || error "无法从 GitHub 获取 Release 信息，请检查仓库 ${GITHUB_REPO}"
 
     asset_info="$(select_release_asset "$os" "$arch" <<<"$releases_json")" \
         || error "无法解析 Release 信息，请确认仓库 ${GITHUB_REPO} 是否存在对应平台的二进制"
 
-    IFS='|' read -r tag asset_name asset_url <<<"$asset_info"
+    IFS='|' read -r tag asset_name asset_url checksum_name checksum_url <<<"$asset_info"
     if [[ -z "$asset_url" ]]; then
         error "未找到可下载的 Release 资产"
     fi
@@ -634,19 +772,76 @@ download_agent() {
 
     create_tmp_dir
 
-    local tmp_bin="${TMP_DIR}/${BINARY_NAME}"
+    local downloaded="${TMP_DIR}/${asset_name}"
+    local download_header=()
+    if [[ "${#auth_header[@]}" -ne 0 && "$download_url" == https://github.com/* ]]; then
+        download_header=("${auth_header[@]}")
+    fi
+
     info "开始下载 Agent..."
-    curl -fL --retry 3 --retry-delay 2 -o "$tmp_bin" "$download_url" \
+    curl -fL --retry 3 --retry-delay 2 "${download_header[@]}" -o "$downloaded" "$download_url" \
         || error "下载失败，请稍后再试"
 
-    chmod +x "$tmp_bin"
+    if [[ -n "${checksum_url:-}" ]]; then
+        local checksum_download_url="$checksum_url"
+        if [[ -n "$DOWNLOAD_MIRROR" && "$checksum_url" == https://github.com/* ]]; then
+            checksum_download_url="${DOWNLOAD_MIRROR%/}${checksum_url#https://github.com}"
+        fi
+        local checksum_file="${TMP_DIR}/${checksum_name}"
+        info "下载校验文件: ${checksum_name}"
+        local checksum_header=()
+        if [[ "${#auth_header[@]}" -ne 0 && "$checksum_download_url" == https://github.com/* ]]; then
+            checksum_header=("${auth_header[@]}")
+        fi
+        curl -fL --retry 3 --retry-delay 2 "${checksum_header[@]}" -o "$checksum_file" "$checksum_download_url" \
+            || warn "下载校验文件失败（将跳过校验）"
+        if [[ -f "$checksum_file" ]]; then
+            verify_download_checksum "$checksum_file" "$asset_name" "$downloaded"
+        fi
+    else
+        warn "未找到 SHA256 校验文件（将跳过校验）"
+    fi
+
+    local tmp_bin="$downloaded"
+    case "$asset_name" in
+        *.tar.gz|*.tgz)
+            require_cmd tar
+            mkdir -p "${TMP_DIR}/extract"
+            tar -xzf "$downloaded" -C "${TMP_DIR}/extract" || error "解压失败: ${asset_name}"
+            tmp_bin="$(find "${TMP_DIR}/extract" -type f \( -name "${BINARY_NAME}" -o -name "${BINARY_NAME}.exe" -o -name "${BINARY_NAME}-*" \) -print | head -n 1 || true)"
+            [[ -n "$tmp_bin" && -f "$tmp_bin" ]] || error "未在压缩包中找到可执行文件: ${asset_name}"
+            ;;
+        *.zip)
+            require_cmd unzip
+            mkdir -p "${TMP_DIR}/extract"
+            unzip -q "$downloaded" -d "${TMP_DIR}/extract" || error "解压失败: ${asset_name}"
+            tmp_bin="$(find "${TMP_DIR}/extract" -type f \( -name "${BINARY_NAME}" -o -name "${BINARY_NAME}.exe" -o -name "${BINARY_NAME}-*" \) -print | head -n 1 || true)"
+            [[ -n "$tmp_bin" && -f "$tmp_bin" ]] || error "未在压缩包中找到可执行文件: ${asset_name}"
+            ;;
+        *)
+            ;;
+    esac
+
+    chmod +x "$tmp_bin" || true
 
     # 若是升级场景，先停止服务再写入目标路径，避免出现 "text file busy"。
     stop_existing_service
 
     info "安装 Agent 到 ${BIN_DIR}"
     $SUDO_CMD mkdir -p "$BIN_DIR"
-    install_binary "$tmp_bin" "${BIN_DIR}/${BINARY_NAME}"
+    local dst="${BIN_DIR}/${BINARY_NAME}"
+    local backup=""
+    if [[ -f "$dst" ]]; then
+        backup="${dst}.bak"
+        $SUDO_CMD cp "$dst" "$backup" >/dev/null 2>&1 || warn "备份旧二进制失败: ${backup}"
+    fi
+
+    if ! install_binary_atomic "$tmp_bin" "$dst"; then
+        if [[ -n "$backup" && -f "$backup" ]]; then
+            $SUDO_CMD cp "$backup" "$dst" >/dev/null 2>&1 || true
+        fi
+        error "安装 Agent 失败"
+    fi
 }
 
 create_config() {

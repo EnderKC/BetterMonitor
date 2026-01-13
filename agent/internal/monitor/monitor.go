@@ -17,6 +17,7 @@ import (
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/user/server-ops-agent/pkg/logger"
+	"github.com/user/server-ops-agent/pkg/version"
 )
 
 // SystemInfo 系统信息结构
@@ -33,6 +34,7 @@ type SystemInfo struct {
 	DiskTotal       uint64 `json:"disk_total"`
 	BootTime        uint64 `json:"boot_time"`
 	PublicIP        string `json:"public_ip"` // 出口IP
+	AgentVersion    string `json:"agent_version"`
 }
 
 // MonitorData 监控数据结构
@@ -285,6 +287,7 @@ func (m *Monitor) GetSystemInfo() (*SystemInfo, error) {
 		DiskTotal:       diskTotal,
 		BootTime:        hostInfo.BootTime,
 		PublicIP:        publicIP,
+		AgentVersion:    version.Version,
 	}, nil
 }
 

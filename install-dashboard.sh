@@ -41,6 +41,7 @@ TZ="${TZ:-Asia/Shanghai}"
 COMPOSE_BIN=()
 JWT_SECRET="${JWT_SECRET:-}"
 ENV_LOADED_PATH=""
+LAST_BACKUP_FILE=""
 
 #==============================================================================
 # 工具函数
@@ -395,9 +396,16 @@ upgrade_dashboard() {
         exit 1
     fi
 
+    # 记录升级前镜像ID（用于回滚）
+    local old_image_id=""
+    old_image_id="$(docker inspect -f '{{.Image}}' "${CONTAINER_NAME}" 2>/dev/null || true)"
+
     # 备份数据
     print_info "备份当前数据..."
-    backup_data "upgrade"
+    if ! backup_data "upgrade"; then
+        print_error "备份失败，已中止升级"
+        exit 1
+    fi
 
     # 拉取最新镜像
     print_info "拉取最新镜像..."
@@ -405,17 +413,27 @@ upgrade_dashboard() {
 
     # 停止并删除旧容器
     print_info "停止旧容器..."
-    docker stop "${CONTAINER_NAME}"
-    docker rm "${CONTAINER_NAME}"
+    docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+    docker rm "${CONTAINER_NAME}" 2>/dev/null || true
 
     # 启动新容器
     print_info "启动新容器..."
     local jwt_secret="${JWT_SECRET:-$(generate_jwt_secret)}"
     JWT_SECRET="$jwt_secret"
 
-    if detect_compose_cmd && [ -f "${COMPOSE_FILE}" ]; then
-        run_compose_cmd up -d
-    else
+    start_container() {
+        local image_override="${1:-}"
+        local image="${DOCKER_IMAGE}"
+        if [[ -n "$image_override" ]]; then
+            image="$image_override"
+        fi
+
+        if detect_compose_cmd && [ -f "${COMPOSE_FILE}" ]; then
+            # 强制重建容器，确保使用刚拉取的镜像
+            run_compose_cmd up -d --force-recreate
+            return
+        fi
+
         docker run -d \
             --name "${CONTAINER_NAME}" \
             --restart unless-stopped \
@@ -427,8 +445,10 @@ upgrade_dashboard() {
             -e JWT_SECRET="${jwt_secret}" \
             -e VERSION=latest \
             --security-opt no-new-privileges:true \
-            "${DOCKER_IMAGE}"
-    fi
+            "${image}"
+    }
+
+    start_container
 
     # 等待服务启动
     print_info "等待服务启动..."
@@ -441,8 +461,29 @@ upgrade_dashboard() {
         echo "访问地址: http://$(hostname -I | awk '{print $1}'):${PORT}"
     else
         print_error "容器启动失败，正在回滚..."
-        # 这里可以添加回滚逻辑
-        docker logs ${CONTAINER_NAME}
+        docker logs "${CONTAINER_NAME}" 2>/dev/null || true
+
+        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+        # 尝试恢复文件备份（data/logs/.env/compose）
+        if [[ -n "${LAST_BACKUP_FILE}" && -f "${LAST_BACKUP_FILE}" ]]; then
+            print_info "恢复备份: ${LAST_BACKUP_FILE}"
+            tar -xzf "${LAST_BACKUP_FILE}" -C "${INSTALL_DIR}" 2>/dev/null || true
+        fi
+
+        # 尝试回滚到升级前镜像（仅 best-effort）
+        if [[ -n "${old_image_id}" ]]; then
+            print_info "回滚镜像: ${old_image_id}"
+            if [[ "${DOCKER_IMAGE}" != *"@sha256:"* ]]; then
+                docker tag "${old_image_id}" "${DOCKER_IMAGE}" 2>/dev/null || true
+                start_container
+            else
+                start_container "${old_image_id}"
+            fi
+        else
+            print_warning "无法获取升级前镜像ID，跳过镜像回滚"
+        fi
+
         exit 1
     fi
 }
@@ -523,28 +564,38 @@ backup_data() {
 
     load_env_file
     print_info "创建数据备份..."
+    LAST_BACKUP_FILE=""
 
     # 确保备份目录存在
     mkdir -p "${BACKUP_DIR}"
 
     # 创建备份
     if [ -d "${DATA_DIR}" ] || [ -d "${LOGS_DIR}" ]; then
+        local tar_exit=0
         tar -czf "${backup_file}" \
             -C "${INSTALL_DIR}" \
             $([ -d "${DATA_DIR}" ] && echo "data") \
             $([ -d "${LOGS_DIR}" ] && echo "logs") \
             $([ -f "${INSTALL_DIR}/.env" ] && echo ".env") \
             $([ -f "${INSTALL_DIR}/docker-compose.yml" ] && echo "docker-compose.yml") \
-            2>/dev/null || true
+            2>/dev/null || tar_exit=$?
 
-        if [ -f "${backup_file}" ]; then
-            print_success "备份创建成功: ${backup_file}"
+        if [ -s "${backup_file}" ]; then
+            LAST_BACKUP_FILE="${backup_file}"
+            if [ "${tar_exit}" -ne 0 ]; then
+                print_warning "备份创建成功但存在告警（tar exit=${tar_exit}）：${backup_file}"
+            else
+                print_success "备份创建成功: ${backup_file}"
+            fi
             cleanup_old_backups
-        else
-            print_warning "备份创建失败"
+            return 0
         fi
+
+        print_warning "备份创建失败"
+        return 1
     else
         print_warning "没有找到需要备份的数据"
+        return 0
     fi
 }
 
