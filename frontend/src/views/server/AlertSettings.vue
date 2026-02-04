@@ -190,6 +190,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, reactive, watch } from 'vue';
 import { useAlertStore, useServerStore } from '@/stores';
+import { useUIStore } from '@/stores/uiStore';
 import request from '@/utils/request';
 
 export default defineComponent({
@@ -198,6 +199,7 @@ export default defineComponent({
   setup() {
     const alertStore = useAlertStore();
     const serverStore = useServerStore();
+    const uiStore = useUIStore();
     
     const activeTab = ref('global');
     const selectedServerId = ref<number | undefined>(undefined);
@@ -260,9 +262,13 @@ export default defineComponent({
     
     // 生命周期钩子
     onMounted(async () => {
-      await fetchData();
-      // 获取服务器列表
-      await fetchServers();
+      try {
+        await fetchData();
+        // 获取服务器列表
+        await fetchServers();
+      } finally {
+        uiStore.stopLoading();
+      }
     });
     
     // 方法

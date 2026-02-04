@@ -15,11 +15,13 @@ import {
 } from '@ant-design/icons-vue';
 import { useUserStore } from '../../stores/userStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import VersionInfo from '../../components/VersionInfo.vue';
 
 const userStore = useUserStore();
 const router = useRouter();
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 const ensureAdminAccess = async () => {
   console.log('[Settings] 开始检查管理员权限');
@@ -247,7 +249,11 @@ onMounted(async () => {
   }
 
   // 然后获取最新设置
-  await loadSettings();
+  try {
+    await loadSettings();
+  } finally {
+    uiStore.stopLoading();
+  }
 });
 </script>
 
@@ -366,8 +372,7 @@ onMounted(async () => {
                   </a-form-item>
 
                   <a-form-item label="允许公开访问生命探针">
-                    <a-switch v-model:checked="form.allow_public_life_probe_access"
-                      checked-children="开启"
+                    <a-switch v-model:checked="form.allow_public_life_probe_access" checked-children="开启"
                       un-checked-children="关闭" />
                     <div class="form-help">是否允许未登录用户通过公开链接访问生命探针详情页面（需要探针本身也开启公开）</div>
                   </a-form-item>
@@ -709,7 +714,7 @@ onMounted(async () => {
   color: #8c8c8c;
 }
 
-.dark .ios-form .ant-form-item-label > label {
+.dark .ios-form .ant-form-item-label>label {
   color: #ccc;
 }
 

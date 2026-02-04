@@ -16,7 +16,9 @@ import request from '../../utils/request';
 // 导入服务器状态store
 import { useServerStore } from '../../stores/serverStore';
 // 导入设置store
+// 导入设置store
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined } from '@ant-design/icons-vue';
 
 // 注册必须的组件
@@ -36,7 +38,9 @@ const serverId = ref<number>(Number(route.params.id));
 // 获取服务器状态store
 const serverStore = useServerStore();
 // 获取设置store
+// 获取设置store
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -329,6 +333,7 @@ const fetchHistoricalData = async () => {
     message.error('获取历史监控数据失败: ' + (error.message || '未知错误'));
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 

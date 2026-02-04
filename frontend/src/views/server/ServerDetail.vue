@@ -16,6 +16,7 @@ import VChart from 'vue-echarts';
 import { useServerStore } from '../../stores/serverStore';
 // 导入设置store
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined, DownOutlined } from '@ant-design/icons-vue';
 
 // 注册必要的ECharts组件
@@ -35,6 +36,7 @@ const serverId = ref<number>(Number(route.params.id));
 const serverStore = useServerStore();
 // 添加设置存储
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -363,6 +365,9 @@ onMounted(async () => {
 
   // 获取历史监控数据
   await fetchHistoricalData();
+
+  // 数据加载完成，关闭全局骨架屏
+  uiStore.stopLoading();
 
   // 连接WebSocket获取实时数据
   connectWebSocket();
@@ -1257,7 +1262,7 @@ const updateMonitorData = (data: any) => {
               {{ serverInfo.name }}
               <span v-if="serverInfo.hostname && serverInfo.hostname !== '未知'" class="hostname-tag">{{
                 serverInfo.hostname
-                }}</span>
+              }}</span>
             </h1>
             <div class="server-meta">
               <span class="meta-item">{{ serverInfo.ip }}</span>

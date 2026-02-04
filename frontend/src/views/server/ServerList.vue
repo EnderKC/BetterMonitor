@@ -13,12 +13,14 @@ import Sortable from 'sortablejs';
 import ServerStatusBadge from '../../components/ServerStatusBadge.vue';
 import DeployAgentModal from '../../components/DeployAgentModal.vue';
 import { useServerStore } from '../../stores/serverStore';
+import { useUIStore } from '../../stores/uiStore';
 
 import { ReloadOutlined } from '@ant-design/icons-vue';
 
 const router = useRouter();
 // 获取服务器状态store
 const serverStore = useServerStore();
+const uiStore = useUIStore();
 
 // 数据状态
 const loading = ref(false);
@@ -128,6 +130,7 @@ const fetchServers = async (force = false, showLoading = true) => {
     message.error('获取服务器列表失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 

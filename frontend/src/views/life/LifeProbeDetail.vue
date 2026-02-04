@@ -11,6 +11,7 @@ import { getToken } from '@/utils/auth';
 import type { LifeProbeDetails, SleepSegmentPoint } from '@/types/life';
 import * as echarts from 'echarts/core';
 import { useThemeStore } from '@/stores/theme';
+import { useUIStore } from '@/stores/uiStore';
 import { storeToRefs } from 'pinia';
 import axios from 'axios';
 
@@ -20,6 +21,7 @@ const route = useRoute();
 const router = useRouter();
 const themeStore = useThemeStore();
 const { isDark } = storeToRefs(themeStore);
+const uiStore = useUIStore();
 
 // 获取probe ID和公开访问模式
 const probeId = computed(() => Number(route.params.id));
@@ -92,6 +94,7 @@ const fetchDetails = async () => {
   } finally {
     if (currentSeq === requestSeq) {
       loading.value = false;
+      uiStore.stopLoading();
     }
   }
 };

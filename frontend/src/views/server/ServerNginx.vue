@@ -16,6 +16,7 @@ import {
   SearchOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { useUIStore } from '../../stores/uiStore';
 import CodeEditor from '../../components/server/CodeEditor.vue';
 
 interface RawSite {
@@ -98,6 +99,7 @@ const openRestyStatus = ref({
 });
 const openRestyChecking = ref(false);
 const installingOpenResty = ref(false);
+const uiStore = useUIStore();
 const installLogModalVisible = ref(false);
 const installLogs = ref<string[]>([]);
 const installSessionId = ref<string>('');
@@ -240,6 +242,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 

@@ -12,6 +12,7 @@ import {
 import request from '@/utils/request';
 import type { LifeProbeSummary } from '@/types/life';
 import { getToken } from '@/utils/auth';
+import { useUIStore } from '@/stores/uiStore';
 
 const router = useRouter();
 const loading = ref(true);
@@ -22,7 +23,9 @@ const submitting = ref(false);
 const editingId = ref<number | null>(null);
 const lifeWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
+
 const lifeReconnectTimer = ref<number | null>(null);
+const uiStore = useUIStore();
 
 const form = reactive({
   name: '',
@@ -109,6 +112,7 @@ const connectLifeProbeListWS = () => {
       if (data.type === 'life_probe_list' && Array.isArray(data.life_probes)) {
         probes.value = data.life_probes;
         loading.value = false;
+        uiStore.stopLoading();
       }
     } catch (error) {
       console.error('解析生命探针列表数据失败:', error);
@@ -119,6 +123,7 @@ const connectLifeProbeListWS = () => {
     console.error('生命探针列表WebSocket错误:', error);
     message.error('生命探针列表连接失败');
     loading.value = false;
+    uiStore.stopLoading();
   };
 
   ws.onclose = () => {
@@ -432,8 +437,6 @@ const totalSteps = computed(() =>
   margin-left: 8px;
   color: rgba(0, 0, 0, 0.45);
 }
-
-
 </style>
 
 <style>
@@ -469,18 +472,18 @@ const totalSteps = computed(() =>
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
 }
 
-.dark .life-table .ant-table-thead > tr > th {
+.dark .life-table .ant-table-thead>tr>th {
   background: rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.85);
 }
 
-.dark .life-table .ant-table-tbody > tr > td {
+.dark .life-table .ant-table-tbody>tr>td {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.85);
 }
 
-.dark .life-table .ant-table-tbody > tr:hover > td {
+.dark .life-table .ant-table-tbody>tr:hover>td {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 

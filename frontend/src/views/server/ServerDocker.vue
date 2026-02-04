@@ -28,6 +28,7 @@ import {
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import { useServerStore } from '../../stores/serverStore';
+import { useUIStore } from '../../stores/uiStore';
 import Convert from 'ansi-to-html';
 
 const route = useRoute();
@@ -36,6 +37,7 @@ const serverId = ref<number>(Number(route.params.id));
 
 // 获取服务器状态store
 const serverStore = useServerStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -145,6 +147,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 

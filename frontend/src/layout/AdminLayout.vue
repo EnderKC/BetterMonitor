@@ -21,6 +21,8 @@ import { getDashboardVersion } from '@/utils/version';
 
 import { useThemeStore } from '@/stores/theme';
 import { storeToRefs } from 'pinia';
+import GlobalSkeleton from '@/components/GlobalSkeleton.vue';
+import { useUIStore } from '@/stores/uiStore';
 
 const router = useRouter();
 const route = useRoute();
@@ -28,6 +30,7 @@ const collapsed = ref(false);
 const user = computed(() => getUser() || {});
 const themeStore = useThemeStore();
 const { isDark } = storeToRefs(themeStore);
+const uiStore = useUIStore();
 
 // 切换菜单收起/展开
 const toggleCollapsed = () => {
@@ -196,14 +199,22 @@ onMounted(() => {
       <!-- 内容 -->
       <a-layout-content class="modern-content">
         <div class="content-wrapper">
+          <!-- 全局骨架屏 -->
+          <transition name="fade">
+            <GlobalSkeleton v-if="uiStore.isPageLoading"
+              style="position: absolute; z-index: 10; padding: 24px; top: 0; left: 0; width: 100%; height: 100%;" />
+          </transition>
+
           <router-view v-slot="{ Component, route }">
             <transition name="slide-fade" mode="out-in">
               <keep-alive>
-                <component :is="Component" :key="route.fullPath" v-if="route.meta.keepAlive" />
+                <component :is="Component" :key="route.fullPath" v-if="route.meta.keepAlive"
+                  v-show="!uiStore.isPageLoading" />
               </keep-alive>
             </transition>
             <transition name="slide-fade" mode="out-in">
-              <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive" />
+              <component :is="Component" :key="route.fullPath" v-if="!route.meta.keepAlive"
+                v-show="!uiStore.isPageLoading" />
             </transition>
           </router-view>
         </div>
@@ -390,6 +401,7 @@ onMounted(() => {
 
 .content-wrapper {
   min-height: calc(100vh - 130px);
+  position: relative;
 }
 
 /* Footer */

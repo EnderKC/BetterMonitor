@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
 import { getToken } from '../utils/auth';
+import { useUIStore } from '../stores/uiStore';
 
 // 路由配置
 const routes: Array<RouteRecordRaw> = [
@@ -26,6 +27,7 @@ const routes: Array<RouteRecordRaw> = [
       title: '探针',
       requiresAuth: false,
       keepAlive: true,
+      manualLoading: true,
     },
   },
   {
@@ -35,6 +37,7 @@ const routes: Array<RouteRecordRaw> = [
     meta: {
       title: '生命探针详情',
       requiresAuth: false,
+      manualLoading: true,
     },
   },
   {
@@ -68,6 +71,7 @@ const routes: Array<RouteRecordRaw> = [
           title: '服务器管理',
           requiresAuth: true,
           keepAlive: true,
+          manualLoading: true,
         },
       },
       {
@@ -77,6 +81,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '服务器详情',
           requiresAuth: true,
+          manualLoading: true, // 手动控制加载结束，防止闪烁
         },
       },
       {
@@ -86,6 +91,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '服务器监控',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -95,6 +101,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '终端',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -104,6 +111,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '文件管理',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -113,6 +121,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '进程管理',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -122,6 +131,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: 'Docker管理',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -131,6 +141,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '容器终端',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -140,6 +151,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '容器文件',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -149,6 +161,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '生命探针',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -158,6 +171,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '生命探针详情',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -167,6 +181,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '网站管理',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -205,6 +220,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '预警设置',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -214,6 +230,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '通知渠道',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
       {
@@ -223,6 +240,7 @@ const routes: Array<RouteRecordRaw> = [
         meta: {
           title: '预警记录',
           requiresAuth: true,
+          manualLoading: true,
         },
       },
     ],
@@ -247,6 +265,12 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - 服务器运维系统` : '服务器运维系统';
+
+  // 开启加载状态
+  const uiStore = useUIStore();
+  // 只有在非 keep-alive 或者确实切换了路由路径才显示骨架屏
+  // 如果只是 query 变化可能不需要，视情况而定
+  uiStore.startLoading();
 
   console.log('路由守卫：', to.path, '需要认证:', to.matched.some(record => record.meta.requiresAuth));
 
@@ -290,6 +314,15 @@ router.beforeEach(async (to, from, next) => {
 
   console.log('允许访问:', to.path);
   next();
+});
+
+router.afterEach((to) => {
+  const uiStore = useUIStore();
+  // 如果页面配置了手动控制加载 (manualLoading: true)，则不自动停止加载
+  // 由页面组件内部调用 uiStore.stopLoading()
+  if (!to.meta.manualLoading) {
+    uiStore.stopLoading();
+  }
 });
 
 export default router; 

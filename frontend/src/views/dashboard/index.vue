@@ -9,6 +9,7 @@ import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import type { LifeProbeSummary } from '@/types/life';
 import {
   DesktopOutlined,
@@ -42,6 +43,7 @@ const router = useRouter();
 const isLoggedIn = computed(() => !!getToken());
 // 获取系统设置
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 // 登录或进入控制台
 const goToLoginOrAdmin = () => {
@@ -164,6 +166,7 @@ const fetchServers = () => {
 
       if (data.type === 'server_list' && Array.isArray(data.servers)) {
         loading.value = false;
+        uiStore.stopLoading();
 
         const processedServers = data.servers.map((server: any) => {
           const status = server.status || 'offline';

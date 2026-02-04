@@ -27,6 +27,7 @@ import request from '../../utils/request';
 import { getToken } from '../../utils/auth';
 // 导入服务器状态store
 import { useServerStore } from '../../stores/serverStore';
+import { useUIStore } from '../../stores/uiStore';
 // 导入CodeMirror相关组件
 import { Codemirror } from 'vue-codemirror';
 // 导入 xterm
@@ -106,6 +107,7 @@ const getQueryPath = (): string => {
 const initialPath = ref<string>(normalizePath(getQueryPath()));
 // 获取服务器状态store
 const serverStore = useServerStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -301,6 +303,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -947,6 +950,14 @@ onMounted(async () => {
   }
 });
 
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeTerminal);
+  // 清理ResizeObserver
+  if (terminal.value && (terminal.value as any)._resizeObserver) {
+    (terminal.value as any)._resizeObserver.disconnect();
+  }
+});
+
 watch(
   () => route.query.path,
   (newVal) => {
@@ -1032,10 +1043,44 @@ const initTerminal = () => {
   fitAddon.value = new FitAddon();
   terminal.value.loadAddon(fitAddon.value);
   terminal.value.open(terminalRef.value);
-  fitAddon.value.fit();
+
+  // 延时执行适应大小，确保DOM已经渲染完成
+  setTimeout(() => {
+    resizeTerminal();
+  }, 100);
 
   // 连接WebSocket
   connectTerminalWs();
+
+  // 添加resize监听
+  window.addEventListener('resize', resizeTerminal);
+};
+
+// 调整终端大小
+const resizeTerminal = () => {
+  if (!fitAddon.value || !terminal.value) return;
+
+  try {
+    fitAddon.value.fit();
+
+    // 如果连接已建立，通知后端调整大小
+    if (terminalWs && terminalWs.readyState === WebSocket.OPEN && terminalSessionId.value) {
+      const resizeCommand = {
+        type: 'shell_command',
+        payload: {
+          type: 'resize',
+          data: JSON.stringify({
+            cols: terminal.value.cols,
+            rows: terminal.value.rows
+          }),
+          session: terminalSessionId.value
+        }
+      };
+      terminalWs.send(JSON.stringify(resizeCommand));
+    }
+  } catch (e) {
+    console.error('Resize terminal error:', e);
+  }
 };
 
 // 连接终端WebSocket
@@ -1063,6 +1108,9 @@ const connectTerminalWs = () => {
 
     // 发送 cd 命令切换到当前目录
     setTimeout(() => {
+      // 先发送resize确保后端知道当前终端大小
+      resizeTerminal();
+
       const cdCommand = {
         type: 'shell_command',
         payload: {

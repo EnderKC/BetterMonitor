@@ -12,6 +12,7 @@ import 'xterm/css/xterm.css';
 
 const props = defineProps<{
   socketUrl: string;
+  session?: string;
   theme?: 'light' | 'dark';
 }>();
 
@@ -86,9 +87,16 @@ const connect = () => {
       if (terminal.value) {
         terminal.value.onData((data) => {
           if (socket.readyState === WebSocket.OPEN) {
+            if (!props.session) {
+              console.warn('Input sent without session');
+            }
             socket.send(JSON.stringify({
-              type: 'input',
-              data: data
+              type: 'shell_command',
+              payload: {
+                type: 'input',
+                data: data,
+                session: props.session || ''
+              }
             }));
           }
         });
@@ -138,15 +146,25 @@ const handleResize = () => {
 
   try {
     fitAddon.value.fit();
+
+    // 只有 session 存在时才发送 resize 命令
+    if (!props.session) {
+      console.warn('Resize skipped: no session provided');
+      return;
+    }
+
     const dims = {
       cols: terminal.value.cols,
       rows: terminal.value.rows
     };
-    
+
     ws.value.send(JSON.stringify({
-      type: 'resize',
-      ...dims,
-      data: JSON.stringify(dims) // Support both formats
+      type: 'shell_command',
+      payload: {
+        type: 'resize',
+        data: JSON.stringify(dims),
+        session: props.session
+      }
     }));
   } catch (e) {
     console.warn('Resize failed:', e);

@@ -20,7 +20,7 @@ const pinia = createPinia()
 
 const app = createApp(App)
 app.use(Antd)
-app.use(router)
 // 注册Pinia
 app.use(pinia)
+app.use(router)
 app.mount('#app')

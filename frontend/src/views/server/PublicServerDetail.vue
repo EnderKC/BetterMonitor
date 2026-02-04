@@ -11,6 +11,7 @@ import { useServerStore } from '../../stores/serverStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useThemeStore } from '../../stores/theme';
 import { storeToRefs } from 'pinia';
+import { useUIStore } from '../../stores/uiStore';
 // 导入图表组件
 import CpuUsageChartCard from '../../components/server/monitor/CpuUsageChartCard.vue';
 import MemoryUsageChartCard from '../../components/server/monitor/MemoryUsageChartCard.vue';
@@ -25,7 +26,9 @@ const serverId = ref<number>(Number(route.params.id));
 const serverStore = useServerStore();
 const settingsStore = useSettingsStore();
 const themeStore = useThemeStore();
+
 const { isDark } = storeToRefs(themeStore);
+const uiStore = useUIStore();
 
 // 定义数据点类型
 type DataPoint = {
@@ -136,6 +139,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -617,7 +621,7 @@ onUnmounted(() => {
           <span class="gradient-title">
             {{ serverInfo.name }}
             <span v-if="serverInfo.hostname && serverInfo.hostname !== '未知'" class="hostname-tag">{{ serverInfo.hostname
-              }}</span>
+            }}</span>
           </span>
         </template>
         <template #subTitle>
@@ -717,7 +721,7 @@ onUnmounted(() => {
               <span class="sys-item">{{ serverInfo.os }}</span>
             </div>
             <small>{{ serverInfo.arch }} • {{ serverInfo.region !== '未知' ? serverInfo.region : serverInfo.hostname
-            }}</small>
+              }}</small>
           </div>
 
           <!-- 描述 (全宽) -->
@@ -1071,5 +1075,4 @@ onUnmounted(() => {
   background: rgba(40, 40, 40, 0.8);
   border-color: rgba(22, 119, 255, 0.4);
 }
-
 </style>
