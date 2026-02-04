@@ -79,9 +79,23 @@ const connect = () => {
     socket.onopen = () => {
       connected.value = true;
       emit('connected');
-      
-      // Send initial resize
-      handleResize();
+
+      // 先发送 create 命令在 Agent 端创建终端会话
+      if (props.session) {
+        socket.send(JSON.stringify({
+          type: 'shell_command',
+          payload: {
+            type: 'create',
+            data: '',
+            session: props.session
+          }
+        }));
+
+        // 延迟发送 resize，确保会话已创建
+        setTimeout(() => {
+          handleResize();
+        }, 100);
+      }
 
       // Handle input
       if (terminal.value) {

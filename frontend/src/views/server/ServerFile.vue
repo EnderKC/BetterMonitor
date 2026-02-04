@@ -1106,21 +1106,35 @@ const connectTerminalWs = () => {
     console.log('Terminal WebSocket connected');
     terminal.value?.write(`正在连接到文件管理器终端...\r\n`);
 
+    // 先发送 create 命令在 Agent 端创建终端会话
+    const createCommand = {
+      type: 'shell_command',
+      payload: {
+        type: 'create',
+        data: '',
+        session: terminalSessionId.value
+      }
+    };
+    terminalWs?.send(JSON.stringify(createCommand));
+
     // 发送 cd 命令切换到当前目录
     setTimeout(() => {
       // 先发送resize确保后端知道当前终端大小
       resizeTerminal();
 
-      const cdCommand = {
-        type: 'shell_command',
-        payload: {
-          type: 'input',
-          data: `cd ${terminalWorkingDir.value}\n`,
-          session: terminalSessionId.value
-        }
-      };
-      terminalWs?.send(JSON.stringify(cdCommand));
-    }, 500);
+      // 延迟发送 cd 命令，确保 resize 已被处理
+      setTimeout(() => {
+        const cdCommand = {
+          type: 'shell_command',
+          payload: {
+            type: 'input',
+            data: `cd ${terminalWorkingDir.value}\n`,
+            session: terminalSessionId.value
+          }
+        };
+        terminalWs?.send(JSON.stringify(cdCommand));
+      }, 100);
+    }, 200);
   };
 
   terminalWs.onmessage = (event) => {
