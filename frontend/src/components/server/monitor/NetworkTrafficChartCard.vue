@@ -173,8 +173,8 @@ const hasData = computed(() => {
   justify-content: center;
   gap: 12px;
   color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 8px;
+  background: var(--alpha-black-02);
+  border-radius: var(--radius-sm);
 }
 
 .empty-icon {
@@ -183,6 +183,6 @@ const hasData = computed(() => {
 }
 
 .empty-text {
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 </style>

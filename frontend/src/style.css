@@ -1,7 +1,7 @@
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  font-family: var(--font-family-sans);
+  line-height: var(--line-height-normal);
+  font-weight: var(--font-weight-regular);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -43,26 +43,26 @@ h6 {
   margin-top: 0;
   margin-bottom: 0.5em;
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
-/* 全局覆盖 Ant Design 样式以匹配紧凑风格 */
+/* Ant Design compact style overrides */
 .ant-card-body {
-  padding: 16px !important;
+  padding: var(--spacing-md) !important;
 }
 
 .ant-table-small .ant-table-thead>tr>th {
-  background-color: rgba(0, 0, 0, 0.02);
+  background-color: var(--alpha-black-02);
 }
 
 :root.dark .ant-table-small .ant-table-thead>tr>th {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--alpha-white-05);
 }
 
-/* 响应式布局 */
+/* Responsive layout */
 @media (max-width: 768px) {
   body {
-    font-size: 14px;
+    font-size: var(--font-size-md);
   }
 }
 
@@ -75,7 +75,7 @@ h6 {
   background: transparent !important;
 }
 
-/* Ensure dark mode background for specific components that might default to white */
+/* Dark mode background for specific components */
 :root.dark .ant-layout-sider-trigger {
   background: #2c313c;
   color: #abb2bf;

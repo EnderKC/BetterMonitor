@@ -158,8 +158,8 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
     top: 24px;
     right: 24px;
     color: var(--text-secondary);
-    background: rgba(0, 0, 0, 0.05);
-    border-radius: 50%;
+    background: var(--alpha-black-05);
+    border-radius: var(--radius-circle);
     width: 32px;
     height: 32px;
     display: flex;
@@ -169,20 +169,20 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .deploy-agent-modal :deep(.ant-modal-close:hover) {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--alpha-black-10);
     color: var(--text-primary);
 }
 
 .modal-content-wrapper {
-    background: rgba(255, 255, 255, 0.8);
+    background: var(--alpha-white-80);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    border-radius: 24px;
+    border-radius: var(--radius-xl);
     padding: 32px;
     box-shadow:
         0 25px 50px -12px rgba(0, 0, 0, 0.25),
-        0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+        0 0 0 1px var(--alpha-white-50) inset;
+    border: 1px solid var(--alpha-white-30);
 }
 
 /* Header */
@@ -197,18 +197,18 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
     width: 48px;
     height: 48px;
     border-radius: 14px;
-    background: linear-gradient(135deg, #007AFF, #5856D6);
+    background: linear-gradient(135deg, var(--primary-color), var(--info-color));
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 24px;
+    font-size: var(--font-size-3xl);
     box-shadow: 0 8px 16px rgba(0, 122, 255, 0.25);
 }
 
 .header-text h3 {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-bold);
     margin: 0 0 4px 0;
     color: #1d1d1f;
     letter-spacing: -0.01em;
@@ -217,14 +217,14 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 .header-text p {
     margin: 0;
     color: #86868b;
-    font-size: 14px;
+    font-size: var(--font-size-md);
 }
 
 /* Glass Panel */
 .glass-panel {
-    background: rgba(255, 255, 255, 0.5);
-    border-radius: 16px;
-    border: 1px solid rgba(0, 0, 0, 0.05);
+    background: var(--alpha-white-50);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--alpha-black-05);
     overflow: hidden;
 }
 
@@ -242,8 +242,8 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .info-label {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
     color: #86868b;
     text-transform: uppercase;
     letter-spacing: 0.02em;
@@ -257,17 +257,17 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 
 .info-value {
     font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
-    font-size: 14px;
+    font-size: var(--font-size-md);
     color: #1d1d1f;
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--alpha-black-05);
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
 }
 
 .copy-btn-mini {
     border: none;
     background: transparent;
-    color: #007AFF;
+    color: var(--primary-color);
     cursor: pointer;
     padding: 4px;
     border-radius: 4px;
@@ -277,12 +277,12 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .copy-btn-mini:hover {
-    background: rgba(0, 122, 255, 0.1);
+    background: var(--primary-light);
 }
 
 .info-divider {
     height: 1px;
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--alpha-black-05);
     margin: 0 20px;
 }
 
@@ -293,15 +293,15 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
     margin-bottom: 16px;
     background: rgba(118, 118, 128, 0.12);
     padding: 4px;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     width: fit-content;
 }
 
 .os-tab {
     padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
     color: #86868b;
     cursor: pointer;
     display: flex;
@@ -320,8 +320,8 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 .command-panel {
     background: #1e1e1e;
     /* Dark terminal background */
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--alpha-white-10);
+    box-shadow: 0 20px 40px var(--alpha-black-20);
 }
 
 .panel-header {
@@ -330,7 +330,7 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
     justify-content: center;
     position: relative;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--alpha-white-10);
 }
 
 .traffic-lights {
@@ -343,7 +343,7 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 .light {
     width: 10px;
     height: 10px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
 }
 
 .light.red {
@@ -359,9 +359,9 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .panel-title {
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 12px;
-    font-weight: 500;
+    color: var(--alpha-white-40);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
 }
 
 .code-block {
@@ -372,7 +372,7 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 .code-block pre {
     margin: 0;
     font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.6;
     color: #fff;
     white-space: pre-wrap;
@@ -384,26 +384,26 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.05);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--alpha-white-05);
+    border-top: 1px solid var(--alpha-white-10);
 }
 
 .cmd-tip {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 12px;
+    color: var(--alpha-white-50);
+    font-size: var(--font-size-xs);
 }
 
 .action-copy-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--alpha-white-10);
+    border: 1px solid var(--alpha-white-10);
     color: white;
     padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
+    border-radius: var(--radius-xs);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -412,7 +412,7 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .action-copy-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--alpha-white-20);
 }
 </style>
 
@@ -420,10 +420,10 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 /* Dark Mode Overrides */
 .dark .modal-content-wrapper {
     background: rgba(30, 30, 32, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--alpha-white-10);
     box-shadow:
-        0 25px 50px -12px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+        0 25px 50px -12px var(--alpha-black-50),
+        0 0 0 1px var(--alpha-white-10) inset;
 }
 
 .dark .header-text h3 {
@@ -435,8 +435,8 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 }
 
 .dark .info-card {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.05);
+    background: var(--alpha-white-05);
+    border-color: var(--alpha-white-05);
 }
 
 .dark .info-label {
@@ -445,29 +445,29 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 
 .dark .info-value {
     color: #fff;
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--alpha-black-30);
 }
 
 .dark .info-divider {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--alpha-white-05);
 }
 
 .dark .os-tabs {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--alpha-black-30);
 }
 
 .dark .os-tab.active {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--alpha-white-10);
     color: #fff;
 }
 
 .dark .deploy-agent-modal .ant-modal-close {
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--alpha-white-50);
+    background: var(--alpha-white-05);
 }
 
 .dark .deploy-agent-modal .ant-modal-close:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--alpha-white-15);
     color: #fff;
 }
 
@@ -482,24 +482,24 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
 
 .dark .command-panel {
     background: #1e1e1e;
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--alpha-white-10);
 }
 
 .dark .panel-header {
-    border-bottom-color: rgba(255, 255, 255, 0.1);
+    border-bottom-color: var(--alpha-white-10);
 }
 
 .dark .panel-footer {
     background: rgba(255, 255, 255, 0.02);
-    border-top-color: rgba(255, 255, 255, 0.1);
+    border-top-color: var(--alpha-white-10);
 }
 
 .dark .action-copy-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.1);
+    background: var(--alpha-white-08);
+    border-color: var(--alpha-white-10);
 }
 
 .dark .action-copy-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--alpha-white-15);
 }
 </style>

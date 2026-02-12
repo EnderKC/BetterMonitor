@@ -1,0 +1,259 @@
+/*
+ * ============================================================
+ *  Better Monitor — Design Token (CSS Custom Properties)
+ * ============================================================
+ *  All visual tokens live here. Override any variable via a
+ *  custom <style> block or an external stylesheet loaded after
+ *  this file to personalise the UI.
+ *
+ *  Theme switching: light = :root / dark = :root.dark
+ * ============================================================
+ */
+
+/* ========================= */
+/*  Light Theme (default)    */
+/* ========================= */
+:root {
+  /* ----- Brand / Status Colors ----- */
+  --primary-color: #007AFF;
+  --primary-hover: #0077ED;
+  --primary-light: rgba(0, 122, 255, 0.1);
+  --primary-bg: rgba(0, 122, 255, 0.05);
+
+  --success-color: #34C759;
+  --warning-color: #FF9500;
+  --error-color: #FF3B30;
+  --info-color: #5856D6;
+
+  /* ----- Neutral / Surface Colors ----- */
+  --body-bg: #F5F5F7;
+  --card-bg: rgba(255, 255, 255, 0.6);
+  --card-border: rgba(255, 255, 255, 0.4);
+
+  /* ----- Text Colors ----- */
+  --text-primary: #1D1D1F;
+  --text-secondary: #8e8e9d;
+  --text-hint: #A1A1A6;
+
+  /* ----- Shadows ----- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.16);
+  --shadow-glow: 0 0 20px rgba(0, 122, 255, 0.3);
+
+  /* ----- Border Radius ----- */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* ----- Spacing ----- */
+  --spacing-2xs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 40px;
+  --spacing-3xl: 48px;
+
+  /* ----- Transition ----- */
+  --transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-fast: all 0.2s ease;
+  --transition-color: background-color 0.3s, color 0.3s;
+
+  /* ----- Component Backgrounds ----- */
+  --sidebar-bg: rgba(255, 255, 255, 0.5);
+  --dropdown-bg: rgba(255, 255, 255, 0.9);
+  --footer-bg: rgba(255, 255, 255, 0.5);
+  --header-bg: rgba(255, 255, 255, 0.5);
+
+  /* ----- Typography ----- */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-family-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+  --font-size-4xl: 28px;
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ----- Semantic Border Colors ----- */
+  --border-subtle: rgba(0, 0, 0, 0.05);
+  --border-default: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+
+  /* ----- Alpha Helpers (theme-independent) ----- */
+  --alpha-white-05: rgba(255, 255, 255, 0.05);
+  --alpha-white-08: rgba(255, 255, 255, 0.08);
+  --alpha-white-10: rgba(255, 255, 255, 0.1);
+  --alpha-white-15: rgba(255, 255, 255, 0.15);
+  --alpha-white-20: rgba(255, 255, 255, 0.2);
+  --alpha-white-30: rgba(255, 255, 255, 0.3);
+  --alpha-white-40: rgba(255, 255, 255, 0.4);
+  --alpha-white-50: rgba(255, 255, 255, 0.5);
+  --alpha-white-60: rgba(255, 255, 255, 0.6);
+  --alpha-white-80: rgba(255, 255, 255, 0.8);
+  --alpha-white-90: rgba(255, 255, 255, 0.9);
+
+  --alpha-black-02: rgba(0, 0, 0, 0.02);
+  --alpha-black-03: rgba(0, 0, 0, 0.03);
+  --alpha-black-04: rgba(0, 0, 0, 0.04);
+  --alpha-black-05: rgba(0, 0, 0, 0.05);
+  --alpha-black-10: rgba(0, 0, 0, 0.1);
+  --alpha-black-15: rgba(0, 0, 0, 0.15);
+  --alpha-black-20: rgba(0, 0, 0, 0.2);
+  --alpha-black-30: rgba(0, 0, 0, 0.3);
+  --alpha-black-40: rgba(0, 0, 0, 0.4);
+  --alpha-black-50: rgba(0, 0, 0, 0.5);
+
+  /* ----- Backdrop Blur ----- */
+  --blur-sm: 10px;
+  --blur-md: 20px;
+  --blur-lg: 25px;
+
+  /* ----- Gradients ----- */
+  --gradient-brand: linear-gradient(135deg, #007AFF, #5856D6);
+  --gradient-brand-soft: linear-gradient(135deg, rgba(0, 122, 255, 0.15), rgba(88, 86, 214, 0.15));
+
+  /* ----- Background Radial Gradients (page level) ----- */
+  --bg-radial-primary: rgba(0, 122, 255, 0.15);
+  --bg-radial-success: rgba(52, 199, 89, 0.15);
+  --bg-radial-accent: rgba(88, 86, 214, 0.1);
+
+  /* ----- Component Sizes ----- */
+  --btn-height: 36px;
+  --header-height: 60px;
+  --menu-item-height: 40px;
+  --sidebar-trigger-height: 50px;
+
+  /* ----- Button Shadows ----- */
+  --btn-primary-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+  --btn-primary-hover-shadow: 0 6px 16px rgba(0, 122, 255, 0.4);
+
+  /* ----- Scrollbar ----- */
+  --scrollbar-size: 8px;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+  --scrollbar-radius: 4px;
+
+  /* ----- Status Background (for tags/badges) ----- */
+  --success-bg: rgba(52, 199, 89, 0.15);
+  --warning-bg: rgba(255, 149, 0, 0.15);
+  --error-bg: rgba(255, 59, 48, 0.15);
+  --info-bg: rgba(0, 122, 255, 0.15);
+
+  /* ----- Modal ----- */
+  --modal-radius: 20px;
+  --modal-bg: rgba(255, 255, 255, 0.85);
+  --modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+  --modal-border: rgba(255, 255, 255, 0.5);
+
+  /* ----- Table ----- */
+  --table-header-bg: rgba(245, 245, 247, 0.5);
+  --table-border: rgba(0, 0, 0, 0.05);
+  --table-row-hover: rgba(0, 122, 255, 0.03);
+
+  /* ----- Input ----- */
+  --input-bg: rgba(255, 255, 255, 0.6);
+  --input-border: rgba(0, 0, 0, 0.1);
+  --input-focus-bg: #fff;
+  --input-focus-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
+}
+
+/* ========================= */
+/*  Dark Theme (One Dark)    */
+/* ========================= */
+:root.dark {
+  /* ----- Brand / Status Colors ----- */
+  --primary-color: #61afef;
+  --primary-hover: #4d8ec4;
+  --primary-light: rgba(97, 175, 239, 0.15);
+  --primary-bg: rgba(97, 175, 239, 0.05);
+
+  --success-color: #98c379;
+  --warning-color: #e5c07b;
+  --error-color: #e06c75;
+  --info-color: #c678dd;
+
+  /* ----- Neutral / Surface Colors ----- */
+  --body-bg: #282c34;
+  --card-bg: rgba(44, 49, 60, 0.7);
+  --card-border: rgba(255, 255, 255, 0.1);
+
+  /* ----- Text Colors ----- */
+  --text-primary: #c3cad8;
+  --text-secondary: #8a93a4;
+  --text-hint: #4b5263;
+
+  /* ----- Shadows ----- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 20px rgba(97, 175, 239, 0.2);
+
+  /* ----- Component Backgrounds ----- */
+  --sidebar-bg: rgba(33, 37, 43, 0.5);
+  --dropdown-bg: #2c313c;
+  --footer-bg: rgba(33, 37, 43, 0.5);
+  --header-bg: rgba(33, 37, 43, 0.5);
+
+  /* ----- Semantic Border Colors ----- */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+
+  /* ----- Gradients ----- */
+  --gradient-brand: linear-gradient(135deg, #61afef, #c678dd);
+  --gradient-brand-soft: linear-gradient(135deg, rgba(97, 175, 239, 0.15), rgba(198, 120, 221, 0.15));
+
+  /* ----- Background Radial Gradients (page level) ----- */
+  --bg-radial-primary: rgba(97, 175, 239, 0.15);
+  --bg-radial-success: rgba(152, 195, 121, 0.15);
+  --bg-radial-accent: rgba(198, 120, 221, 0.1);
+
+  /* ----- Button Shadows ----- */
+  --btn-primary-shadow: 0 4px 12px rgba(97, 175, 239, 0.2);
+  --btn-primary-hover-shadow: 0 6px 16px rgba(97, 175, 239, 0.3);
+
+  /* ----- Scrollbar ----- */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+
+  /* ----- Status Background (for tags/badges) ----- */
+  --success-bg: rgba(152, 195, 121, 0.2);
+  --warning-bg: rgba(229, 192, 123, 0.2);
+  --error-bg: rgba(224, 108, 117, 0.2);
+  --info-bg: rgba(198, 120, 221, 0.2);
+
+  /* ----- Modal ----- */
+  --modal-bg: rgba(40, 44, 52, 0.9);
+  --modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  --modal-border: rgba(255, 255, 255, 0.1);
+
+  /* ----- Table ----- */
+  --table-header-bg: rgba(40, 44, 52, 0.5);
+  --table-border: rgba(255, 255, 255, 0.08);
+  --table-row-hover: rgba(97, 175, 239, 0.05);
+
+  /* ----- Input ----- */
+  --input-bg: rgba(0, 0, 0, 0.2);
+  --input-border: rgba(255, 255, 255, 0.1);
+  --input-focus-bg: rgba(0, 0, 0, 0.4);
+  --input-focus-shadow: 0 0 0 4px rgba(97, 175, 239, 0.1);
+}

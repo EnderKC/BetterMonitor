@@ -1418,7 +1418,7 @@ const updateMonitorData = (data: any) => {
   gap: 8px;
   cursor: pointer;
   color: var(--primary-color);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   font-size: 15px;
   transition: opacity 0.2s;
 }
@@ -1428,7 +1428,7 @@ const updateMonitorData = (data: any) => {
 }
 
 .back-arrow {
-  font-size: 20px;
+  font-size: var(--font-size-2xl);
 }
 
 .header-content {
@@ -1440,8 +1440,8 @@ const updateMonitorData = (data: any) => {
 .server-icon {
   width: 64px;
   height: 64px;
-  background: linear-gradient(135deg, #e0e0e0, #f5f5f5);
-  border-radius: 16px;
+  background: linear-gradient(135deg, var(--alpha-black-05), var(--alpha-black-02));
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1449,8 +1449,8 @@ const updateMonitorData = (data: any) => {
 }
 
 .icon-placeholder {
-  font-size: 28px;
-  font-weight: 600;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -1462,8 +1462,8 @@ const updateMonitorData = (data: any) => {
 
 .server-title {
   margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.5px;
   color: var(--text-primary);
 }
@@ -1473,7 +1473,7 @@ const updateMonitorData = (data: any) => {
   align-items: center;
   gap: 8px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .meta-dot {
@@ -1483,39 +1483,39 @@ const updateMonitorData = (data: any) => {
 
 .status-badge {
   padding: 2px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
 }
 
 .status-badge.online {
-  background-color: rgba(52, 199, 89, 0.15);
+  background-color: var(--success-bg);
   color: var(--success-color);
 }
 
 .status-badge.offline {
-  background-color: rgba(255, 59, 48, 0.15);
+  background-color: var(--error-bg);
   color: var(--error-color);
 }
 
 /* iOS Buttons */
 .ios-btn {
   border: none;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   box-shadow: none;
   transition: all 0.2s;
 }
 
 .ios-btn:hover {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--alpha-black-10);
   color: var(--text-primary);
 }
 
 .ios-btn-primary {
   background: var(--primary-color);
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .ios-btn-primary:hover {
@@ -1536,11 +1536,11 @@ const updateMonitorData = (data: any) => {
 
 .overview-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   display: flex;
@@ -1549,8 +1549,8 @@ const updateMonitorData = (data: any) => {
 
 .overview-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
-  border-color: rgba(22, 119, 255, 0.3);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
+  border-color: var(--primary-light);
 }
 
 .overview-card.full-width {
@@ -1558,8 +1558,8 @@ const updateMonitorData = (data: any) => {
 }
 
 .overview-card .label {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   margin-bottom: 8px;
   text-transform: uppercase;
@@ -1568,8 +1568,8 @@ const updateMonitorData = (data: any) => {
 
 .overview-card h3 {
   margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   letter-spacing: -0.5px;
   font-family: "SF Mono", Menlo, monospace;
@@ -1580,7 +1580,7 @@ const updateMonitorData = (data: any) => {
   margin-top: auto;
   padding-top: 8px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: normal;
   overflow: visible;
 }
@@ -1589,7 +1589,7 @@ const updateMonitorData = (data: any) => {
   color: var(--text-secondary);
   line-height: 1.6;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 /* Specific Card Styles */
@@ -1602,14 +1602,14 @@ const updateMonitorData = (data: any) => {
 .status-dot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  background-color: #ff4d4f;
-  box-shadow: 0 0 8px rgba(255, 77, 79, 0.4);
+  border-radius: var(--radius-circle);
+  background-color: var(--error-color);
+  box-shadow: 0 0 8px var(--error-bg);
 }
 
 .status-dot.online {
-  background-color: #52c41a;
-  box-shadow: 0 0 8px rgba(82, 196, 26, 0.4);
+  background-color: var(--success-color);
+  box-shadow: 0 0 8px var(--success-bg);
 }
 
 .network-speeds {
@@ -1626,22 +1626,22 @@ const updateMonitorData = (data: any) => {
 
 .speed-value {
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
-  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
 }
 
 .arrow {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: bold;
 }
 
 .arrow.up {
-  color: #52c41a;
+  color: var(--success-color);
 }
 
 .arrow.down {
-  color: #1677ff;
+  color: var(--primary-color);
 }
 
 /* Monitor Section */
@@ -1657,8 +1657,8 @@ const updateMonitorData = (data: any) => {
 }
 
 .section-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   margin: 0;
 }
@@ -1671,11 +1671,11 @@ const updateMonitorData = (data: any) => {
 
 .chart-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   height: 320px;
@@ -1684,12 +1684,12 @@ const updateMonitorData = (data: any) => {
 }
 
 .chart-card:hover {
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
 }
 
 .chart-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   margin-bottom: 16px;
   color: var(--text-primary);
 }
@@ -1714,20 +1714,20 @@ const updateMonitorData = (data: any) => {
 }
 
 .ios-alert {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
+  background: var(--alpha-white-60);
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--radius-md);
   padding: 16px;
   display: flex;
   gap: 16px;
   align-items: flex-start;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--alpha-black-05);
 }
 
 .alert-icon {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1747,14 +1747,14 @@ const updateMonitorData = (data: any) => {
 .alert-content h4 {
   margin: 0 0 4px 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
 .alert-content p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 @media (max-width: 768px) {
@@ -1782,25 +1782,79 @@ const updateMonitorData = (data: any) => {
 
 <style>
 /* Dark Mode Overrides */
+
+/* --- Header --- */
 .dark .ios-header {
-  background: rgba(43, 42, 42, 0.6);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-default);
 }
 
+/* --- Server Icon --- */
+.dark .server-icon {
+  background: linear-gradient(135deg, var(--alpha-white-10), var(--alpha-white-05));
+  box-shadow: var(--shadow-sm);
+}
+
+.dark .icon-placeholder {
+  color: var(--text-secondary);
+}
+
+/* --- Cards --- */
 .dark .overview-card,
 .dark .chart-card {
-  background: rgba(52, 51, 51, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--card-bg);
+  border-color: var(--card-border);
 }
 
 .dark .overview-card:hover,
 .dark .chart-card:hover {
-  background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(22, 119, 255, 0.4);
+  background: var(--alpha-white-08);
+  border-color: var(--primary-light);
 }
 
+/* --- Buttons --- */
+.dark .ios-btn {
+  background: var(--alpha-white-08);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.dark .ios-btn:hover {
+  background: var(--alpha-white-15);
+  color: var(--text-primary);
+}
+
+.dark .ios-btn-primary {
+  background: var(--primary-color);
+  border-color: transparent;
+  box-shadow: var(--btn-primary-shadow);
+}
+
+.dark .ios-btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+/* --- Status Dots --- */
+.dark .status-dot {
+  box-shadow: 0 0 8px var(--error-bg);
+}
+
+.dark .status-dot.online {
+  box-shadow: 0 0 8px var(--success-bg);
+}
+
+/* --- Alerts --- */
 .dark .ios-alert {
-  background: rgba(52, 51, 51, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--card-bg);
+  border-color: var(--card-border);
+}
+
+.dark .ios-alert a {
+  color: var(--primary-color);
+}
+
+/* --- Text Overrides --- */
+.dark .back-btn {
+  color: var(--primary-color);
 }
 </style>

@@ -1056,8 +1056,8 @@ onMounted(() => {
 
 .glass-header {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  border-bottom: 1px solid var(--alpha-black-05);
   margin-bottom: 16px;
 }
 
@@ -1067,10 +1067,10 @@ onMounted(() => {
 
 .glass-panel {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--alpha-white-30);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   padding: 24px;
   min-height: 600px;
 }
@@ -1081,12 +1081,12 @@ onMounted(() => {
 
 .custom-tabs :deep(.ant-tabs-tab) {
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: all 0.3s;
 }
 
 .custom-tabs :deep(.ant-tabs-tab-active) {
-  background: rgba(24, 144, 255, 0.1);
+  background: var(--info-bg);
 }
 
 .toolbar {
@@ -1097,8 +1097,8 @@ onMounted(() => {
 }
 
 .glass-input {
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 8px;
+  background: var(--alpha-white-50);
+  border-radius: var(--radius-sm);
 }
 
 .glass-table :deep(.ant-table) {
@@ -1106,16 +1106,16 @@ onMounted(() => {
 }
 
 .glass-table :deep(.ant-table-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  font-weight: 600;
+  background: var(--alpha-black-02);
+  font-weight: var(--font-weight-semibold);
 }
 
 .glass-table :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid var(--alpha-black-03);
 }
 
 .glass-table :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 
 .mono-text {
@@ -1124,8 +1124,8 @@ onMounted(() => {
 }
 
 .name-text {
-  font-weight: 500;
-  color: #1890ff;
+  font-weight: var(--font-weight-medium);
+  color: var(--primary-color);
 }
 
 .text-secondary {
@@ -1138,12 +1138,12 @@ onMounted(() => {
 }
 
 .working-dir-link {
-  color: #1890ff;
+  color: var(--primary-color);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   transition: color 0.2s;
 }
 
@@ -1165,14 +1165,14 @@ onMounted(() => {
 }
 
 .form-help {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: #999;
   margin-top: 4px;
 }
 
 .code-textarea {
   font-family: "SF Mono", Menlo, monospace;
-  background: #f5f5f5;
+  background: var(--alpha-black-02);
 }
 </style>
 
@@ -1180,33 +1180,33 @@ onMounted(() => {
 /* Dark Mode Global Overrides */
 .dark .glass-header {
   background: rgba(30, 30, 30, 0.7);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .glass-panel {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .glass-input {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #fff;
 }
 
 .dark .glass-table .ant-table-thead>tr>th {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
   color: #e6e6e6;
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .glass-table .ant-table-tbody>tr>td {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
   color: #e6e6e6;
 }
 
 .dark .glass-table .ant-table-tbody>tr:hover>td {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 
 .dark .mono-text {
@@ -1232,7 +1232,7 @@ onMounted(() => {
 .dark .code-textarea {
   background: #1e1e1e;
   color: #d4d4d4;
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--alpha-white-10);
 }
 
 .dark .custom-tabs .ant-tabs-tab-active {
@@ -1249,45 +1249,45 @@ onMounted(() => {
 
 /* Glass Modal Styles */
 .glass-modal .ant-modal-content {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-80);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px var(--alpha-black-10);
+  border: 1px solid var(--alpha-white-50);
 }
 
 .glass-modal .ant-modal-header {
   background: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px 16px 0 0;
+  border-bottom: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg) 16px 0 0;
 }
 
 .glass-modal .ant-modal-title {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .glass-modal .ant-input,
 .glass-modal .ant-select-selector,
 .glass-modal .ant-input-number {
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
-  border-color: rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-sm);
+  background: var(--alpha-white-50);
+  border-color: var(--alpha-black-10);
 }
 
 .glass-modal .ant-btn {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 /* Dark Mode Modal */
 .dark .glass-modal .ant-modal-content {
   background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  border-color: var(--alpha-white-10);
+  box-shadow: 0 20px 50px var(--alpha-black-30);
 }
 
 .dark .glass-modal .ant-modal-header {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .glass-modal .ant-modal-title {
@@ -1301,8 +1301,8 @@ onMounted(() => {
 .dark .glass-modal .ant-input,
 .dark .glass-modal .ant-select-selector,
 .dark .glass-modal .ant-input-number {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #e0e0e0;
 }
 

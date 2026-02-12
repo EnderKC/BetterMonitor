@@ -241,7 +241,7 @@ watch(() => props.socketUrl, (newUrl) => {
   width: 100%;
   height: 100%;
   background: #1e1e1e;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   padding: 4px;
 }

@@ -112,6 +112,6 @@ const handleChange = (val: string) => {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 </style>

@@ -80,14 +80,14 @@ const { isDark } = storeToRefs(themeStore);
 }
 
 .skeleton-card {
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: var(--radius-md);
+    background: var(--alpha-white-40);
+    border: 1px solid var(--alpha-white-40);
 }
 
 .dark .skeleton-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--alpha-white-05);
+    border: 1px solid var(--alpha-white-05);
 }
 
 .main-area {
@@ -102,12 +102,12 @@ const { isDark } = storeToRefs(themeStore);
 
 .list-header {
     margin-bottom: 16px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    border-bottom: 1px solid var(--alpha-black-05);
     padding-bottom: 16px;
 }
 
 .dark .list-header {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--alpha-white-05);
 }
 
 @media (max-width: 768px) {

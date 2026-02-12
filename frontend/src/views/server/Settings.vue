@@ -453,15 +453,15 @@ onMounted(async () => {
 }
 
 .page-title {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
   color: rgba(0, 0, 0, 0.85);
   margin-bottom: 8px;
   letter-spacing: -0.5px;
 }
 
 .page-subtitle {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: rgba(0, 0, 0, 0.45);
 }
 
@@ -486,26 +486,26 @@ onMounted(async () => {
   align-items: center;
   padding: 12px 16px;
   margin-bottom: 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
   color: rgba(0, 0, 0, 0.65);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .sidebar-item:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--alpha-black-04);
   color: rgba(0, 0, 0, 0.85);
 }
 
 .sidebar-item.active {
   background: #e6f7ff;
-  color: #1890ff;
+  color: var(--primary-color);
 }
 
 .sidebar-icon {
   margin-right: 12px;
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   display: flex;
   align-items: center;
 }
@@ -519,13 +519,13 @@ onMounted(async () => {
 /* iOS Card Style */
 .ios-card {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--alpha-white-30);
   box-shadow:
-    0 4px 24px -1px rgba(0, 0, 0, 0.05),
-    0 0 1px 0 rgba(0, 0, 0, 0.1);
+    0 4px 24px -1px var(--alpha-black-05),
+    0 0 1px 0 var(--alpha-black-10);
   overflow: hidden;
 }
 
@@ -539,14 +539,14 @@ onMounted(async () => {
 }
 
 .card-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   margin: 0 0 4px 0;
   color: rgba(0, 0, 0, 0.85);
 }
 
 .card-desc {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: rgba(0, 0, 0, 0.45);
   margin: 0;
 }
@@ -561,9 +561,9 @@ onMounted(async () => {
 }
 
 .ios-form :deep(.ant-form-item-label > label) {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: rgba(0, 0, 0, 0.65);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .ios-input,
@@ -574,34 +574,34 @@ onMounted(async () => {
 
 .ios-input {
   border-radius: 10px;
-  border-color: rgba(0, 0, 0, 0.15);
+  border-color: var(--alpha-black-15);
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-50);
   transition: all 0.3s;
 }
 
 .ios-input:hover,
 .ios-input:focus {
   background: #fff;
-  border-color: #1890ff;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--info-bg);
 }
 
 :deep(.ant-select-selector) {
   border-radius: 10px !important;
-  border-color: rgba(0, 0, 0, 0.15) !important;
-  background: rgba(255, 255, 255, 0.5) !important;
+  border-color: var(--alpha-black-15) !important;
+  background: var(--alpha-white-50) !important;
 }
 
 :deep(.ant-input-number) {
   border-radius: 10px;
-  border-color: rgba(0, 0, 0, 0.15);
-  background: rgba(255, 255, 255, 0.5);
+  border-color: var(--alpha-black-15);
+  background: var(--alpha-white-50);
   width: 100%;
 }
 
 .form-help {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: rgba(0, 0, 0, 0.45);
   margin-top: 4px;
 }
@@ -618,15 +618,15 @@ onMounted(async () => {
 .ios-btn {
   height: 40px;
   border-radius: 20px;
-  font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  font-weight: var(--font-weight-medium);
+  box-shadow: 0 4px 12px var(--alpha-black-10);
   border: none;
   transition: all 0.3s;
   padding: 0 24px;
 }
 
 .ios-btn-primary {
-  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  background: linear-gradient(135deg, var(--primary-color) 0%, #096dd9 100%);
 }
 
 .ios-btn-primary:hover {
@@ -635,7 +635,7 @@ onMounted(async () => {
 }
 
 .ios-btn-secondary {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--alpha-black-04);
   color: rgba(0, 0, 0, 0.65);
   box-shadow: none;
 }
@@ -687,7 +687,7 @@ onMounted(async () => {
 }
 
 .dark .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #fff;
 }
 
@@ -698,12 +698,12 @@ onMounted(async () => {
 
 .dark .ios-card {
   background: rgba(30, 30, 30, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--alpha-white-05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-20);
 }
 
 .dark .card-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--alpha-white-05);
 }
 
 .dark .card-title {
@@ -719,26 +719,26 @@ onMounted(async () => {
 }
 
 .dark .ios-input {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #e0e0e0;
 }
 
 .dark .ios-input:hover,
 .dark .ios-input:focus {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--alpha-black-40);
   border-color: #177ddc;
 }
 
 .dark .ant-select-selector {
-  background: rgba(0, 0, 0, 0.2) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-black-20) !important;
+  border-color: var(--alpha-white-10) !important;
   color: #e0e0e0 !important;
 }
 
 .dark .ant-input-number {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #e0e0e0;
 }
 
@@ -751,16 +751,16 @@ onMounted(async () => {
 }
 
 .dark .form-actions {
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--alpha-white-05);
 }
 
 .dark .ios-btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #ccc;
 }
 
 .dark .ios-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--alpha-white-15);
   color: #fff;
 }
 </style>

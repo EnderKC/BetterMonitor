@@ -497,8 +497,8 @@ onDeactivated(() => {
 }
 
 .header-title h2 {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
   margin-bottom: 8px;
 }
 
@@ -516,7 +516,7 @@ onDeactivated(() => {
 }
 
 .modern-table :deep(.ant-table-thead > tr > th) {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .action-buttons {

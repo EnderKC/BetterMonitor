@@ -244,9 +244,9 @@ onMounted(() => {
 /* Sidebar Style - macOS Sidebar */
 .modern-sider {
   background: var(--sidebar-bg) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-right: 1px solid var(--border-subtle);
   z-index: 100;
 }
 
@@ -258,7 +258,7 @@ onMounted(() => {
 }
 
 .logo {
-  height: 60px;
+  height: var(--header-height);
   padding: 0 20px;
   display: flex;
   align-items: center;
@@ -267,8 +267,8 @@ onMounted(() => {
 
 .logo h2 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.5px;
   -webkit-background-clip: text;
   background-clip: text;
@@ -279,31 +279,31 @@ onMounted(() => {
   flex: 1;
   border-right: none;
   background: transparent;
-  padding: 10px 12px;
+  padding: 10px var(--spacing-sm);
 }
 
 .modern-menu :deep(.ant-menu-item),
 .modern-menu :deep(.ant-menu-submenu-title) {
-  margin: 4px 0;
+  margin: var(--spacing-xs) 0;
   width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-weight: 500;
-  height: 40px;
-  line-height: 40px;
-  transition: all 0.2s;
+  font-weight: var(--font-weight-medium);
+  height: var(--menu-item-height);
+  line-height: var(--menu-item-height);
+  transition: var(--transition-fast);
 }
 
 .modern-menu :deep(.ant-menu-item:hover),
 .modern-menu :deep(.ant-menu-submenu-title:hover) {
   color: var(--text-primary);
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--alpha-black-03);
 }
 
 .modern-menu :deep(.ant-menu-item-selected) {
-  background-color: rgba(0, 122, 255, 0.1);
+  background-color: var(--primary-light);
   color: var(--primary-color);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .modern-menu :deep(.ant-menu-item-selected::after) {
@@ -311,14 +311,14 @@ onMounted(() => {
 }
 
 .collapse-trigger {
-  height: 50px;
+  height: var(--sidebar-trigger-height);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   cursor: pointer;
   transition: color 0.3s;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .collapse-trigger:hover {
@@ -328,12 +328,11 @@ onMounted(() => {
 /* Header Style */
 .modern-header {
   padding: 0;
-  height: 60px;
-  line-height: 60px;
+  height: var(--header-height);
+  line-height: var(--header-height);
   background: var(--header-bg);
   z-index: 99;
-  /* 覆盖一下 毛玻璃卡片的圆角 */
-  border-radius: 0 0 16px 0;
+  border-radius: 0 0 var(--radius-lg) 0;
 }
 
 .header-content {
@@ -341,20 +340,20 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   height: 100%;
-  padding: 0 24px;
+  padding: 0 var(--spacing-lg);
 }
 
 .header-title {
   display: flex;
   align-items: center;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   letter-spacing: -0.5px;
 }
 
 .header-title span {
-  margin-left: 12px;
+  margin-left: var(--spacing-sm);
 }
 
 .header-actions {
@@ -366,35 +365,35 @@ onMounted(() => {
   display: flex;
   align-items: center;
   cursor: pointer;
-  padding: 0 12px;
-  border-radius: 12px;
-  transition: all 0.3s;
+  padding: 0 var(--spacing-sm);
+  border-radius: var(--radius-md);
+  transition: var(--transition);
   background: var(--header-bg) !important;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-subtle);
 }
 
 .user-avatar:hover {
-  background: rgba(255, 255, 255, 0.861);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  background: var(--alpha-white-80);
+  box-shadow: 0 2px 8px var(--alpha-black-05);
 }
 
 .user-avatar-inner {
-  background: linear-gradient(135deg, #007AFF, #5856D6);
+  background: var(--gradient-brand);
   color: white;
-  margin-right: 8px;
-  font-size: 12px;
+  margin-right: var(--spacing-sm);
+  font-size: var(--font-size-xs);
 }
 
 .username {
-  font-size: 14px;
-  font-weight: 500;
-  margin-right: 6px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  margin-right: var(--spacing-xs);
   color: var(--text-primary);
 }
 
 /* Content Area */
 .modern-content {
-  padding: 24px;
+  padding: var(--spacing-lg);
   background: transparent;
   overflow-y: auto;
 }
@@ -407,58 +406,56 @@ onMounted(() => {
 /* Footer */
 .modern-footer {
   line-height: 1.1;
-  /* 这样可以和左侧选择栏下面的线对齐 */
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--spacing-sm);
   text-align: center;
-  padding: 16px 24px;
+  padding: var(--spacing-md) var(--spacing-lg);
   color: var(--text-hint);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   background: var(--footer-bg) !important;
-  border-top: 1px solid rgba(0, 0, 0, 0.04);
-  /* box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.06); */
+  border-top: 1px solid var(--alpha-black-04);
   transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .footer-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm);
   flex-wrap: wrap;
 }
 
 .version-badge {
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: rgba(0, 122, 255, 0.1);
+  font-size: var(--font-size-xs);
+  padding: var(--spacing-2xs) 10px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-light);
   color: var(--text-secondary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.5px;
 }
 
 
 /* User Dropdown */
 :deep(.user-dropdown .ant-dropdown-menu) {
-  padding: 6px;
-  border-radius: 12px;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-md);
   background: var(--dropdown-bg);
-  backdrop-filter: blur(20px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  box-shadow: 0 10px 30px var(--alpha-black-10);
+  border: 1px solid var(--border-subtle);
 }
 
 :deep(.user-dropdown .ant-dropdown-menu-item) {
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-weight: 500;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-sm);
+  font-weight: var(--font-weight-medium);
 }
 
 :deep(.user-dropdown .ant-dropdown-menu-item:hover) {
-  background: rgba(0, 122, 255, 0.1);
+  background: var(--primary-light);
   color: var(--primary-color);
 }
 
@@ -473,11 +470,11 @@ onMounted(() => {
   }
 
   .header-content {
-    padding: 0 16px;
+    padding: 0 var(--spacing-md);
   }
 
   .modern-content {
-    padding: 16px;
+    padding: var(--spacing-md);
   }
 }
 
@@ -501,7 +498,6 @@ onMounted(() => {
 <style>
 .dark .modern-footer {
   background: var(--footer-bg) !important;
-
   color: var(--text-hint);
 }
 
@@ -517,22 +513,22 @@ onMounted(() => {
 .dark .modern-menu .ant-menu-item:hover,
 .dark .modern-menu .ant-menu-submenu-title:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--alpha-white-08);
 }
 
 .dark .modern-menu .ant-menu-item-selected {
-  background-color: rgba(97, 175, 239, 0.2);
+  background-color: var(--primary-light);
   color: var(--primary-color);
 }
 
 .dark .collapse-trigger {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--alpha-white-08);
   color: var(--text-secondary);
 }
 
 .dark .collapse-trigger:hover {
   color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 
 .dark .user-avatar {
@@ -540,9 +536,13 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
+.dark .user-avatar-inner {
+  background: var(--primary-color);
+}
+
 .dark .user-avatar:hover {
-  background: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-15);
+  box-shadow: 0 2px 8px var(--alpha-white-10);
 }
 
 .dark .username {
@@ -550,8 +550,8 @@ onMounted(() => {
 }
 
 .dark .user-dropdown .ant-dropdown-menu {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 4px 12px var(--alpha-black-50);
 }
 
 .dark .user-dropdown .ant-dropdown-menu-item {
@@ -559,12 +559,12 @@ onMounted(() => {
 }
 
 .dark .user-dropdown .ant-dropdown-menu-item:hover {
-  background: rgba(97, 175, 239, 0.15);
+  background: var(--primary-light);
   color: var(--primary-color);
 }
 
 .dark .ant-dropdown-menu-item-divider {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--border-default);
 }
 
 .dark .footer-right {
@@ -572,11 +572,11 @@ onMounted(() => {
 }
 
 .dark .version-badge {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--alpha-white-15);
   color: var(--text-primary);
 }
 
 .author-text {
-  color: #9ab5ca68;
+  color: rgba(154, 181, 202, 0.41);
 }
 </style>

@@ -360,7 +360,7 @@ defineExpose({
 }
 
 .search-box .ant-input {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .search-box :deep(.ant-input-affix-wrapper .ant-input) {
@@ -396,7 +396,7 @@ defineExpose({
 
 .directory-item.selected {
   background-color: #e6f7ff;
-  border: 1px solid #1890ff;
+  border: 1px solid var(--primary-color);
 }
 
 .file-input {
@@ -408,7 +408,7 @@ defineExpose({
 }
 
 .selected-path code {
-  color: #1890ff;
+  color: var(--primary-color);
   font-weight: bold;
 }
 </style> 

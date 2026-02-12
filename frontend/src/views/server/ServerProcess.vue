@@ -465,27 +465,27 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
   margin-bottom: 16px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
 }
 
 .process-list {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   overflow: hidden;
 }
 
 .process-name {
   color: var(--primary-color);
   cursor: pointer;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   transition: all 0.2s ease;
 }
 
@@ -504,8 +504,8 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 .detail-item {
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 12px;
+  background: var(--alpha-black-02);
+  border-radius: var(--radius-md);
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -517,22 +517,22 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 .detail-label {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: #8e8e93;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .detail-value {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   color: #1d1d1f;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   word-break: break-all;
 }
 
 .detail-value.highlight {
-  font-size: 16px;
-  font-weight: 600;
-  color: #007aff;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary-color);
 }
 
 .detail-value.mono {
@@ -541,10 +541,10 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 
 .detail-value.cmd-text {
   font-family: "SF Mono", Menlo, monospace;
-  font-size: 12px;
-  background: rgba(0, 0, 0, 0.03);
+  font-size: var(--font-size-xs);
+  background: var(--alpha-black-03);
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   margin-top: 4px;
 }
 
@@ -554,41 +554,41 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 :deep(.ant-table-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.6);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  font-weight: 600;
+  background: var(--alpha-white-60);
+  border-bottom: 1px solid var(--alpha-black-05);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 :deep(.ant-table-tbody > tr > td) {
   background: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
-  font-size: 13px;
+  border-bottom: 1px solid var(--alpha-black-03);
+  font-size: var(--font-size-sm);
 }
 
 :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(0, 122, 255, 0.05);
+  background: var(--primary-bg);
 }
 
 /* 模态框样式 */
 :deep(.ant-modal-content) {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--alpha-white-40);
   box-shadow: var(--shadow-lg);
 }
 
 :deep(.ant-modal-header) {
-  background: rgba(255, 255, 255, 0.5);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px 16px 0 0;
+  background: var(--alpha-white-50);
+  border-bottom: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg) 16px 0 0;
 }
 
 :deep(.ant-modal-title) {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
@@ -597,33 +597,33 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 :deep(.ant-modal-footer) {
-  background: rgba(255, 255, 255, 0.3);
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--alpha-white-30);
+  border-top: 1px solid var(--alpha-black-05);
   border-radius: 0 0 16px 16px;
 }
 
 /* 标签样式优化 */
 :deep(.ant-tag) {
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
   padding: 2px 10px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 /* 输入框样式 */
 :deep(.ant-input) {
   border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--alpha-black-10);
 }
 
 :deep(.ant-input:focus) {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.1);
+  box-shadow: 0 0 0 2px var(--primary-light);
 }
 
 /* 复选框样式 */
 :deep(.ant-checkbox-wrapper) {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
 }
 </style>
@@ -633,23 +633,23 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 .dark .filter-bar,
 .dark .process-list {
   background: rgba(30, 30, 30, 0.6) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--alpha-white-10);
+  box-shadow: 0 8px 32px var(--alpha-black-20);
 }
 
 .dark .ant-table-thead>tr>th {
   background: rgba(40, 40, 40, 0.6) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
-  color: #f5f5f7 !important;
+  border-bottom: 1px solid var(--alpha-white-10) !important;
+  color: var(--body-bg) !important;
 }
 
 .dark .ant-table-tbody>tr>td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-  color: #f5f5f7 !important;
+  border-bottom: 1px solid var(--alpha-white-05) !important;
+  color: var(--body-bg) !important;
 }
 
 .dark .ant-table-tbody>tr:hover>td {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: var(--alpha-white-05) !important;
 }
 
 .dark .process-name {
@@ -663,31 +663,31 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 /* Modal Dark Mode */
 .dark .ant-modal-content {
   background: rgba(40, 40, 40, 0.8) !important;
-  backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(var(--blur-md)) !important;
+  border: 1px solid var(--alpha-white-10) !important;
+  box-shadow: 0 8px 32px var(--alpha-black-40) !important;
 }
 
 .dark .ant-modal-header {
   background: rgba(50, 50, 50, 0.6) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-bottom: 1px solid var(--alpha-white-10) !important;
 }
 
 .dark .ant-modal-title {
-  color: #f5f5f7 !important;
+  color: var(--body-bg) !important;
 }
 
 .dark .ant-modal-footer {
   background: rgba(50, 50, 50, 0.3) !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-top: 1px solid var(--alpha-white-10) !important;
 }
 
 .dark .ant-modal-close {
-  color: #f5f5f7 !important;
+  color: var(--body-bg) !important;
 }
 
 .dark .detail-item {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 
 .dark .detail-label {
@@ -695,7 +695,7 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 .dark .detail-value {
-  color: #f5f5f7;
+  color: var(--body-bg);
 }
 
 .dark .detail-value.highlight {
@@ -703,15 +703,15 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 .dark .detail-value.cmd-text {
-  background: rgba(0, 0, 0, 0.2);
-  color: #f5f5f7;
+  background: var(--alpha-black-20);
+  color: var(--body-bg);
 }
 
 /* Input Dark Mode */
 .dark .ant-input {
-  background: rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  color: #f5f5f7 !important;
+  background: var(--alpha-black-20) !important;
+  border: 1px solid var(--alpha-white-10) !important;
+  color: var(--body-bg) !important;
 }
 
 .dark .ant-input:focus {
@@ -720,6 +720,6 @@ const handleTableChange = (pagination: any, filters: any, sorter: any) => {
 }
 
 .dark .ant-checkbox-wrapper {
-  color: #f5f5f7 !important;
+  color: var(--body-bg) !important;
 }
 </style>

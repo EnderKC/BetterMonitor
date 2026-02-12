@@ -1600,12 +1600,12 @@ onUnmounted(() => {
 
 .chart-card {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   transition: all 0.3s ease;
 }
 
@@ -1624,8 +1624,8 @@ onUnmounted(() => {
 
 .chart-header h3 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   color: #1d1d1f;
   letter-spacing: -0.01em;
 }
@@ -1640,9 +1640,9 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   min-height: 400px;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
+  background: var(--alpha-white-50);
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--radius-lg);
   margin-top: 24px;
 }
 
@@ -1658,17 +1658,17 @@ onUnmounted(() => {
 /* Dark Mode Adaptation - Global Styles */
 .dark .chart-card {
   background: rgba(30, 30, 30, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--alpha-white-10);
+  box-shadow: 0 8px 32px var(--alpha-black-20);
 }
 
 .dark .chart-card:hover {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 40px var(--alpha-black-30);
   background: rgba(40, 40, 40, 0.7);
 }
 
 .dark .chart-header h3 {
-  color: #f5f5f7;
+  color: var(--body-bg);
 }
 
 .dark .no-data-container {

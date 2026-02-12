@@ -30,11 +30,11 @@ const goHome = () => {
 h1 {
   font-size: 120px;
   margin: 0;
-  color: #1890ff;
+  color: var(--primary-color);
 }
 
 h2 {
-  font-size: 24px;
+  font-size: var(--font-size-3xl);
   margin: 8px 0 16px;
 }
 

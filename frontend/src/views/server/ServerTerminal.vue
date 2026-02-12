@@ -1099,8 +1099,8 @@ onUnmounted(() => {
 
 .terminal-header {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  border-bottom: 1px solid var(--alpha-black-05);
 }
 
 .main-content {
@@ -1116,13 +1116,13 @@ onUnmounted(() => {
 .file-manager-sidebar,
 .system-status-sidebar {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
 }
 
 .workspace-container {
@@ -1135,12 +1135,12 @@ onUnmounted(() => {
 
 .editor-container {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--alpha-black-05);
   position: relative;
 }
 
@@ -1149,8 +1149,8 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0 8px;
-  background: rgba(0, 0, 0, 0.03);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-03);
+  border-bottom: 1px solid var(--alpha-black-05);
   height: 40px;
 }
 
@@ -1166,7 +1166,7 @@ onUnmounted(() => {
   padding: 0 12px;
   height: 40px;
   cursor: pointer;
-  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  border-right: 1px solid var(--alpha-black-05);
   background: transparent;
   transition: all 0.2s;
   min-width: 120px;
@@ -1174,12 +1174,12 @@ onUnmounted(() => {
 }
 
 .editor-tab:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 
 .editor-tab-active {
   background: white;
-  border-top: 2px solid #1890ff;
+  border-top: 2px solid var(--primary-color);
 }
 
 .tab-content {
@@ -1191,7 +1191,7 @@ onUnmounted(() => {
 }
 
 .tab-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1200,14 +1200,14 @@ onUnmounted(() => {
 .tab-language {
   font-size: 10px;
   color: #999;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   padding: 1px 4px;
   border-radius: 4px;
 }
 
 .tab-dirty-indicator {
-  font-size: 12px;
-  color: #faad14;
+  font-size: var(--font-size-xs);
+  color: var(--warning-color);
 }
 
 .editor-content {
@@ -1229,7 +1229,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 
 .empty-content {
@@ -1251,13 +1251,13 @@ onUnmounted(() => {
 }
 
 .editor-resize-handle:hover {
-  background: rgba(24, 144, 255, 0.1);
+  background: var(--info-bg);
 }
 
 .resize-line {
   width: 40px;
   height: 3px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--alpha-black-10);
   border-radius: 2px;
 }
 
@@ -1266,11 +1266,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   padding: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   overflow: hidden;
 }
 
@@ -1285,10 +1285,10 @@ onUnmounted(() => {
 .terminal-wrapper {
   flex: 1;
   background: #1e1e1e;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   padding: 12px;
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 20px var(--alpha-black-50);
   position: relative;
 }
 
@@ -1297,10 +1297,10 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-50);
   padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--alpha-black-05);
 }
 
 .session-select-compact,
@@ -1312,8 +1312,8 @@ onUnmounted(() => {
 
 .system-status-header {
   padding: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid var(--alpha-black-05);
+  background: var(--alpha-white-50);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1323,7 +1323,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .system-status-content {
@@ -1336,10 +1336,10 @@ onUnmounted(() => {
 }
 
 .status-item {
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
+  background: var(--alpha-white-50);
+  border-radius: var(--radius-md);
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--alpha-white-50);
 }
 
 .status-header {
@@ -1349,14 +1349,14 @@ onUnmounted(() => {
 }
 
 .status-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 .status-value {
   font-family: monospace;
-  font-weight: 700;
-  color: #1890ff;
+  font-weight: var(--font-weight-bold);
+  color: var(--primary-color);
 }
 
 .status-detail {
@@ -1387,8 +1387,8 @@ onUnmounted(() => {
 
 .load-value,
 .network-value {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 </style>
 
@@ -1400,19 +1400,19 @@ onUnmounted(() => {
 .dark .editor-container,
 .dark .terminal-section {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--alpha-white-10);
 }
 
 .dark .editor-header,
 .dark .session-controller,
 .dark .system-status-header,
 .dark .status-item {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .editor-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 
 .dark .editor-tab-active {
@@ -1421,12 +1421,12 @@ onUnmounted(() => {
 }
 
 .dark .tab-language {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #bbb;
 }
 
 .dark .editor-empty {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--alpha-black-10);
 }
 
 .dark .status-title {

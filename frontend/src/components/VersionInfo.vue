@@ -450,18 +450,18 @@ onMounted(() => {
 }
 
 code {
-  background: #f5f5f5;
+  background: var(--alpha-black-02);
   padding: 2px 4px;
   border-radius: 3px;
   font-family: 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .release-notes .notes {
   background: #f7f7f8;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 12px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: pre-wrap;
 }
