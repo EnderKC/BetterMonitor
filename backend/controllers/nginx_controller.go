@@ -83,7 +83,7 @@ func NginxConfigsList(c *gin.Context) {
 	log.Printf("[DEBUG] utils.GetAgentConnectionFunc的值: %v", utils.GetAgentConnectionFunc != nil)
 
 	// 使用带有超时的上下文
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), TimeoutSimpleQuery)
 	defer cancel()
 
 	// 创建一个通道来接收响应
@@ -167,6 +167,8 @@ func NginxConfigContent(c *gin.Context) {
 }
 
 // SaveNginxConfig 保存Nginx配置文件内容
+// NOTE: 当前实现需要两次 Agent 往返（先获取配置列表定位文件路径，再保存内容）。
+// 如需优化为单次往返，需要 Agent 侧支持通过 config_id 直接保存，暂不做此改动。
 func SaveNginxConfig(c *gin.Context) {
 	serverId := c.Param("id")
 	configId := c.Param("config_id")
@@ -254,10 +256,10 @@ func SaveNginxConfig(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -310,10 +312,10 @@ func CreateNginxConfig(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -354,10 +356,10 @@ func DeleteNginxConfig(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -524,10 +526,10 @@ func RestartNginx(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -566,10 +568,10 @@ func StopNginx(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -608,10 +610,10 @@ func StartNginx(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -650,10 +652,10 @@ func TestNginxConfig(c *gin.Context) {
 		return
 	}
 
-	// 解析响应
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+	// 【安全修复】解析并验证响应
+	result, err := parseAndValidateNginxResponse(resp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -744,6 +746,67 @@ func GetNginxPorts(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// checkNginxResponseError 检查解析为 interface{} 的Agent响应是否包含错误指示
+// 某些端点将响应解析为 interface{} 因为JSON可能是对象或数组
+// 如果响应是包含错误指示的map，返回错误；否则返回nil
+func checkNginxResponseError(result interface{}) error {
+	respMap, ok := result.(map[string]interface{})
+	if !ok || respMap == nil {
+		// 不是map类型（可能是数组），不检查错误
+		return nil
+	}
+
+	hasErrorIndicator := false
+
+	// 检查 type 字段
+	if v, ok := respMap["type"].(string); ok && (v == "error" || v == "nginx_error") {
+		hasErrorIndicator = true
+	}
+
+	// 检查 status 字段
+	if v, ok := respMap["status"].(string); ok && (v == "error" || v == "failed" || v == "failure") {
+		hasErrorIndicator = true
+	}
+
+	// 检查 success 字段
+	if v, ok := respMap["success"].(bool); ok && !v {
+		hasErrorIndicator = true
+	}
+
+	// 检查 error 字段
+	errText := ""
+	if v, exists := respMap["error"]; exists && v != nil {
+		switch t := v.(type) {
+		case string:
+			errText = t
+		default:
+			errText = fmt.Sprintf("%v", t)
+		}
+		if errText != "" {
+			hasErrorIndicator = true
+		}
+	}
+
+	if !hasErrorIndicator {
+		return nil
+	}
+
+	// 提取错误消息
+	msg := errText
+	if msg == "" {
+		if v, ok := respMap["message"].(string); ok && v != "" {
+			msg = v
+		} else if v, ok := respMap["msg"].(string); ok && v != "" {
+			msg = v
+		}
+	}
+	if msg == "" {
+		msg = "未知错误"
+	}
+
+	return fmt.Errorf("Nginx Agent响应错误: %s", msg)
+}
+
 // ListWebsites 获取网站列表
 func ListWebsites(c *gin.Context) {
 	serverID := c.Param("id")
@@ -781,6 +844,12 @@ func ListWebsites(c *gin.Context) {
 	var result interface{}
 	if err := json.Unmarshal([]byte(resp), &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -836,6 +905,12 @@ func GetWebsiteDetail(c *gin.Context) {
 		return
 	}
 
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -885,6 +960,12 @@ func GetWebsiteNginxConfig(c *gin.Context) {
 	var result interface{}
 	if err := json.Unmarshal([]byte(resp), &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -955,6 +1036,12 @@ func SaveWebsiteNginxConfig(c *gin.Context) {
 		return
 	}
 
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -998,6 +1085,12 @@ func OpenRestyStatus(c *gin.Context) {
 		return
 	}
 
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -1038,6 +1131,12 @@ func InstallOpenResty(c *gin.Context) {
 	var result interface{}
 	if err := json.Unmarshal([]byte(resp), &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -1088,6 +1187,12 @@ func GetOpenRestyInstallLogs(c *gin.Context) {
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(resp), &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := validateNginxResponse(result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -1179,6 +1284,12 @@ func ApplyWebsiteConfig(c *gin.Context) {
 	var respData interface{}
 	if err := json.Unmarshal([]byte(resp), &respData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
+		return
+	}
+
+	// 【安全修复】验证Agent响应是否包含错误
+	if err := checkNginxResponseError(respData); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -1289,6 +1400,12 @@ func IssueWebsiteCertificate(c *gin.Context) {
 		return
 	}
 
+	// 【安全修复】验证Agent响应是否包含错误，防止在错误响应时创建无效证书记录
+	if err := validateNginxResponse(respData); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
 	// 成功后记录证书信息
 	domainList := req.Domains
 	if len(domainList) == 0 && req.Domain != "" {
@@ -1347,4 +1464,83 @@ func extractUint(value interface{}) uint {
 		}
 	}
 	return 0
+}
+
+// 【安全修复】validateNginxResponse 验证Nginx Agent响应是否成功
+// 检查多种可能的错误指示字段，确保Agent返回成功状态
+func validateNginxResponse(resp map[string]interface{}) error {
+	// 检查 status 字段
+	if status, ok := resp["status"].(string); ok {
+		if status == "error" || status == "failed" || status == "failure" {
+			errMsg := extractNginxErrorMessage(resp)
+			return fmt.Errorf("Nginx操作失败: %s", errMsg)
+		}
+	}
+
+	// 检查 success 字段（如果存在）
+	if success, ok := resp["success"].(bool); ok && !success {
+		errMsg := extractNginxErrorMessage(resp)
+		return fmt.Errorf("Nginx操作失败: %s", errMsg)
+	}
+
+	// 检查 error 字段是否存在且非空
+	if errField, ok := resp["error"].(string); ok && errField != "" {
+		return fmt.Errorf("Nginx错误: %s", errField)
+	}
+
+	// 检查 type 字段是否为 error
+	if respType, ok := resp["type"].(string); ok {
+		if respType == "error" || respType == "nginx_error" {
+			errMsg := extractNginxErrorMessage(resp)
+			return fmt.Errorf("Nginx Agent错误: %s", errMsg)
+		}
+	}
+
+	return nil
+}
+
+// extractNginxErrorMessage 从响应中提取错误信息
+func extractNginxErrorMessage(resp map[string]interface{}) string {
+	// 优先从 error 字段提取
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		return errMsg
+	}
+	// 从 message 字段提取
+	if msg, ok := resp["message"].(string); ok && msg != "" {
+		return msg
+	}
+	// 从 msg 字段提取
+	if msg, ok := resp["msg"].(string); ok && msg != "" {
+		return msg
+	}
+	// 从 data.error 字段提取
+	if data, ok := resp["data"].(map[string]interface{}); ok {
+		if errMsg, ok := data["error"].(string); ok && errMsg != "" {
+			return errMsg
+		}
+		if msg, ok := data["message"].(string); ok && msg != "" {
+			return msg
+		}
+	}
+	return "未知错误"
+}
+
+// parseAndValidateNginxResponse 解析并验证Nginx响应
+// 返回解析后的数据和可能的错误
+func parseAndValidateNginxResponse(respStr string) (map[string]interface{}, error) {
+	if respStr == "" {
+		return nil, fmt.Errorf("Agent返回空响应")
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(respStr), &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	// 验证响应是否包含错误
+	if err := validateNginxResponse(result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

@@ -977,6 +977,10 @@ const goBack = () => {
     router.push(`/admin/servers/${serverId.value}/nginx`);
     return;
   }
+  if (from === 'docker') {
+    router.push(`/admin/servers/${serverId.value}/docker`);
+    return;
+  }
   router.push(`/admin/servers/${serverId.value}`);
 };
 

@@ -1100,6 +1100,15 @@ const connectWebSocket = () => {
           console.error('服务器错误:', data.message);
           message.error(`服务器错误: ${data.message}`);
         }
+        // 处理Agent离线通知
+        else if (data.type === 'agent_offline') {
+          console.log('收到Agent离线通知:', data);
+          if (serverInfo.value) {
+            serverInfo.value.status = 'offline';
+            serverStore.updateServerStatus(serverId.value, 'offline');
+          }
+          message.warning(data.message || 'Agent连接已断开');
+        }
       } catch (error) {
         console.error('解析WebSocket消息失败:', error, '原始消息:', event.data);
       }

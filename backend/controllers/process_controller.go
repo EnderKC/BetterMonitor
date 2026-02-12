@@ -81,7 +81,7 @@ func GetProcesses(c *gin.Context) {
 	case response := <-responseChan:
 		// 返回响应
 		c.JSON(http.StatusOK, response)
-	case <-time.After(10 * time.Second): // 10秒超时
+	case <-time.After(TimeoutProcessQuery): // 进程查询超时
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "获取进程列表超时"})
 	}
 }
@@ -159,7 +159,7 @@ func KillProcess(c *gin.Context) {
 	case response := <-responseChan:
 		// 返回响应
 		c.JSON(http.StatusOK, response)
-	case <-time.After(10 * time.Second): // 10秒超时
+	case <-time.After(TimeoutProcessQuery): // 进程终止超时
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "终止进程超时"})
 	}
 }

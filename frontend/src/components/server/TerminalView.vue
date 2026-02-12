@@ -130,6 +130,11 @@ const connect = () => {
            }
         } else if (msg.type === 'error') {
            emit('error', msg.message);
+        } else if (msg.type === 'terminal_error') {
+           // Agent断连等导致终端不可用
+           emit('error', msg.message || 'Agent连接已断开，终端会话不可用');
+           connected.value = false;
+           emit('disconnected');
         }
       } catch (e) {
         // Handle raw text if not JSON

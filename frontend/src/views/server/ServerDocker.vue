@@ -631,6 +631,26 @@ const refreshData = () => {
 };
 
 const formatTime = (timestamp: string) => new Date(timestamp).toLocaleString();
+
+// 截断路径显示（保留首尾，中间用...）
+const truncatePath = (path: string, maxLength: number = 30): string => {
+  if (!path || path.length <= maxLength) return path;
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length <= 2) return path;
+  // 保留第一个和最后一个目录
+  return `/${parts[0]}/.../${parts[parts.length - 1]}`;
+};
+
+// 跳转到文件管理页面
+const navigateToFileManager = (path: string) => {
+  if (!path) return;
+  router.push({
+    name: 'ServerFile',
+    params: { id: serverId.value },
+    query: { path, from: 'docker' }
+  });
+};
+
 const containerStatusText = (status: string) => {
   const s = parseContainerStatus(status);
   const map: Record<string, string> = {
@@ -873,6 +893,17 @@ onMounted(() => {
                     </template>
                   </a-table-column>
                   <a-table-column title="容器数" dataIndex="container_count" />
+                  <a-table-column title="工作目录" dataIndex="working_dir">
+                    <template #default="{ text }">
+                      <a-tooltip v-if="text" :title="`点击跳转到文件管理: ${text}`">
+                        <a @click="navigateToFileManager(text)" class="working-dir-link">
+                          <FolderOutlined style="margin-right: 4px" />
+                          {{ truncatePath(text) }}
+                        </a>
+                      </a-tooltip>
+                      <span v-else class="text-muted">-</span>
+                    </template>
+                  </a-table-column>
                   <a-table-column title="更新时间" dataIndex="updated_at">
                     <template #default="{ text }">{{ formatTime(text) }}</template>
                   </a-table-column>
@@ -1101,6 +1132,26 @@ onMounted(() => {
   color: #999;
 }
 
+.text-muted {
+  color: #999;
+  font-style: italic;
+}
+
+.working-dir-link {
+  color: #1890ff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  transition: color 0.2s;
+}
+
+.working-dir-link:hover {
+  color: #40a9ff;
+  text-decoration: underline;
+}
+
 .form-row {
   display: flex;
   align-items: center;
@@ -1164,6 +1215,18 @@ onMounted(() => {
 
 .dark .name-text {
   color: #177ddc;
+}
+
+.dark .working-dir-link {
+  color: #177ddc;
+}
+
+.dark .working-dir-link:hover {
+  color: #3c9ae8;
+}
+
+.dark .text-muted {
+  color: #666;
 }
 
 .dark .code-textarea {

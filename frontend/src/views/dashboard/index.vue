@@ -404,6 +404,21 @@ const connectWebSocket = (serverId: number) => {
             updateServerMonitorData(serverId, data);
           }
         }
+
+        // Agent离线通知
+        if (data.type === 'agent_offline') {
+          updateServerStatus(serverId, false);
+        }
+
+        // Agent升级状态推送
+        if (data.type === 'agent_upgrade_status') {
+          const status = data.status;
+          if (status === 'completed' || status === 'success') {
+            message.success(`服务器 ${serverId} Agent升级完成`);
+          } else if (status === 'failed' || status === 'error') {
+            message.error(`服务器 ${serverId} Agent升级失败: ${data.message || '未知错误'}`);
+          }
+        }
       } catch (error) {
         console.error(`解析服务器 ${serverId} WebSocket消息失败:`, error);
       }

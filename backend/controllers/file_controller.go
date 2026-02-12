@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +21,7 @@ import (
 var (
 	fileRequestMutex   sync.Mutex
 	fileRequestMap     = make(map[string]chan map[string]interface{})
-	fileRequestTimeout = 60 * time.Second
+	fileRequestTimeout = TimeoutFileOperation
 )
 
 // 外部引用WebSocket控制器的变量已在websocket_controller.go中定义
@@ -624,7 +625,10 @@ func CreateContainerDirectory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "目录创建成功"})
 }
 
-// UploadContainerFile 上传容器文件（不限制大小）
+// 容器文件上传大小限制（100MB，容器场景可能需要上传较大文件）
+const maxContainerUploadSize int64 = 100 * 1024 * 1024
+
+// UploadContainerFile 上传容器文件
 func UploadContainerFile(c *gin.Context) {
 	serverID := c.Param("id")
 	containerID := c.Param("container_id")
@@ -640,6 +644,9 @@ func UploadContainerFile(c *gin.Context) {
 		return
 	}
 
+	// 【安全修复】限制请求体大小，防止DoS攻击
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxContainerUploadSize)
+
 	path := c.PostForm("path")
 	if !isValidFilePath(path) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
@@ -648,14 +655,38 @@ func UploadContainerFile(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		// 【安全修复】使用 errors.As 进行类型匹配，替代脆弱的字符串比较
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("文件太大，最大允许%dMB", maxContainerUploadSize/1024/1024)})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "获取上传文件失败"})
 		return
 	}
 	defer file.Close()
 
-	fileContent, err := io.ReadAll(file)
+	// 【安全修复】检查文件大小
+	if header.Size <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文件内容为空"})
+		return
+	}
+	if header.Size > maxContainerUploadSize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("文件太大，最大允许%dMB", maxContainerUploadSize/1024/1024)})
+		return
+	}
+
+	// 使用LimitReader作为额外保护
+	limitedReader := io.LimitReader(file, maxContainerUploadSize+1)
+	fileContent, err := io.ReadAll(limitedReader)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取上传文件失败"})
+		return
+	}
+
+	// 检查实际读取的大小
+	if int64(len(fileContent)) > maxContainerUploadSize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("文件太大，最大允许%dMB", maxContainerUploadSize/1024/1024)})
 		return
 	}
 
@@ -820,6 +851,10 @@ func requestFileListViaWebSocket(serverID uint, path string) ([]FileInfo, error)
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_list",
@@ -834,7 +869,7 @@ func requestFileListViaWebSocket(serverID uint, path string) ([]FileInfo, error)
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -881,7 +916,7 @@ func requestFileListViaWebSocket(serverID uint, path string) ([]FileInfo, error)
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -908,6 +943,10 @@ func requestFileTreeViaWebSocket(serverID uint, depth string) ([]*FileInfo, erro
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -924,7 +963,7 @@ func requestFileTreeViaWebSocket(serverID uint, depth string) ([]*FileInfo, erro
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -961,7 +1000,7 @@ func requestFileTreeViaWebSocket(serverID uint, depth string) ([]*FileInfo, erro
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -988,6 +1027,10 @@ func requestFileContentViaWebSocket(serverID uint, path string) (string, error) 
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1003,7 +1046,7 @@ func requestFileContentViaWebSocket(serverID uint, path string) (string, error) 
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return "", fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1031,7 +1074,7 @@ func requestFileContentViaWebSocket(serverID uint, path string) (string, error) 
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return "", fmt.Errorf("请求超时")
 	}
 }
@@ -1133,6 +1176,10 @@ func saveFileContentViaWebSocket(serverID uint, path string, content string) err
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1149,7 +1196,7 @@ func saveFileContentViaWebSocket(serverID uint, path string, content string) err
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1167,7 +1214,7 @@ func saveFileContentViaWebSocket(serverID uint, path string, content string) err
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1194,6 +1241,10 @@ func createFileViaWebSocket(serverID uint, path string, content string) error {
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1210,7 +1261,7 @@ func createFileViaWebSocket(serverID uint, path string, content string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1228,7 +1279,7 @@ func createFileViaWebSocket(serverID uint, path string, content string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1255,6 +1306,10 @@ func createDirectoryViaWebSocket(serverID uint, path string) error {
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1270,7 +1325,7 @@ func createDirectoryViaWebSocket(serverID uint, path string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1288,7 +1343,7 @@ func createDirectoryViaWebSocket(serverID uint, path string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1314,6 +1369,10 @@ func uploadFileViaWebSocket(serverID uint, path string, content []byte) error {
 	fileRequestMutex.Lock()
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
+
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
 
 	// Base64编码文件内容
 	base64Content := base64.StdEncoding.EncodeToString(content)
@@ -1342,7 +1401,7 @@ func uploadFileViaWebSocket(serverID uint, path string, content []byte) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1356,11 +1415,11 @@ func uploadFileViaWebSocket(serverID uint, path string, content []byte) error {
 
 		return nil
 
-	case <-time.After(60 * time.Second): // 上传可能需要更长时间
+	case <-time.After(fileRequestTimeout): // 上传可能需要更长时间
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1387,6 +1446,10 @@ func downloadFileViaWebSocket(serverID uint, path string) ([]byte, error) {
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息 - 这里使用file_content消息类型的"download"操作
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1402,7 +1465,7 @@ func downloadFileViaWebSocket(serverID uint, path string) ([]byte, error) {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1432,11 +1495,11 @@ func downloadFileViaWebSocket(serverID uint, path string) ([]byte, error) {
 
 		return fileData, nil
 
-	case <-time.After(60 * time.Second): // 下载可能需要更长时间
+	case <-time.After(fileRequestTimeout): // 下载可能需要更长时间
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -1463,6 +1526,10 @@ func deleteFilesViaWebSocket(serverID uint, paths []string) error {
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 将路径列表转为JSON字符串
 	pathsJSON, err := json.Marshal(paths)
 	if err != nil {
@@ -1485,7 +1552,7 @@ func deleteFilesViaWebSocket(serverID uint, paths []string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1503,7 +1570,7 @@ func deleteFilesViaWebSocket(serverID uint, paths []string) error {
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1530,6 +1597,10 @@ func requestDirectoryChildrenViaWebSocket(serverID uint, path string) ([]*FileIn
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造请求消息 - 使用深度1来只获取直接子目录
 	request := map[string]interface{}{
 		"type":       "file_content",
@@ -1546,7 +1617,7 @@ func requestDirectoryChildrenViaWebSocket(serverID uint, path string) ([]*FileIn
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1587,7 +1658,7 @@ func requestDirectoryChildrenViaWebSocket(serverID uint, path string) ([]*FileIn
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -1610,6 +1681,10 @@ func requestContainerFileListViaWebSocket(serverID uint, containerID string, pat
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	request := map[string]interface{}{
 		"type":       "docker_file",
 		"request_id": requestID,
@@ -1624,7 +1699,7 @@ func requestContainerFileListViaWebSocket(serverID uint, containerID string, pat
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1658,7 +1733,7 @@ func requestContainerFileListViaWebSocket(serverID uint, containerID string, pat
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -1679,6 +1754,10 @@ func requestContainerDirectoryChildrenViaWebSocket(serverID uint, containerID, p
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	request := map[string]interface{}{
 		"type":       "docker_file",
 		"request_id": requestID,
@@ -1694,7 +1773,7 @@ func requestContainerDirectoryChildrenViaWebSocket(serverID uint, containerID, p
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1726,7 +1805,7 @@ func requestContainerDirectoryChildrenViaWebSocket(serverID uint, containerID, p
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -1747,6 +1826,10 @@ func requestContainerFileContentViaWebSocket(serverID uint, containerID, path st
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	request := map[string]interface{}{
 		"type":       "docker_file",
 		"request_id": requestID,
@@ -1761,7 +1844,7 @@ func requestContainerFileContentViaWebSocket(serverID uint, containerID, path st
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return "", fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1783,7 +1866,7 @@ func requestContainerFileContentViaWebSocket(serverID uint, containerID, path st
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return "", fmt.Errorf("请求超时")
 	}
 }
@@ -1816,6 +1899,10 @@ func deleteContainerFilesViaWebSocket(serverID uint, containerID string, paths [
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	pathsJSON, err := json.Marshal(paths)
 	if err != nil {
 		return fmt.Errorf("序列化路径列表失败: %v", err)
@@ -1837,7 +1924,7 @@ func deleteContainerFilesViaWebSocket(serverID uint, containerID string, paths [
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1851,7 +1938,7 @@ func deleteContainerFilesViaWebSocket(serverID uint, containerID string, paths [
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1871,6 +1958,10 @@ func uploadContainerFileViaWebSocket(serverID uint, containerID, path string, co
 	fileRequestMutex.Lock()
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
+
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
 
 	base64Content := base64.StdEncoding.EncodeToString(content)
 	filename := filepath.Base(path)
@@ -1895,7 +1986,7 @@ func uploadContainerFileViaWebSocket(serverID uint, containerID, path string, co
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1905,11 +1996,11 @@ func uploadContainerFileViaWebSocket(serverID uint, containerID, path string, co
 			return fmt.Errorf("Agent返回错误: %v", resp["error"])
 		}
 		return nil
-	case <-time.After(60 * time.Second):
+	case <-time.After(fileRequestTimeout):
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
@@ -1930,6 +2021,10 @@ func downloadContainerFileViaWebSocket(serverID uint, containerID, path string) 
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	request := map[string]interface{}{
 		"type":       "docker_file",
 		"request_id": requestID,
@@ -1944,7 +2039,7 @@ func downloadContainerFileViaWebSocket(serverID uint, containerID, path string) 
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -1966,11 +2061,11 @@ func downloadContainerFileViaWebSocket(serverID uint, containerID, path string) 
 			return nil, fmt.Errorf("解码文件内容失败: %v", err)
 		}
 		return fileData, nil
-	case <-time.After(60 * time.Second):
+	case <-time.After(fileRequestTimeout):
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return nil, fmt.Errorf("请求超时")
 	}
 }
@@ -1991,6 +2086,10 @@ func genericContainerFileContentAction(serverID uint, containerID, path, action,
 	fileRequestMap[requestID] = respChan
 	fileRequestMutex.Unlock()
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	request := map[string]interface{}{
 		"type":       "docker_file",
 		"request_id": requestID,
@@ -2006,7 +2105,7 @@ func genericContainerFileContentAction(serverID uint, containerID, path, action,
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -2020,41 +2119,104 @@ func genericContainerFileContentAction(serverID uint, containerID, path, action,
 		fileRequestMutex.Lock()
 		delete(fileRequestMap, requestID)
 		fileRequestMutex.Unlock()
-		close(respChan)
+
 		return fmt.Errorf("请求超时")
 	}
 }
 
-// 验证文件路径是否合法
+// isValidFilePath 验证文件路径是否合法
+// 安全检查：在Clean之前先检查原始路径中的traversal段，防止目录穿越攻击
 func isValidFilePath(path string) bool {
+	if path == "" {
+		return false
+	}
+
+	// 【关键】在Clean之前检查原始路径中的traversal段
+	// 因为Clean会将 "../" 规范化，导致后续检查失效
+	// 例如："/www/../etc/passwd" 会被Clean为 "/etc/passwd"
+	normalizedSlash := filepath.ToSlash(path)
+	for _, seg := range strings.Split(normalizedSlash, "/") {
+		if seg == ".." {
+			return false
+		}
+	}
+
 	// 清理路径
-	path = filepath.Clean(path)
+	cleanPath := filepath.Clean(path)
 
-	// 检查路径是否包含..
-	if strings.Contains(path, "..") {
+	// 再次检查Clean后的路径（双重保险）
+	if cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
 		return false
 	}
 
-	// 检查是否是绝对路径
-	if filepath.IsAbs(path) && !strings.HasPrefix(path, "/") {
-		return false
-	}
-
-	// 禁止访问的目录列表
-	bannedDirs := []string{
+	// 禁止访问的敏感路径列表
+	bannedPaths := []string{
 		"/etc/shadow",
 		"/etc/passwd",
 		"/etc/sudoers",
+		"/etc/gshadow",
+		"/etc/security",
 		"/root/.ssh",
 		"/home/.ssh",
+		"/proc",
+		"/sys",
 	}
 
 	// 检查是否在禁止访问的目录中
-	for _, dir := range bannedDirs {
-		if strings.HasPrefix(path, dir) {
+	for _, banned := range bannedPaths {
+		if cleanPath == banned || strings.HasPrefix(cleanPath, banned+"/") {
 			return false
 		}
 	}
 
 	return true
+}
+
+// validatePathInBaseDir 验证用户路径是否在指定的基础目录内
+// 用于需要限制访问范围的场景（如容器文件操作）
+func validatePathInBaseDir(baseDir, userPath string) (string, error) {
+	if userPath == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+
+	// 先检查原始路径中的traversal段
+	normalizedSlash := filepath.ToSlash(userPath)
+	for _, seg := range strings.Split(normalizedSlash, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("路径包含非法字符")
+		}
+	}
+
+	// 构造完整路径
+	var fullPath string
+	if filepath.IsAbs(userPath) {
+		fullPath = filepath.Clean(userPath)
+	} else {
+		fullPath = filepath.Clean(filepath.Join(baseDir, userPath))
+	}
+
+	// 获取基础目录的绝对路径
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("无效的基础目录")
+	}
+
+	// 获取目标路径的绝对路径
+	absTarget, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("无效的目标路径")
+	}
+
+	// 验证目标路径是否在基础目录内
+	rel, err := filepath.Rel(absBase, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("路径验证失败")
+	}
+
+	// 如果相对路径以..开头，说明目标路径不在基础目录内
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("路径越界")
+	}
+
+	return absTarget, nil
 }

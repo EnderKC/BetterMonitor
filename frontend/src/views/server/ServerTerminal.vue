@@ -935,6 +935,9 @@ const connectStatusWebSocket = () => {
       if (data.type === 'welcome' || data.type === 'status' || data.type === 'heartbeat' || data.type === 'monitor') {
         if (data.data) updateSystemStatusData(data.data);
         if (data.data?.status) serverInfo.value.online = data.data.status === 'online';
+      } else if (data.type === 'agent_offline') {
+        serverInfo.value.online = false;
+        message.warning(data.message || 'Agent连接已断开');
       }
     } catch (e) { }
   };
