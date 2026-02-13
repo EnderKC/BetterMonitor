@@ -46,6 +46,7 @@ const formState = reactive({
   id: null,
   name: '',
   description: '',
+  agent_type: 'full' as 'full' | 'monitor',
 });
 
 // 部署 Agent 弹窗状态
@@ -81,6 +82,15 @@ const splitIpList = (value: unknown): string[] => {
 const columns = [
   { title: '', key: 'dragHandle', width: 50 }, // 拖拽手柄列
   { title: '名称', dataIndex: 'name', key: 'name' },
+  {
+    title: '类型',
+    key: 'agent_type',
+    width: 90,
+    customRender: ({ record }: { record: any }) => {
+      const isMonitor = record.agent_type === 'monitor';
+      return h(Tag, { color: isMonitor ? 'orange' : 'green' }, () => isMonitor ? '监控' : '全功能');
+    }
+  },
   {
     title: '出口IP',
     key: 'ip',
@@ -165,6 +175,7 @@ const resetForm = () => {
   formState.id = null;
   formState.name = '';
   formState.description = '';
+  formState.agent_type = 'full';
 };
 
 // 关闭表单
@@ -184,7 +195,8 @@ const handleSubmit = () => {
         // 创建服务器
         response = await request.post('/servers', {
           name: formState.name,
-          notes: formState.description
+          notes: formState.description,
+          agent_type: formState.agent_type,
         });
         message.success('服务器添加成功');
 
@@ -473,6 +485,16 @@ onDeactivated(() => {
 
         <a-form-item name="description" label="备注">
           <a-textarea v-model:value="formState.description" placeholder="可选的服务器描述" :rows="4" :maxLength="500" />
+        </a-form-item>
+
+        <a-form-item v-if="formMode === 'create'" name="agent_type" label="Agent 类型">
+          <a-radio-group v-model:value="formState.agent_type">
+            <a-radio value="full">全功能版</a-radio>
+            <a-radio value="monitor">最小监控版</a-radio>
+          </a-radio-group>
+          <div style="margin-top: 4px; color: var(--text-tertiary); font-size: 12px;">
+            {{ formState.agent_type === 'monitor' ? '仅包含系统监控功能，不支持终端、文件管理、Docker 等操作' : '包含所有功能：监控、终端、文件管理、Docker、Nginx 等' }}
+          </div>
         </a-form-item>
       </a-form>
     </a-modal>

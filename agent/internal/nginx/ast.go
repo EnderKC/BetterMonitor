@@ -1,3 +1,5 @@
+//go:build !monitor_only
+
 package nginx
 
 import (

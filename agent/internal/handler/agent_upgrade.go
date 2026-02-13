@@ -23,6 +23,9 @@ type agentUpgradePayload struct {
 	// 可选：若面板端愿意直接提供下载信息，Agent 就不需要自行拼接/推断 URL
 	DownloadURL string `json:"download_url,omitempty"`
 	SHA256      string `json:"sha256,omitempty"`
+
+	// 可选：由面板端指定目标 Agent 类型，用于跨变体切换（full ↔ monitor）
+	TargetAgentType string `json:"target_agent_type,omitempty"`
 }
 
 // HandleAgentUpgradeMessage 处理面板端下发的 agent_upgrade 消息（type/payload 格式）
@@ -73,15 +76,16 @@ func HandleAgentUpgradeMessage(c *websocket.Conn, serverID uint, secretKey strin
 	defer cancel()
 
 	req := upgrader.UpgradeRequest{
-		RequestID:     requestID,
-		TargetVersion: strings.TrimSpace(p.TargetVersion),
-		Channel:       strings.TrimSpace(p.Channel),
-		DownloadURL:   strings.TrimSpace(p.DownloadURL),
-		SHA256:        strings.TrimSpace(p.SHA256),
-		ServerID:      p.ServerID,
-		SecretKey:     secretKey,
-		Args:          osArgs(),
-		Env:           osEnviron(),
+		RequestID:       requestID,
+		TargetVersion:   strings.TrimSpace(p.TargetVersion),
+		Channel:         strings.TrimSpace(p.Channel),
+		DownloadURL:     strings.TrimSpace(p.DownloadURL),
+		SHA256:          strings.TrimSpace(p.SHA256),
+		TargetAgentType: strings.TrimSpace(p.TargetAgentType),
+		ServerID:        p.ServerID,
+		SecretKey:       secretKey,
+		Args:            osArgs(),
+		Env:             osEnviron(),
 	}
 
 	sendAgentUpgradeStatus(c, requestID, "starting", "开始执行升级流程", map[string]interface{}{

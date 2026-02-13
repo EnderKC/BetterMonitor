@@ -25,15 +25,18 @@ const copiedCmd = ref(false);
 
 const serverId = computed(() => props.server?.id || props.server?.ID || '');
 const secretKey = computed(() => props.server?.secret_key || props.server?.SecretKey || '');
+const agentType = computed(() => props.server?.agent_type || props.server?.AgentType || 'full');
 const dashboardUrl = window.location.origin;
 const releaseRepo = computed(() => props.agentReleaseRepo || 'EnderKC/BetterMonitor');
 
+const agentTypeFlag = computed(() => agentType.value === 'monitor' ? ' --agent-type monitor' : '');
+
 const installCmdLinux = computed(() =>
-    `curl -fsSL https://raw.githubusercontent.com/${releaseRepo.value}/refs/heads/main/install-agent.sh | bash -s -- --server-id ${serverId.value} --secret-key ${secretKey.value} --server ${dashboardUrl}`
+    `curl -fsSL https://raw.githubusercontent.com/${releaseRepo.value}/refs/heads/main/install-agent.sh | bash -s -- --server-id ${serverId.value} --secret-key ${secretKey.value} --server ${dashboardUrl}${agentTypeFlag.value}`
 );
 
 const installCmdWindows = computed(() =>
-    `irm https://raw.githubusercontent.com/${releaseRepo.value}/main/install-agent.ps1 | iex -ServerUrl "${dashboardUrl}" -ServerId ${serverId.value} -SecretKey "${secretKey.value}"`
+    `irm https://raw.githubusercontent.com/${releaseRepo.value}/main/install-agent.ps1 | iex -ServerUrl "${dashboardUrl}" -ServerId ${serverId.value} -SecretKey "${secretKey.value}"${agentTypeFlag.value}`
 );
 
 const handleClose = () => {
@@ -130,6 +133,10 @@ const copyToClipboard = async (text: string, type: 'id' | 'key' | 'cmd') => {
                     <div class="cmd-tip">
                         <InfoCircleOutlined />
                         <span>{{ activeTab === 'linux' ? '一键安装脚本，自动配置开机自启' : '请以管理员身份运行 PowerShell' }}</span>
+                    </div>
+                    <div v-if="agentType === 'monitor'" class="cmd-tip" style="margin-top: 4px;">
+                        <InfoCircleOutlined />
+                        <span>此服务器将安装最小监控版 Agent</span>
                     </div>
                     <button class="action-copy-btn"
                         @click="copyToClipboard(activeTab === 'linux' ? installCmdLinux : installCmdWindows, 'cmd')">

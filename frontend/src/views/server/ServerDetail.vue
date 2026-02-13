@@ -4,7 +4,7 @@ defineOptions({
 });
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { message, Tabs } from 'ant-design-vue';
+import { message, Tabs, Modal } from 'ant-design-vue';
 import request from '../../utils/request';
 // 导入ECharts组件
 import { use } from 'echarts/core';
@@ -108,6 +108,47 @@ const isServerOnline = computed(() => {
   return serverStore.isServerOnline(serverId.value);
 });
 
+// 是否为监控模式服务器（隐藏操作类 Tab）
+const isMonitorOnly = computed(() => {
+  return serverInfo.value?.agent_type === 'monitor';
+});
+
+// 切换 Agent 类型（full ↔ monitor）
+const switchingAgentType = ref(false);
+const switchAgentType = () => {
+  const currentType = serverInfo.value?.agent_type || 'full';
+  const targetType = currentType === 'monitor' ? 'full' : 'monitor';
+  const targetLabel = targetType === 'monitor' ? '最小监控版' : '全功能版';
+  const currentLabel = currentType === 'monitor' ? '最小监控版' : '全功能版';
+
+  Modal.confirm({
+    title: '切换 Agent 类型',
+    content: `确定将此服务器的 Agent 从「${currentLabel}」切换为「${targetLabel}」吗？切换后 Agent 将自动下载对应版本的二进制并重启。`,
+    okText: '确认切换',
+    cancelText: '取消',
+    onOk: async () => {
+      switchingAgentType.value = true;
+      try {
+        const res = await request.post(`/servers/${serverId.value}/switch-agent-type`, {
+          target_agent_type: targetType,
+        });
+        // 更新本地状态
+        serverInfo.value.agent_type = targetType;
+        serverStore.updateServerMonitorData(serverId.value, { agent_type: targetType });
+        if (res?.upgrade_dispatched) {
+          message.success(`Agent 类型切换指令已下发，正在切换为${targetLabel}`);
+        } else {
+          message.warning(res?.message || '类型已更新，但 Agent 离线，需手动重装');
+        }
+      } catch (error: any) {
+        message.error(error?.response?.data?.error || '切换 Agent 类型失败');
+      } finally {
+        switchingAgentType.value = false;
+      }
+    },
+  });
+};
+
 // 更新服务器信息并解析系统信息
 const updateServerInfo = (server: any) => {
   console.log('🔄 updateServerInfo被调用');
@@ -175,7 +216,8 @@ const updateServerInfo = (server: any) => {
       (systemInfo.os_version || '未知'),
     kernel_version: systemInfo.kernel_version || '未知',
     tags: server.tags || '',
-    user_id: server.user_id
+    user_id: server.user_id,
+    agent_type: server.agent_type || server.AgentType || 'full',
   };
 
   console.log('处理后的服务器信息:', serverInfo.value);
@@ -1235,20 +1277,22 @@ const updateMonitorData = (data: any) => {
             <a-space>
               <a-button type="primary" shape="round" class="ios-btn-primary"
                 @click="navigateTo('monitor')">监控</a-button>
-              <a-button shape="round" class="ios-btn" @click="navigateTo('terminal')">终端</a-button>
-              <a-button shape="round" class="ios-btn" @click="navigateTo('file')">文件</a-button>
-              <a-dropdown>
-                <template #overlay>
-                  <a-menu class="ios-menu">
-                    <a-menu-item @click="navigateTo('process')">进程管理</a-menu-item>
-                    <a-menu-item @click="navigateTo('docker')">Docker容器</a-menu-item>
-                    <a-menu-item @click="navigateTo('nginx')">网站管理</a-menu-item>
-                  </a-menu>
-                </template>
-                <a-button shape="round" class="ios-btn">更多
-                  <DownOutlined />
-                </a-button>
-              </a-dropdown>
+              <template v-if="!isMonitorOnly">
+                <a-button shape="round" class="ios-btn" @click="navigateTo('terminal')">终端</a-button>
+                <a-button shape="round" class="ios-btn" @click="navigateTo('file')">文件</a-button>
+                <a-dropdown>
+                  <template #overlay>
+                    <a-menu class="ios-menu">
+                      <a-menu-item @click="navigateTo('process')">进程管理</a-menu-item>
+                      <a-menu-item @click="navigateTo('docker')">Docker容器</a-menu-item>
+                      <a-menu-item @click="navigateTo('nginx')">网站管理</a-menu-item>
+                    </a-menu>
+                  </template>
+                  <a-button shape="round" class="ios-btn">更多
+                    <DownOutlined />
+                  </a-button>
+                </a-dropdown>
+              </template>
             </a-space>
           </div>
         </div>
@@ -1272,6 +1316,22 @@ const updateMonitorData = (data: any) => {
               <span class="status-badge" :class="isServerOnline ? 'online' : 'offline'">
                 {{ isServerOnline ? '运行中' : '已离线' }}
               </span>
+              <span class="meta-dot">•</span>
+              <span
+                v-if="isMonitorOnly"
+                class="status-badge"
+                style="background: rgba(255, 149, 0, 0.12); color: #ff9500;"
+              >监控模式</span>
+              <span
+                v-else
+                class="status-badge"
+                style="background: rgba(52, 199, 89, 0.12); color: #34c759;"
+              >全功能</span>
+              <span
+                class="switch-agent-type-btn"
+                :class="{ disabled: switchingAgentType }"
+                @click="!switchingAgentType && switchAgentType()"
+              >{{ switchingAgentType ? '切换中...' : '切换' }}</span>
             </div>
           </div>
         </div>
@@ -1496,6 +1556,28 @@ const updateMonitorData = (data: any) => {
 .status-badge.offline {
   background-color: var(--error-bg);
   color: var(--error-color);
+}
+
+.switch-agent-type-btn {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--primary-color, #007aff);
+  background: var(--alpha-black-05);
+  cursor: pointer;
+  transition: opacity 0.2s;
+  user-select: none;
+}
+
+.switch-agent-type-btn:hover {
+  opacity: 0.7;
+}
+
+.switch-agent-type-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* iOS Buttons */

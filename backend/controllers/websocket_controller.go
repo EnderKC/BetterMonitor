@@ -1264,6 +1264,13 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				}
 			}
 
+			if agentType, ok := systemInfoData["agent_type"].(string); ok {
+				agentType = strings.TrimSpace(agentType)
+				if agentType == "full" || agentType == "monitor" {
+					server.AgentType = agentType
+				}
+			}
+
 			if memoryTotal, ok := systemInfoData["memory_total"].(float64); ok && memoryTotal > 0 {
 				server.MemoryTotal = int64(memoryTotal)
 			}
@@ -1282,16 +1289,17 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			}
 
 			updates := map[string]interface{}{
-				"system_info":  server.SystemInfo,
-				"ip":           server.IP,
-				"public_ip":    server.PublicIP,
-				"os":           server.OS,
-				"arch":         server.Arch,
-				"cpu_cores":    server.CPUCores,
-				"cpu_model":    server.CPUModel,
+				"system_info":   server.SystemInfo,
+				"ip":            server.IP,
+				"public_ip":     server.PublicIP,
+				"os":            server.OS,
+				"arch":          server.Arch,
+				"cpu_cores":     server.CPUCores,
+				"cpu_model":     server.CPUModel,
 				"agent_version": server.AgentVersion,
-				"memory_total": server.MemoryTotal,
-				"disk_total":   server.DiskTotal,
+				"agent_type":    server.AgentType,
+				"memory_total":  server.MemoryTotal,
+				"disk_total":    server.DiskTotal,
 			}
 
 			if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {

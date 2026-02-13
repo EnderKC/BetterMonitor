@@ -23,9 +23,11 @@ type App struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	stopChan        chan struct{}
-	terminalHandler *TerminalHandler
 	lastMonitorData *monitor.MonitorData
 	lastSendTime    time.Time
+
+	// 操作类功能字段（通过 build tag 控制）
+	appOpsFields
 }
 
 // New 创建一个新的应用程序
@@ -276,13 +278,3 @@ func (a *App) SetRegisterToken(token string) {
 	}
 }
 
-// InitTerminalHandling 初始化终端处理
-func (a *App) InitTerminalHandling() {
-	// 创建终端处理器
-	a.terminalHandler = NewTerminalHandler(a.log)
-
-	// 调用终端处理初始化函数，传入client
-	InitTerminalHandling(a.client, a.log)
-
-	a.log.Info("终端处理初始化完成")
-}
