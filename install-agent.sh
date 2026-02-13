@@ -32,6 +32,7 @@ SECRET_KEY=""
 SERVER_URL=""
 SERVER_API_URL=""
 REGISTER_TOKEN=""
+AGENT_TYPE="full"
 HEARTBEAT_INTERVAL="10s"
 MONITOR_INTERVAL="30s"
 LOG_LEVEL="info"
@@ -50,6 +51,7 @@ usage() {
   --server <URL>          Dashboard 地址 (例如: https://dashboard.example.com:3333)
 
 可选参数:
+  --agent-type <TYPE>     Agent 类型(full|monitor) (默认: full)
   --repo <OWNER/REPO>     自定义 Agent Release 仓库 (默认: EnderKC/BetterMonitor)
   --channel <stable|prerelease|nightly>
                           指定 release 通道 (默认: stable)
@@ -267,6 +269,11 @@ parse_args() {
                 ANDROID_MODE="$2"
                 shift 2
                 ;;
+            --agent-type)
+                [[ $# -ge 2 ]] || error "--agent-type 需要一个参数"
+                AGENT_TYPE="$2"
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -287,6 +294,14 @@ parse_args() {
             ;;
         *)
             error "无效的 --android-mode: ${ANDROID_MODE}（可选: auto|termux|root）"
+            ;;
+    esac
+
+    case "${AGENT_TYPE}" in
+        full|monitor)
+            ;;
+        *)
+            error "无效的 --agent-type: ${AGENT_TYPE}（可选: full|monitor）"
             ;;
     esac
 
@@ -557,13 +572,14 @@ select_release_asset() {
     local arch="$2"
     # 注意：不要把完整 Release JSON 放进环境变量里（可能触发 "Argument list too long"）。
     # 直接从 stdin 读取更稳妥。
-    BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" \
+    BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" BM_AGENT_TYPE="${AGENT_TYPE}" \
         "$PYTHON_CMD" -c '
 import json, os, sys
 
 channel=os.environ.get("BM_RELEASE_CHANNEL","stable").lower()
 os_name=os.environ["BM_OS"]
 arch=os.environ["BM_ARCH"]
+agent_type=os.environ.get("BM_AGENT_TYPE","full").lower()
 
 try:
     data=json.load(sys.stdin)
@@ -600,14 +616,17 @@ expected_suffix=f"{os_name}-{arch}"
 preferred_patterns=[]
 extensions=["", ".exe", ".tar.gz", ".tgz", ".zip"]
 
-if version:
-    preferred_patterns.append(f"better-monitor-agent-{version}-{expected_suffix}")
-    preferred_patterns.append(f"better-monitor-agent-{version}-{os_name}-{arch}")
-    preferred_patterns.append(f"better-monitor-agent-{version}-{os_name}")
+# monitor variant uses "better-monitor-agent-monitor-..." naming
+base_name = "better-monitor-agent-monitor" if agent_type == "monitor" else "better-monitor-agent"
 
-preferred_patterns.append(f"better-monitor-agent-{expected_suffix}")
-preferred_patterns.append(f"better-monitor-agent-{os_name}-{arch}")
-preferred_patterns.append(f"better-monitor-agent-{os_name}")
+if version:
+    preferred_patterns.append(f"{base_name}-{version}-{expected_suffix}")
+    preferred_patterns.append(f"{base_name}-{version}-{os_name}-{arch}")
+    preferred_patterns.append(f"{base_name}-{version}-{os_name}")
+
+preferred_patterns.append(f"{base_name}-{expected_suffix}")
+preferred_patterns.append(f"{base_name}-{os_name}-{arch}")
+preferred_patterns.append(f"{base_name}-{os_name}")
 
 def find_by_pattern():
     for pattern in preferred_patterns:
@@ -623,9 +642,17 @@ selected=find_by_pattern()
 if selected is None:
     for asset in assets:
         name=asset.get("name") or ""
-        if "better-monitor-agent" in name and expected_suffix in name:
-            selected=asset
-            break
+        # For full variant, exclude monitor binaries to avoid false matches
+        if agent_type == "full":
+            if "better-monitor-agent-monitor" in name:
+                continue
+            if "better-monitor-agent" in name and expected_suffix in name:
+                selected=asset
+                break
+        else:
+            if base_name in name and expected_suffix in name:
+                selected=asset
+                break
 if selected is None:
     raise SystemExit("未找到匹配的 Release 资产")
 
@@ -882,6 +909,7 @@ server_url: "${SERVER_API_URL}"
 server_id: ${SERVER_ID}
 secret_key: "${SECRET_KEY}"
 register_token: "${REGISTER_TOKEN}"
+agent_type: "${AGENT_TYPE}"
 heartbeat_interval: "${HEARTBEAT_INTERVAL}"
 monitor_interval: "${MONITOR_INTERVAL}"
 log_level: "${LOG_LEVEL}"
@@ -1333,6 +1361,11 @@ main() {
     parse_args "$@"
     prepare_env
     normalize_server_url
+    if [[ "${AGENT_TYPE}" == "monitor" ]]; then
+        info "Agent 类型: 最小监控版 (monitor)"
+    else
+        info "Agent 类型: 全功能版 (full)"
+    fi
     fetch_public_release_config
     fetch_agent_settings
     download_agent

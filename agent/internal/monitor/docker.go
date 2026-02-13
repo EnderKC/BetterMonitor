@@ -1,13 +1,18 @@
+//go:build !monitor_only
+
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +22,16 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/user/server-ops-agent/pkg/logger"
+)
+
+// Compose 配置相关错误类型，用于区分不同的错误场景
+var (
+	// ErrComposeConfigUnknownPath 表示 Compose 项目存在但无法从 docker compose ls 或容器 labels 获取配置路径
+	ErrComposeConfigUnknownPath = errors.New("无法获取Compose配置路径")
+	// ErrComposeConfigInaccessible 表示配置路径已发现但无法访问（权限等问题）
+	ErrComposeConfigInaccessible = errors.New("Compose配置路径不可访问")
+	// ErrComposeConfigFileNotFound 表示配置文件路径已确定但文件不存在于磁盘
+	ErrComposeConfigFileNotFound = errors.New("Compose配置文件不存在")
 )
 
 func sanitizeComposeProjectName(projectName string) (string, error) {
@@ -74,10 +89,125 @@ type ImageInfo struct {
 
 // ComposeInfo Compose项目信息
 type ComposeInfo struct {
-	Name           string `json:"name"`
-	Status         string `json:"status"`
-	ContainerCount int    `json:"container_count"`
-	UpdatedAt      string `json:"updated_at"`
+	Name           string   `json:"name"`
+	Status         string   `json:"status"`
+	ContainerCount int      `json:"container_count"`
+	ConfigFiles    []string `json:"config_files,omitempty"`
+	WorkingDir     string   `json:"working_dir,omitempty"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
+// dockerComposeLsItem 用于解析 docker compose ls --format json 的原始输出
+// Docker CLI 返回的字段名首字母大写，与 ComposeInfo 的 JSON tag 不匹配
+// ConfigFiles 可能是逗号分隔的字符串或数组（取决于 Docker Compose 版本）
+type dockerComposeLsItem struct {
+	Name        string             `json:"Name"`
+	Status      string             `json:"Status"`
+	ConfigFiles composeConfigFiles `json:"ConfigFiles"`
+	ProjectDir  string             `json:"ProjectDir"`
+	WorkingDir  string             `json:"WorkingDir"`
+}
+
+// composeConfigFiles 自定义类型，支持从 JSON 字符串（逗号分隔）或数组反序列化
+type composeConfigFiles []string
+
+func (c *composeConfigFiles) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || bytes.Equal(b, []byte("null")) {
+		*c = nil
+		return nil
+	}
+	// 如果是字符串形式（如 "/path/a.yml,/path/b.yml"）
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*c = splitConfigFilesString(s)
+		return nil
+	}
+	// 如果是数组形式
+	var arr []string
+	if err := json.Unmarshal(b, &arr); err != nil {
+		return err
+	}
+	result := make([]string, 0, len(arr))
+	for _, v := range arr {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			result = append(result, v)
+		}
+	}
+	*c = result
+	return nil
+}
+
+// composeStatusRe 用于解析 docker compose ls 的 Status 字段
+// 使用非锚定模式以支持组合状态如 "running(1), exited(2)"
+var composeStatusRe = regexp.MustCompile(`(?i)([a-zA-Z_-]+)\s*\(\s*(\d+)\s*\)`)
+
+// statusPriority 定义容器状态优先级，用于从组合状态中选择主要状态
+// running 优先级最高，表示有容器在运行
+var statusPriority = map[string]int{
+	"running":    100,
+	"restarting": 80,
+	"paused":     60,
+	"created":    40,
+	"exited":     20,
+	"dead":       10,
+}
+
+// parseComposeStatus 解析 docker compose ls 的 Status 字段
+// 支持单一状态如 "running(1)" 和组合状态如 "running(1), exited(2)"
+// 返回: 主要状态(按优先级选择，仅考虑count>0的状态), 总容器数(所有状态容器数之和)
+// 特殊情况: 当所有状态的容器数都为0时，返回原始状态字符串
+func parseComposeStatus(raw string) (status string, containerCount int) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", 0
+	}
+
+	// 查找所有匹配的状态片段
+	matches := composeStatusRe.FindAllStringSubmatch(raw, -1)
+	if len(matches) == 0 {
+		// 无法解析，返回原始状态
+		return raw, 0
+	}
+
+	var totalCount int
+	var primaryStatus string
+	highestPriority := -1
+
+	for _, m := range matches {
+		if len(m) != 3 {
+			continue
+		}
+		stateName := strings.ToLower(strings.TrimSpace(m[1]))
+		count, _ := strconv.Atoi(m[2])
+		totalCount += count
+
+		// 仅当 count > 0 时才参与主状态竞争
+		// 避免 "running(0), exited(2)" 错误地返回 "running"
+		if count == 0 {
+			continue
+		}
+
+		// 根据优先级选择主要状态
+		priority, known := statusPriority[stateName]
+		if !known {
+			priority = 1 // 未知状态给予最低优先级
+		}
+		if priority > highestPriority {
+			highestPriority = priority
+			primaryStatus = stateName
+		}
+	}
+
+	// 如果没有选出主状态（所有状态count都为0或解析失败），返回原始状态
+	if primaryStatus == "" {
+		return raw, totalCount
+	}
+	return primaryStatus, totalCount
 }
 
 // DockerManager Docker管理器
@@ -448,28 +578,8 @@ func (dm *DockerManager) GetImages() ([]ImageInfo, error) {
 		}
 
 		// 转换大小为数字
-		var size int64
-		if imgData.Size != "" {
-			sizeStr := strings.TrimSuffix(imgData.Size, "B")
-			sizeStr = strings.TrimSpace(sizeStr)
-
-			if strings.HasSuffix(sizeStr, "MB") {
-				sizeVal := strings.TrimSuffix(sizeStr, "MB")
-				if val, err := strconv.ParseFloat(sizeVal, 64); err == nil {
-					size = int64(val * 1024 * 1024)
-				}
-			} else if strings.HasSuffix(sizeStr, "GB") {
-				sizeVal := strings.TrimSuffix(sizeStr, "GB")
-				if val, err := strconv.ParseFloat(sizeVal, 64); err == nil {
-					size = int64(val * 1024 * 1024 * 1024)
-				}
-			} else if strings.HasSuffix(sizeStr, "kB") {
-				sizeVal := strings.TrimSuffix(sizeStr, "kB")
-				if val, err := strconv.ParseFloat(sizeVal, 64); err == nil {
-					size = int64(val * 1024)
-				}
-			}
-		}
+		// docker images 输出格式如 "2.1GB"、"99.4MB"、"512kB"、"1.2TB"
+		size := parseImageSize(imgData.Size)
 
 		imageInfos = append(imageInfos, ImageInfo{
 			ID:         imgData.ID,
@@ -497,20 +607,58 @@ func (dm *DockerManager) PullImage(imageRef string) error {
 
 // RemoveImage 删除镜像
 func (dm *DockerManager) RemoveImage(imageID string, force bool) error {
+	// 规范化镜像引用，解决 "sha256:<短hex>" 被误解析为 "name:tag" 导致 404 的问题
+	imageRef := normalizeImageRef(imageID)
+	if imageRef == "" {
+		return fmt.Errorf("删除镜像失败: 空的镜像ID")
+	}
+
 	// 使用命令行方式删除镜像，避免API版本兼容性问题
 	args := []string{"rmi"}
 	if force {
 		args = append(args, "-f")
 	}
-	args = append(args, imageID)
+	args = append(args, imageRef)
 
 	cmd := exec.Command("docker", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("删除镜像失败: %v, 输出: %s", err, string(output))
+		return fmt.Errorf("删除镜像失败: %v, 输出: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	return nil
+}
+
+// normalizeImageRef 规范化镜像引用
+// 处理 "sha256:<短hex>" 格式，避免被 Docker 误解析为 "repository:tag"
+// 例如 "sha256:abc123" 会被剥离前缀变成 "abc123"
+func normalizeImageRef(imageID string) string {
+	ref := strings.TrimSpace(imageID)
+	if ref == "" {
+		return ""
+	}
+
+	// 如果是 sha256 前缀格式
+	if strings.HasPrefix(ref, "sha256:") {
+		hexPart := strings.TrimPrefix(ref, "sha256:")
+		// 如果是完整的 64 字符 hex，保留原格式（Docker 可以正确处理）
+		// 如果是截断的短 hex（< 64 字符），剥离前缀避免被误解析为 name:tag
+		if len(hexPart) > 0 && len(hexPart) < 64 && isHexString(hexPart) {
+			return hexPart
+		}
+	}
+
+	return ref
+}
+
+// isHexString 检查字符串是否为有效的十六进制字符串
+func isHexString(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // GetComposes 获取Docker Compose项目列表
@@ -520,80 +668,131 @@ func (dm *DockerManager) GetComposes() ([]ComposeInfo, error) {
 		return nil, fmt.Errorf("创建Compose目录失败: %v", err)
 	}
 
-	// 使用docker-compose命令获取项目列表
-	// 尝试使用docker compose (新版本)
+	// 使用 docker compose ls 获取项目列表
 	cmd := exec.Command("docker", "compose", "ls", "--format", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// 读取Compose目录下的所有项目文件夹
-		entries, err := os.ReadDir(dm.composeDir)
-		if err != nil {
-			return nil, fmt.Errorf("读取Compose目录失败: %v", err)
-		}
+		// docker compose ls 失败，回退到读取托管目录
+		return dm.getComposesFromManagedDir()
+	}
 
-		var composes []ComposeInfo
-		for _, entry := range entries {
-			if entry.IsDir() {
-				projectName := entry.Name()
-				projectPath := filepath.Join(dm.composeDir, projectName)
+	// 解析JSON输出到中间结构体（Docker CLI 返回的字段名首字母大写）
+	var rawItems []dockerComposeLsItem
+	if err := json.Unmarshal(output, &rawItems); err != nil {
+		return nil, fmt.Errorf("解析Docker Compose项目列表失败: %v", err)
+	}
 
-				// 检查docker-compose.yml文件是否存在
-				configFile := filepath.Join(projectPath, "docker-compose.yml")
-				if _, err := os.Stat(configFile); os.IsNotExist(err) {
-					// 尝试检查docker-compose.yaml
-					configFile = filepath.Join(projectPath, "docker-compose.yaml")
-					if _, err := os.Stat(configFile); os.IsNotExist(err) {
-						// 两种扩展名都不存在，跳过
-						continue
-					}
-				}
+	// 预先通过容器 labels 获取补充信息（用于 ls 输出缺少 WorkingDir 的情况）
+	labelIndex := dm.buildComposeLabelIndex()
 
-				composes = append(composes, ComposeInfo{
-					Name:           projectName,
-					Status:         "unknown",
-					ContainerCount: 0,
-					UpdatedAt:      time.Now().Format(time.RFC3339),
-				})
+	// 转换为 ComposeInfo，正确映射字段
+	composes := make([]ComposeInfo, 0, len(rawItems))
+	for _, item := range rawItems {
+		status, containerCount := parseComposeStatus(item.Status)
+
+		workingDir := firstNonEmpty(item.WorkingDir, item.ProjectDir)
+		configFiles := []string(item.ConfigFiles)
+
+		// 如果 ls 输出缺少关键字段，尝试从容器 labels 补充
+		if meta, ok := labelIndex[item.Name]; ok {
+			if workingDir == "" {
+				workingDir = meta.workingDir
+			}
+			if len(configFiles) == 0 && len(meta.configFiles) > 0 {
+				configFiles = meta.configFiles
 			}
 		}
 
-		return composes, nil
+		composes = append(composes, ComposeInfo{
+			Name:           item.Name,
+			Status:         status,
+			ContainerCount: containerCount,
+			ConfigFiles:    configFiles,
+			WorkingDir:     workingDir,
+			UpdatedAt:      time.Now().Format(time.RFC3339),
+		})
 	}
 
-	// 解析JSON输出
+	return composes, nil
+}
+
+// getComposesFromManagedDir 从托管目录读取 Compose 项目列表（docker compose ls 不可用时的回退）
+func (dm *DockerManager) getComposesFromManagedDir() ([]ComposeInfo, error) {
+	entries, err := os.ReadDir(dm.composeDir)
+	if err != nil {
+		return nil, fmt.Errorf("读取Compose目录失败: %v", err)
+	}
+
 	var composes []ComposeInfo
-	if err := json.Unmarshal(output, &composes); err != nil {
-		return nil, fmt.Errorf("解析Docker Compose项目列表失败: %v", err)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectName := entry.Name()
+		projectPath := filepath.Join(dm.composeDir, projectName)
+
+		configFile := findComposeFile(projectPath)
+		if configFile == "" {
+			continue
+		}
+
+		composes = append(composes, ComposeInfo{
+			Name:           projectName,
+			Status:         "unknown",
+			ContainerCount: 0,
+			ConfigFiles:    []string{configFile},
+			WorkingDir:     projectPath,
+			UpdatedAt:      time.Now().Format(time.RFC3339),
+		})
 	}
 
 	return composes, nil
 }
 
 // GetComposeConfig 获取Compose项目配置内容
+// 优先通过 docker compose config 获取渲染后的配置（处理多文件合并、变量替换等）
+// 按以下顺序尝试发现配置：1) docker compose ls 2) 容器 labels 3) 托管目录
 func (dm *DockerManager) GetComposeConfig(projectName string) (string, error) {
 	projectName, err := sanitizeComposeProjectName(projectName)
 	if err != nil {
 		return "", err
 	}
 
-	// 检查配置文件
-	projectPath := filepath.Join(dm.composeDir, projectName)
-	configFile := filepath.Join(projectPath, "docker-compose.yml")
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		// 尝试检查docker-compose.yaml
-		configFile = filepath.Join(projectPath, "docker-compose.yaml")
-		if _, err := os.Stat(configFile); os.IsNotExist(err) {
-			return "", fmt.Errorf("Compose配置文件不存在")
+	// 尝试发现项目的配置元数据
+	meta, discoverErr := dm.discoverComposeProjectMeta(projectName)
+	if discoverErr == nil && meta != nil && len(meta.configFiles) > 0 {
+		// 解析配置文件路径（处理相对路径）
+		absFiles, err := resolveConfigFilePaths(meta.workingDir, meta.configFiles)
+		if err != nil {
+			return "", err
 		}
+
+		// 检查文件是否都可访问
+		if err := checkFilesAccessible(absFiles); err != nil {
+			return "", err
+		}
+
+		// 使用 docker compose config 获取渲染后的配置
+		return dm.runComposeConfig(projectName, meta.workingDir, absFiles)
 	}
 
-	// 读取配置文件内容
-	content, err := os.ReadFile(configFile)
-	if err != nil {
-		return "", fmt.Errorf("读取Compose配置文件失败: %v", err)
+	// 回退：尝试托管目录 /tmp/docker-compose/{projectName}
+	projectPath := filepath.Join(dm.composeDir, projectName)
+	configFile := findComposeFile(projectPath)
+	if configFile == "" {
+		// 如果之前有发现错误，返回该错误
+		if discoverErr != nil {
+			return "", fmt.Errorf("%w: %s", ErrComposeConfigUnknownPath, projectName)
+		}
+		return "", fmt.Errorf("%w: %s", ErrComposeConfigFileNotFound, projectPath)
 	}
 
-	return string(content), nil
+	// 检查配置文件是否可访问
+	if err := checkFilesAccessible([]string{configFile}); err != nil {
+		return "", err
+	}
+
+	return dm.runComposeConfig(projectName, projectPath, []string{configFile})
 }
 
 // ComposeUp 启动Compose项目
@@ -762,4 +961,335 @@ func (dm *DockerManager) CreateContainer(name string, image string, ports []stri
 	dm.log.Info("容器创建成功，ID: %s", containerID)
 
 	return containerID, nil
+}
+
+// ============================================================================
+// Compose 配置发现相关辅助函数和类型
+// ============================================================================
+
+// composeProjectMeta 存储 Compose 项目的配置元数据
+type composeProjectMeta struct {
+	workingDir  string
+	configFiles []string
+}
+
+// composeLabelMeta 从容器 labels 解析出的 Compose 项目元数据
+type composeLabelMeta struct {
+	workingDir  string
+	configFiles []string
+}
+
+// discoverComposeProjectMeta 发现指定 Compose 项目的配置元数据
+// 优先从 docker compose ls 获取，失败则从容器 labels 兜底
+func (dm *DockerManager) discoverComposeProjectMeta(projectName string) (*composeProjectMeta, error) {
+	// 1) 尝试从 docker compose ls 获取
+	if meta, err := dm.discoverMetaFromComposeLs(projectName); err == nil && meta != nil {
+		if meta.workingDir != "" && len(meta.configFiles) > 0 {
+			return meta, nil
+		}
+	}
+
+	// 2) 回退到容器 labels
+	if meta, err := dm.discoverMetaFromContainerLabels(projectName); err == nil && meta != nil {
+		if meta.workingDir != "" && len(meta.configFiles) > 0 {
+			return meta, nil
+		}
+	}
+
+	return nil, fmt.Errorf("无法发现项目 %s 的配置信息", projectName)
+}
+
+// discoverMetaFromComposeLs 从 docker compose ls 输出中获取项目元数据
+func (dm *DockerManager) discoverMetaFromComposeLs(projectName string) (*composeProjectMeta, error) {
+	cmd := exec.Command("docker", "compose", "ls", "--format", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	var items []dockerComposeLsItem
+	if err := json.Unmarshal(output, &items); err != nil {
+		return nil, err
+	}
+
+	for _, item := range items {
+		if item.Name != projectName {
+			continue
+		}
+		return &composeProjectMeta{
+			workingDir:  firstNonEmpty(item.WorkingDir, item.ProjectDir),
+			configFiles: []string(item.ConfigFiles),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("项目 %s 未在 compose ls 中找到", projectName)
+}
+
+// discoverMetaFromContainerLabels 从容器 labels 中获取指定项目的元数据
+// 仅查询属于该项目的容器，避免全量 inspect 的性能开销
+func (dm *DockerManager) discoverMetaFromContainerLabels(projectName string) (*composeProjectMeta, error) {
+	// 只获取属于该项目的一个容器
+	filterLabel := fmt.Sprintf("label=com.docker.compose.project=%s", projectName)
+	cmd := exec.Command("docker", "ps", "-a", "--filter", filterLabel, "--format", "{{.ID}}", "-n", "1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	containerID := strings.TrimSpace(string(output))
+	if containerID == "" {
+		return nil, fmt.Errorf("项目 %s 未在容器 labels 中找到", projectName)
+	}
+
+	// inspect 单个容器
+	cmd = exec.Command("docker", "inspect", containerID)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	var inspected []struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(output, &inspected); err != nil {
+		return nil, err
+	}
+
+	if len(inspected) == 0 || inspected[0].Config.Labels == nil {
+		return nil, fmt.Errorf("项目 %s 的容器 labels 为空", projectName)
+	}
+
+	labels := inspected[0].Config.Labels
+	return &composeProjectMeta{
+		workingDir:  strings.TrimSpace(labels["com.docker.compose.project.working_dir"]),
+		configFiles: splitConfigFilesString(labels["com.docker.compose.project.config_files"]),
+	}, nil
+}
+
+// buildComposeLabelIndex 构建所有 Compose 项目的 labels 索引
+// 通过检查所有带有 com.docker.compose.project label 的容器
+func (dm *DockerManager) buildComposeLabelIndex() map[string]composeLabelMeta {
+	result := make(map[string]composeLabelMeta)
+
+	// 获取所有属于 Compose 项目的容器 ID
+	cmd := exec.Command("docker", "ps", "-a", "--filter", "label=com.docker.compose.project", "--format", "{{.ID}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return result
+	}
+
+	var containerIDs []string
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			containerIDs = append(containerIDs, line)
+		}
+	}
+
+	if len(containerIDs) == 0 {
+		return result
+	}
+
+	// 批量 inspect 所有容器以提高性能
+	args := append([]string{"inspect"}, containerIDs...)
+	cmd = exec.Command("docker", args...)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return result
+	}
+
+	var inspected []struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(output, &inspected); err != nil {
+		return result
+	}
+
+	for _, item := range inspected {
+		labels := item.Config.Labels
+		if labels == nil {
+			continue
+		}
+
+		projectName := strings.TrimSpace(labels["com.docker.compose.project"])
+		if projectName == "" {
+			continue
+		}
+
+		// 每个项目只取第一个容器的信息（同一项目的容器 labels 应该相同）
+		if _, exists := result[projectName]; exists {
+			continue
+		}
+
+		result[projectName] = composeLabelMeta{
+			workingDir:  strings.TrimSpace(labels["com.docker.compose.project.working_dir"]),
+			configFiles: splitConfigFilesString(labels["com.docker.compose.project.config_files"]),
+		}
+	}
+
+	return result
+}
+
+// runComposeConfig 执行 docker compose config 命令获取渲染后的配置
+func (dm *DockerManager) runComposeConfig(projectName, workingDir string, configFiles []string) (string, error) {
+	// 如果 workingDir 为空但有配置文件，使用第一个配置文件的目录作为工作目录
+	// 这对于加载 .env 文件和解析相对 include 路径很重要
+	if workingDir == "" && len(configFiles) > 0 {
+		workingDir = filepath.Dir(configFiles[0])
+	}
+
+	args := []string{"compose"}
+	if workingDir != "" {
+		args = append(args, "--project-directory", workingDir)
+	}
+	args = append(args, "-p", projectName)
+	for _, f := range configFiles {
+		args = append(args, "-f", f)
+	}
+	args = append(args, "config")
+
+	cmd := exec.Command("docker", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("docker compose config 执行失败: %v, stderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return stdout.String(), nil
+}
+
+// ============================================================================
+// 通用辅助函数
+// ============================================================================
+
+// parseImageSize 解析 docker images 输出的人类可读大小字符串为字节数
+// 支持格式: "2.1GB"、"99.4MB"、"512kB"、"1.2TB"、"800B"
+func parseImageSize(sizeStr string) int64 {
+	sizeStr = strings.TrimSpace(sizeStr)
+	if sizeStr == "" {
+		return 0
+	}
+
+	// 按后缀从长到短匹配，避免 "B" 提前被匹配
+	suffixes := []struct {
+		suffix     string
+		multiplier float64
+	}{
+		{"TB", 1024 * 1024 * 1024 * 1024},
+		{"GB", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"kB", 1024},
+		{"B", 1},
+	}
+
+	for _, s := range suffixes {
+		if strings.HasSuffix(sizeStr, s.suffix) {
+			numStr := strings.TrimSpace(strings.TrimSuffix(sizeStr, s.suffix))
+			if val, err := strconv.ParseFloat(numStr, 64); err == nil {
+				return int64(val * s.multiplier)
+			}
+			return 0
+		}
+	}
+
+	return 0
+}
+
+// splitConfigFilesString 将逗号分隔的配置文件字符串拆分为数组
+func splitConfigFilesString(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// resolveConfigFilePaths 解析配置文件路径，将相对路径转换为绝对路径
+func resolveConfigFilePaths(workingDir string, configFiles []string) ([]string, error) {
+	if len(configFiles) == 0 {
+		return nil, fmt.Errorf("%w: 配置文件列表为空", ErrComposeConfigUnknownPath)
+	}
+
+	result := make([]string, 0, len(configFiles))
+	for _, f := range configFiles {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+
+		if filepath.IsAbs(f) {
+			result = append(result, f)
+			continue
+		}
+
+		// 相对路径需要 workingDir 来解析
+		if strings.TrimSpace(workingDir) == "" {
+			return nil, fmt.Errorf("%w: 存在相对路径 %s 但缺少工作目录", ErrComposeConfigUnknownPath, f)
+		}
+		result = append(result, filepath.Join(workingDir, f))
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("%w: 解析后配置文件列表为空", ErrComposeConfigUnknownPath)
+	}
+	return result, nil
+}
+
+// checkFilesAccessible 检查所有文件是否可访问
+func checkFilesAccessible(files []string) error {
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("%w: %s", ErrComposeConfigFileNotFound, f)
+			}
+			return fmt.Errorf("%w: %s (%v)", ErrComposeConfigInaccessible, f, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("%w: %s 是目录而非文件", ErrComposeConfigInaccessible, f)
+		}
+	}
+	return nil
+}
+
+// findComposeFile 在指定目录中查找 Compose 配置文件
+// 按优先级检查: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+func findComposeFile(dir string) string {
+	candidates := []string{
+		"docker-compose.yml",
+		"docker-compose.yaml",
+		"compose.yml",
+		"compose.yaml",
+	}
+	for _, name := range candidates {
+		path := filepath.Join(dir, name)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
+}
+
+// firstNonEmpty 返回第一个非空字符串
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

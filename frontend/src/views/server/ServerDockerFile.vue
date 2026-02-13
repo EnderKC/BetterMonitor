@@ -322,17 +322,17 @@ onMounted(() => {
   height: 100%;
   gap: 16px;
   padding: 16px;
-  background-color: #f5f5f7;
+  background-color: var(--body-bg);
 }
 
 /* Glass Panel Styles */
 .glass-panel {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-white-30);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px var(--alpha-black-05);
 }
 
 .header-panel {
@@ -358,13 +358,13 @@ onMounted(() => {
 }
 
 .title-text {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: #1d1d1f;
 }
 
 .subtitle-text {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: #86868b;
 }
 
@@ -395,7 +395,7 @@ onMounted(() => {
 
 .dark .glass-panel {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .title-text {

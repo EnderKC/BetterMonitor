@@ -3,13 +3,8 @@
     <a-card title="预警记录" :bordered="false">
       <a-row :gutter="16" style="margin-bottom: 16px">
         <a-col :span="6">
-          <a-select 
-            v-model:value="filters.server_id"
-            style="width: 100%"
-            placeholder="选择服务器"
-            allowClear
-            @change="handleFilterChange"
-          >
+          <a-select v-model:value="filters.server_id" style="width: 100%" placeholder="选择服务器" allowClear
+            @change="handleFilterChange">
             <a-select-option :value="0">全部服务器</a-select-option>
             <a-select-option v-for="server in servers" :key="server.id" :value="server.id">
               {{ server.name }}
@@ -17,13 +12,8 @@
           </a-select>
         </a-col>
         <a-col :span="6">
-          <a-select 
-            v-model:value="filters.type"
-            style="width: 100%"
-            placeholder="预警类型"
-            allowClear
-            @change="handleFilterChange"
-          >
+          <a-select v-model:value="filters.type" style="width: 100%" placeholder="预警类型" allowClear
+            @change="handleFilterChange">
             <a-select-option value="">全部类型</a-select-option>
             <a-select-option value="cpu">CPU 使用率</a-select-option>
             <a-select-option value="memory">内存使用率</a-select-option>
@@ -32,10 +22,7 @@
           </a-select>
         </a-col>
         <a-col :span="6">
-          <a-checkbox 
-            v-model:checked="filters.unresolved"
-            @change="handleFilterChange"
-          >
+          <a-checkbox v-model:checked="filters.unresolved" @change="handleFilterChange">
             只显示未解决
           </a-checkbox>
         </a-col>
@@ -45,13 +32,8 @@
       </a-row>
 
       <a-spin :spinning="loading.records">
-        <a-table 
-          :dataSource="alertRecords" 
-          :columns="columns" 
-          rowKey="id" 
-          :pagination="paginationProps"
-          @change="handleTableChange"
-        >
+        <a-table :dataSource="alertRecords" :columns="columns" rowKey="id" :pagination="paginationProps"
+          @change="handleTableChange">
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'alert_type'">
               <a-tag :color="getTypeColor(record.alert_type)">{{ getTypeName(record.alert_type) }}</a-tag>
@@ -65,12 +47,7 @@
               </a-tag>
             </template>
             <template v-if="column.key === 'action'">
-              <a-button 
-                type="link" 
-                size="small" 
-                @click="resolveRecord(record.id)"
-                :disabled="record.resolved"
-              >
+              <a-button type="link" size="small" @click="resolveRecord(record.id)" :disabled="record.resolved">
                 标记为已解决
               </a-button>
             </template>
@@ -85,15 +62,17 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, reactive } from 'vue';
 import { useAlertStore, useServerStore } from '@/stores';
+import { useUIStore } from '@/stores/uiStore';
 import type { TablePaginationConfig } from 'ant-design-vue';
 
 export default defineComponent({
   name: 'AlertRecords',
-  
+
   setup() {
     const alertStore = useAlertStore();
     const serverStore = useServerStore();
-    
+    const uiStore = useUIStore();
+
     const filters = reactive({
       server_id: 0,
       type: '',
@@ -101,7 +80,7 @@ export default defineComponent({
       page: 1,
       limit: 10,
     });
-    
+
     const columns = [
       {
         title: '服务器',
@@ -144,13 +123,13 @@ export default defineComponent({
         key: 'action',
       },
     ];
-    
+
     // 计算属性
     const loading = computed(() => alertStore.loading);
     const alertRecords = computed(() => alertStore.alertRecords);
     const servers = computed(() => serverStore.servers);
     const totalRecords = computed(() => alertStore.totalRecords);
-    
+
     const paginationProps = computed(() => ({
       current: filters.page,
       pageSize: filters.limit,
@@ -158,34 +137,38 @@ export default defineComponent({
       showSizeChanger: true,
       showTotal: (total: number) => `共 ${total} 条记录`,
     }));
-    
+
     // 生命周期钩子
     onMounted(async () => {
-      await serverStore.fetchServers();
-      await fetchRecords();
+      try {
+        await serverStore.fetchServers();
+        await fetchRecords();
+      } finally {
+        uiStore.stopLoading();
+      }
     });
-    
+
     // 方法
     const fetchRecords = async () => {
       await alertStore.fetchAlertRecords(filters);
     };
-    
+
     const refreshRecords = () => {
       filters.page = 1; // 重置页码
       fetchRecords();
     };
-    
+
     const handleFilterChange = () => {
       filters.page = 1; // 重置页码
       fetchRecords();
     };
-    
+
     const handleTableChange = (pagination: TablePaginationConfig) => {
       filters.page = pagination.current || 1;
       filters.limit = pagination.pageSize || 10;
       fetchRecords();
     };
-    
+
     const getTypeColor = (type: string) => {
       switch (type) {
         case 'cpu': return 'blue';
@@ -195,7 +178,7 @@ export default defineComponent({
         default: return 'default';
       }
     };
-    
+
     const getTypeName = (type: string) => {
       switch (type) {
         case 'cpu': return 'CPU 使用率';
@@ -205,7 +188,7 @@ export default defineComponent({
         default: return type;
       }
     };
-    
+
     const getFormattedValue = (record: any) => {
       switch (record.alert_type) {
         case 'cpu':
@@ -219,7 +202,7 @@ export default defineComponent({
           return record.value;
       }
     };
-    
+
     const getFormattedThreshold = (record: any) => {
       switch (record.alert_type) {
         case 'cpu':
@@ -238,7 +221,7 @@ export default defineComponent({
           return record.threshold;
       }
     };
-    
+
     const resolveRecord = async (id: number) => {
       try {
         await alertStore.resolveAlertRecord(id);
@@ -246,7 +229,7 @@ export default defineComponent({
         console.error('解决预警记录失败:', error);
       }
     };
-    
+
     return {
       loading,
       filters,
@@ -254,7 +237,7 @@ export default defineComponent({
       alertRecords,
       servers,
       paginationProps,
-      
+
       handleFilterChange,
       handleTableChange,
       refreshRecords,
@@ -272,4 +255,4 @@ export default defineComponent({
 .alert-records-container {
   padding: 16px;
 }
-</style> 
+</style>

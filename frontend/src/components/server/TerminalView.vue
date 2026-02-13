@@ -12,6 +12,7 @@ import 'xterm/css/xterm.css';
 
 const props = defineProps<{
   socketUrl: string;
+  session?: string;
   theme?: 'light' | 'dark';
 }>();
 
@@ -78,17 +79,38 @@ const connect = () => {
     socket.onopen = () => {
       connected.value = true;
       emit('connected');
-      
-      // Send initial resize
-      handleResize();
+
+      // 先发送 create 命令在 Agent 端创建终端会话
+      if (props.session) {
+        socket.send(JSON.stringify({
+          type: 'shell_command',
+          payload: {
+            type: 'create',
+            data: '',
+            session: props.session
+          }
+        }));
+
+        // 延迟发送 resize，确保会话已创建
+        setTimeout(() => {
+          handleResize();
+        }, 100);
+      }
 
       // Handle input
       if (terminal.value) {
         terminal.value.onData((data) => {
           if (socket.readyState === WebSocket.OPEN) {
+            if (!props.session) {
+              console.warn('Input sent without session');
+            }
             socket.send(JSON.stringify({
-              type: 'input',
-              data: data
+              type: 'shell_command',
+              payload: {
+                type: 'input',
+                data: data,
+                session: props.session || ''
+              }
             }));
           }
         });
@@ -108,6 +130,11 @@ const connect = () => {
            }
         } else if (msg.type === 'error') {
            emit('error', msg.message);
+        } else if (msg.type === 'terminal_error') {
+           // Agent断连等导致终端不可用
+           emit('error', msg.message || 'Agent连接已断开，终端会话不可用');
+           connected.value = false;
+           emit('disconnected');
         }
       } catch (e) {
         // Handle raw text if not JSON
@@ -138,15 +165,25 @@ const handleResize = () => {
 
   try {
     fitAddon.value.fit();
+
+    // 只有 session 存在时才发送 resize 命令
+    if (!props.session) {
+      console.warn('Resize skipped: no session provided');
+      return;
+    }
+
     const dims = {
       cols: terminal.value.cols,
       rows: terminal.value.rows
     };
-    
+
     ws.value.send(JSON.stringify({
-      type: 'resize',
-      ...dims,
-      data: JSON.stringify(dims) // Support both formats
+      type: 'shell_command',
+      payload: {
+        type: 'resize',
+        data: JSON.stringify(dims),
+        session: props.session
+      }
     }));
   } catch (e) {
     console.warn('Resize failed:', e);
@@ -204,7 +241,7 @@ watch(() => props.socketUrl, (newUrl) => {
   width: 100%;
   height: 100%;
   background: #1e1e1e;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   padding: 4px;
 }

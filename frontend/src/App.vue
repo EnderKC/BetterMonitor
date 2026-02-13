@@ -46,98 +46,10 @@ const themeConfig = computed(() => ({
   opacity: 0;
 }
 
-:root {
-  /* macOS Color Palette */
-  --primary-color: #007AFF;
-  /* macOS Blue */
-  --primary-hover: #0077ED;
-  --primary-light: rgba(0, 122, 255, 0.1);
-  --primary-bg: rgba(0, 122, 255, 0.05);
-
-  --success-color: #34C759;
-  /* macOS Green */
-  --warning-color: #FF9500;
-  /* macOS Orange */
-  --error-color: #FF3B30;
-  /* macOS Red */
-  --info-color: #5856D6;
-  /* macOS Purple */
-
-  /* Neutral Colors */
-  --body-bg: #F5F5F7;
-  /* macOS System Gray 6 */
-  --card-bg: rgba(255, 255, 255, 0.6);
-  --card-border: rgba(255, 255, 255, 0.4);
-
-  /* Text Colors */
-  --text-primary: #1D1D1F;
-  --text-secondary: #8e8e9d;
-  --text-hint: #A1A1A6;
-
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.16);
-  --shadow-glow: 0 0 20px rgba(0, 122, 255, 0.3);
-
-  /* Radius */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-
-  /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-
-  /* Transition */
-  --transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
-
-  /* Component Backgrounds */
-  --sidebar-bg: rgba(255, 255, 255, 0.5);
-  --dropdown-bg: rgba(255, 255, 255, 0.9);
-  --footer-bg: rgba(255, 255, 255, 0.5);
-  --header-bg: rgba(255, 255, 255, 0.5);
-}
-
-/* Dark Mode (One Dark Style) */
-:root.dark {
-  --primary-color: #61afef;
-  --primary-hover: #4d8ec4;
-  --primary-light: rgba(97, 175, 239, 0.15);
-  --primary-bg: rgba(97, 175, 239, 0.05);
-
-  --success-color: #98c379;
-  --warning-color: #e5c07b;
-  --error-color: #e06c75;
-  --info-color: #c678dd;
-
-  /* One Dark Backgrounds */
-  --body-bg: #282c34;
-  --card-bg: rgba(44, 49, 60, 0.7);
-  /* #2c313c with opacity */
-  --card-border: rgba(255, 255, 255, 0.1);
-
-  /* Text Colors */
-  --text-primary: #c3cad8;
-  --text-secondary: #8a93a4;
-  --text-hint: #4b5263;
-
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 20px rgba(97, 175, 239, 0.2);
-
-  /* Component Backgrounds */
-  --sidebar-bg: rgba(33, 37, 43, 0.5);
-  --dropdown-bg: #2c313c;
-  --footer-bg: rgba(33, 37, 43, 0.5);
-  --header-bg: rgba(33, 37, 43, 0.5);
-}
+/* ============================================
+   CSS variables are defined in:
+   src/styles/variables.css
+   ============================================ */
 
 /* Global Reset & Typography */
 html,
@@ -145,12 +57,12 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-family-sans);
   background-color: var(--body-bg);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.3s, color 0.3s;
+  transition: var(--transition-color);
 }
 
 #app {
@@ -161,43 +73,36 @@ body {
   min-height: 100vh;
   background-color: var(--body-bg);
   background-image:
-    radial-gradient(circle at 10% 20%, rgba(0, 122, 255, 0.15) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(52, 199, 89, 0.15) 0%, transparent 40%),
-    radial-gradient(circle at 50% 50%, rgba(88, 86, 214, 0.1) 0%, transparent 60%);
+    radial-gradient(circle at 10% 20%, var(--bg-radial-primary) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, var(--bg-radial-success) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, var(--bg-radial-accent) 0%, transparent 60%);
   background-attachment: fixed;
   transition: background-image 0.3s, background-color 0.3s;
-}
-
-:root.dark .modern-ui {
-  background-image:
-    radial-gradient(circle at 10% 20%, rgba(97, 175, 239, 0.15) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(152, 195, 121, 0.15) 0%, transparent 40%),
-    radial-gradient(circle at 50% 50%, rgba(198, 120, 221, 0.1) 0%, transparent 60%);
 }
 
 /* Glassmorphism Utility */
 .glass-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--alpha-white-40);
   transition: var(--transition);
 }
 
 :root.dark .glass-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--alpha-white-08);
 }
 
 .glass-card:hover {
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.8);
+  border-color: var(--alpha-white-80);
 }
 
 :root.dark .glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: var(--alpha-white-15);
 }
 
 /* Ant Design Overrides */
@@ -205,51 +110,51 @@ body {
 /* Buttons */
 .ant-btn {
   border-radius: var(--radius-md);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   box-shadow: none;
   border: none;
-  height: 36px;
-  padding: 4px 16px;
+  height: var(--btn-height);
+  padding: var(--spacing-xs) var(--spacing-md);
 }
 
 .ant-btn-primary {
   background: var(--primary-color);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 :root.dark .ant-btn-primary {
-  box-shadow: 0 4px 12px rgba(97, 175, 239, 0.2);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .ant-btn-primary:hover {
   background: var(--primary-hover);
-  box-shadow: 0 6px 16px rgba(0, 122, 255, 0.4);
+  box-shadow: var(--btn-primary-hover-shadow);
 }
 
 :root.dark .ant-btn-primary:hover {
-  box-shadow: 0 6px 16px rgba(97, 175, 239, 0.3);
+  box-shadow: var(--btn-primary-hover-shadow);
 }
 
 .ant-btn-default {
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--alpha-white-80);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
 }
 
 :root.dark .ant-btn-default {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-05);
+  border: 1px solid var(--border-default);
 }
 
 .ant-btn-default:hover {
   background: #fff;
-  border-color: rgba(0, 0, 0, 0.1);
+  border-color: var(--border-default);
   color: var(--primary-color);
 }
 
 :root.dark .ant-btn-default:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--alpha-white-10);
+  border-color: var(--alpha-white-20);
 }
 
 /* Inputs */
@@ -257,33 +162,33 @@ body {
 .ant-input-number,
 .ant-select-selector {
   border-radius: var(--radius-sm) !important;
-  border-color: rgba(0, 0, 0, 0.1) !important;
-  background: rgba(255, 255, 255, 0.6) !important;
-  backdrop-filter: blur(10px);
+  border-color: var(--input-border) !important;
+  background: var(--input-bg) !important;
+  backdrop-filter: blur(var(--blur-sm));
   transition: var(--transition) !important;
 }
 
 :root.dark .ant-input,
 :root.dark .ant-input-number,
 :root.dark .ant-select-selector {
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  background: rgba(0, 0, 0, 0.2) !important;
+  border-color: var(--input-border) !important;
+  background: var(--input-bg) !important;
   color: var(--text-primary) !important;
 }
 
 .ant-input:focus,
 .ant-input-number:focus,
 .ant-select-selector:focus {
-  background: #fff !important;
-  box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1) !important;
+  background: var(--input-focus-bg) !important;
+  box-shadow: var(--input-focus-shadow) !important;
   border-color: var(--primary-color) !important;
 }
 
 :root.dark .ant-input:focus,
 :root.dark .ant-input-number:focus,
 :root.dark .ant-select-selector:focus {
-  background: rgba(0, 0, 0, 0.4) !important;
-  box-shadow: 0 0 0 4px rgba(97, 175, 239, 0.1) !important;
+  background: var(--input-focus-bg) !important;
+  box-shadow: var(--input-focus-shadow) !important;
 }
 
 /* Cards */
@@ -291,7 +196,7 @@ body {
   border-radius: var(--radius-lg) !important;
   border: none !important;
   background: rgba(255, 255, 255, 0.7) !important;
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
   box-shadow: var(--shadow-sm) !important;
 }
 
@@ -300,23 +205,23 @@ body {
 }
 
 .ant-card-head {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
-  font-weight: 600;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary) !important;
 }
 
 :root.dark .ant-card-head {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-bottom: 1px solid var(--alpha-white-08) !important;
 }
 
-/* 菜单内部 */
+/* Menu Sub */
 .ant-menu-sub {
-  background: rgba(255, 255, 255, 0.2) !important;
+  background: var(--alpha-white-20) !important;
   border-radius: var(--radius-sm) !important;
 }
 
 :root.dark .ant-menu-sub {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: var(--alpha-black-20) !important;
 }
 
 /* Tables */
@@ -326,98 +231,98 @@ body {
 }
 
 .ant-table-thead>tr>th {
-  background: rgba(245, 245, 247, 0.5) !important;
-  backdrop-filter: blur(10px);
+  background: var(--table-header-bg) !important;
+  backdrop-filter: blur(var(--blur-sm));
   color: var(--text-secondary) !important;
-  font-weight: 600 !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  border-bottom: 1px solid var(--table-border) !important;
 }
 
 :root.dark .ant-table-thead>tr>th {
-  background: rgba(40, 44, 52, 0.5) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: var(--table-header-bg) !important;
+  border-bottom: 1px solid var(--table-border) !important;
 }
 
 .ant-table-tbody>tr>td {
   background: transparent !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03) !important;
-  transition: background 0.2s;
+  border-bottom: 1px solid var(--alpha-black-03) !important;
+  transition: var(--transition-fast);
 }
 
 :root.dark .ant-table-tbody>tr>td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-bottom: 1px solid var(--alpha-white-05) !important;
 }
 
 .ant-table-tbody>tr:hover>td {
-  background: rgba(0, 122, 255, 0.03) !important;
+  background: var(--table-row-hover) !important;
 }
 
 :root.dark .ant-table-tbody>tr:hover>td {
-  background: rgba(97, 175, 239, 0.05) !important;
+  background: var(--table-row-hover) !important;
 }
 
 /* Modals */
 .ant-modal-content {
-  border-radius: 20px !important;
-  background: rgba(255, 255, 255, 0.85) !important;
-  backdrop-filter: blur(25px) !important;
-  -webkit-backdrop-filter: blur(25px) !important;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--modal-radius) !important;
+  background: var(--modal-bg) !important;
+  backdrop-filter: blur(var(--blur-lg)) !important;
+  -webkit-backdrop-filter: blur(var(--blur-lg)) !important;
+  box-shadow: var(--modal-shadow) !important;
+  border: 1px solid var(--modal-border);
 }
 
 :root.dark .ant-modal-content {
-  background: rgba(40, 44, 52, 0.9) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--modal-border);
 }
 
 .ant-modal-header {
   background: transparent !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
 }
 
 :root.dark .ant-modal-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-bottom: 1px solid var(--alpha-white-08) !important;
 }
 
 .ant-modal-title {
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xl);
   color: var(--text-primary) !important;
 }
 
 /* Tags */
 .ant-tag {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: none;
-  font-weight: 500;
-  padding: 2px 8px;
+  font-weight: var(--font-weight-medium);
+  padding: var(--spacing-2xs) var(--spacing-sm);
 }
 
 .ant-tag-success {
-  background: rgba(52, 199, 89, 0.15);
+  background: var(--success-bg);
   color: var(--success-color);
 }
 
 .ant-tag-error {
-  background: rgba(255, 59, 48, 0.15);
+  background: var(--error-bg);
   color: var(--error-color);
 }
 
 .ant-tag-warning {
-  background: rgba(255, 149, 0, 0.15);
+  background: var(--warning-bg);
   color: var(--warning-color);
 }
 
 .ant-tag-processing {
-  background: rgba(0, 122, 255, 0.15);
+  background: var(--info-bg);
   color: var(--primary-color);
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 
 ::-webkit-scrollbar-track {
@@ -425,32 +330,32 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
+  background: var(--scrollbar-thumb);
+  border-radius: var(--scrollbar-radius);
 }
 
 :root.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scrollbar-thumb);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--scrollbar-thumb-hover);
 }
 
 :root.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Utilities */
 .gradient-text {
-  background: linear-gradient(135deg, #007AFF, #5856D6);
+  background: var(--gradient-brand);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 :root.dark .gradient-text {
-  background: linear-gradient(135deg, #61afef, #c678dd);
+  background: var(--gradient-brand);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -470,11 +375,11 @@ body {
 
 :root.dark .ant-dropdown-menu-item:hover,
 :root.dark .ant-dropdown-menu-submenu-title:hover {
-  background: rgba(97, 175, 239, 0.15) !important;
+  background: var(--primary-light) !important;
 }
 
 :root.dark .ant-dropdown-menu-item-divider {
-  background-color: rgba(255, 255, 255, 0.1) !important;
+  background-color: var(--border-default) !important;
 }
 
 /* Dark Mode - Select Dropdown */
@@ -487,11 +392,11 @@ body {
 }
 
 :root.dark .ant-select-item-option-selected {
-  background: rgba(97, 175, 239, 0.15) !important;
+  background: var(--primary-light) !important;
 }
 
 :root.dark .ant-select-item-option-active {
-  background: rgba(97, 175, 239, 0.1) !important;
+  background: var(--primary-bg) !important;
 }
 
 /* Dark Mode - Popover & Tooltip */
@@ -522,7 +427,7 @@ body {
 
 :root.dark .ant-drawer-header {
   background: var(--card-bg) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-bottom: 1px solid var(--border-default) !important;
   color: var(--text-primary) !important;
 }
 
@@ -562,8 +467,8 @@ body {
 
 /* Dark Mode - Pagination */
 :root.dark .ant-pagination-item {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-white-05) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-pagination-item a {
@@ -596,8 +501,8 @@ body {
 
 /* Dark Mode - Alert */
 :root.dark .ant-alert {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-white-05) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-alert-message,
@@ -608,22 +513,22 @@ body {
 /* Dark Mode - Collapse */
 :root.dark .ant-collapse {
   background: transparent !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-collapse-item {
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-collapse-header {
   color: var(--text-primary) !important;
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: var(--alpha-white-05) !important;
 }
 
 :root.dark .ant-collapse-content {
   background: transparent !important;
   color: var(--text-primary) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
 }
 
 /* Dark Mode - Descriptions */
@@ -637,12 +542,12 @@ body {
 
 /* Dark Mode - Divider */
 :root.dark .ant-divider {
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
 }
 
 /* Dark Mode - List */
 :root.dark .ant-list-item {
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
   color: var(--text-primary) !important;
 }
 
@@ -671,18 +576,18 @@ body {
 }
 
 :root.dark .ant-tree-node-content-wrapper:hover {
-  background: rgba(97, 175, 239, 0.1) !important;
+  background: var(--primary-bg) !important;
 }
 
 /* Dark Mode - Transfer */
 :root.dark .ant-transfer-list {
   background: var(--card-bg) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-transfer-list-header {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-white-05) !important;
+  border-color: var(--border-default) !important;
   color: var(--text-primary) !important;
 }
 
@@ -692,13 +597,13 @@ body {
 
 /* Dark Mode - Upload */
 :root.dark .ant-upload {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-white-05) !important;
+  border-color: var(--border-default) !important;
 }
 
 :root.dark .ant-upload-list-item {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-white-05) !important;
+  border-color: var(--border-default) !important;
   color: var(--text-primary) !important;
 }
 

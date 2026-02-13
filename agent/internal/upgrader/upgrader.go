@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/user/server-ops-agent/pkg/version"
 )
 
 type UpgradeRequest struct {
@@ -24,6 +26,10 @@ type UpgradeRequest struct {
 	// 推荐：由面板端直接提供 URL 与 SHA256，Agent 只负责执行升级动作
 	DownloadURL string
 	SHA256      string
+
+	// 可选：由面板端指定目标 Agent 类型，用于跨变体切换（full ↔ monitor）
+	// 为空时沿用当前 Agent 编译时的类型（version.AgentType）
+	TargetAgentType string
 
 	// 可选：若下载地址是面板端的受保护接口，可用于鉴权 header
 	ServerID  uint
@@ -177,12 +183,24 @@ func resolveDownloadURL(req UpgradeRequest) (string, error) {
 
 	// 2) GitHub Repo：BETTER_MONITOR_AGENT_GITHUB_REPO=user/server-ops-backend
 	//    默认按 GitHub Releases 约定拼 URL
+	//    支持跨变体切换：若 TargetAgentType 非空则使用指定类型，否则沿用当前编译类型
 	if repo := strings.TrimSpace(os.Getenv("BETTER_MONITOR_AGENT_GITHUB_REPO")); repo != "" {
 		versionTag := req.TargetVersion
 		if !strings.HasPrefix(versionTag, "v") {
 			versionTag = "v" + versionTag
 		}
-		name := fmt.Sprintf("better-monitor-agent-%s-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
+
+		agentType := strings.TrimSpace(req.TargetAgentType)
+		if agentType == "" {
+			agentType = version.AgentType
+		}
+
+		var name string
+		if agentType == "monitor" {
+			name = fmt.Sprintf("better-monitor-agent-monitor-%s-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
+		} else {
+			name = fmt.Sprintf("better-monitor-agent-%s-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
+		}
 		if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
 			name += ".exe"
 		}

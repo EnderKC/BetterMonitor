@@ -35,6 +35,7 @@ type SystemInfo struct {
 	BootTime        uint64 `json:"boot_time"`
 	PublicIP        string `json:"public_ip"` // 出口IP
 	AgentVersion    string `json:"agent_version"`
+	AgentType       string `json:"agent_type"` // full 或 monitor
 }
 
 // MonitorData 监控数据结构
@@ -288,6 +289,7 @@ func (m *Monitor) GetSystemInfo() (*SystemInfo, error) {
 		BootTime:        hostInfo.BootTime,
 		PublicIP:        publicIP,
 		AgentVersion:    version.Version,
+		AgentType:       version.AgentType,
 	}, nil
 }
 

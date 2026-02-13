@@ -17,6 +17,8 @@ var (
 	Commit = ""
 	// BuildDate 构建日期
 	BuildDate = ""
+	// AgentType Agent类型: "full" 或 "monitor"（通过 ldflags 注入）
+	AgentType = "full"
 )
 
 func init() {
@@ -77,6 +79,7 @@ type Info struct {
 	Version   string `json:"version"`
 	Commit    string `json:"commit"`
 	BuildDate string `json:"buildTime"`
+	AgentType string `json:"agentType"`
 	GoVersion string `json:"goVersion"`
 	Platform  string `json:"platform"`
 	Arch      string `json:"arch"`
@@ -88,6 +91,7 @@ func GetVersion() *Info {
 		Version:   Version,
 		Commit:    Commit,
 		BuildDate: BuildDate,
+		AgentType: AgentType,
 		GoVersion: runtime.Version(),
 		Platform:  runtime.GOOS,
 		Arch:      runtime.GOARCH,

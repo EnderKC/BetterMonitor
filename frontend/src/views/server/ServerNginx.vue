@@ -16,6 +16,7 @@ import {
   SearchOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { useUIStore } from '../../stores/uiStore';
 import CodeEditor from '../../components/server/CodeEditor.vue';
 
 interface RawSite {
@@ -98,6 +99,7 @@ const openRestyStatus = ref({
 });
 const openRestyChecking = ref(false);
 const installingOpenResty = ref(false);
+const uiStore = useUIStore();
 const installLogModalVisible = ref(false);
 const installLogs = ref<string[]>([]);
 const installSessionId = ref<string>('');
@@ -240,6 +242,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -1728,18 +1731,18 @@ const goBack = () => {
 /* Page Header */
 .page-header {
   background: var(--header-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border: 1px solid var(--card-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
 }
 
 :deep(.ant-page-header-heading-title) {
   color: var(--text-primary);
-  font-weight: 600;
-  font-size: 20px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-2xl);
 }
 
 :deep(.ant-page-header-heading-sub-title) {
@@ -1755,10 +1758,10 @@ const goBack = () => {
 
 /* Alerts */
 .install-alert {
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   border: 1px solid rgba(250, 173, 20, 0.3);
-  background: rgba(250, 173, 20, 0.1);
-  backdrop-filter: blur(10px);
+  background: var(--warning-bg);
+  backdrop-filter: blur(var(--blur-sm));
 }
 
 /* Cards (Glassmorphism) */
@@ -1767,8 +1770,8 @@ const goBack = () => {
 .dns-card,
 .cert-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border: 1px solid var(--card-border);
   border-radius: 20px;
   box-shadow: var(--shadow-sm);
@@ -1786,7 +1789,7 @@ const goBack = () => {
 :deep(.ant-card-head) {
   border-bottom: 1px solid var(--card-border);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 :deep(.ant-card-body) {
@@ -1803,7 +1806,7 @@ const goBack = () => {
 .service-version {
   margin-left: 12px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 /* Table Header & Filters */
@@ -1827,10 +1830,10 @@ const goBack = () => {
 }
 
 :deep(.ant-table-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
   color: var(--text-secondary);
   border-bottom: 1px solid var(--card-border);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 
@@ -1857,17 +1860,17 @@ const goBack = () => {
 }
 
 .primary-domain {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   font-size: 15px;
 }
 
 .extra-hint {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 
@@ -1893,7 +1896,7 @@ const goBack = () => {
 .expiry-text {
   margin-left: 8px;
   color: var(--text-hint);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 /* Tabs */
@@ -1931,7 +1934,7 @@ const goBack = () => {
 
 /* Hint Text */
 .hint-text {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin-bottom: 16px;
   line-height: 1.6;
@@ -1947,7 +1950,7 @@ const goBack = () => {
 .config-summary {
   color: var(--text-secondary);
   font-family: monospace;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -1957,16 +1960,16 @@ const goBack = () => {
 /* Form Hint */
 .form-hint {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-hint);
 }
 
 /* Cert Content Modal */
 .cert-content-section {
   margin-bottom: 24px;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
   padding: 16px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--card-border);
 }
 
@@ -1984,7 +1987,7 @@ const goBack = () => {
 }
 
 .cert-path {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   margin-top: 4px;
 }
@@ -1996,7 +1999,7 @@ const goBack = () => {
 
 /* Buttons */
 :deep(.ant-btn) {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 :deep(.ant-btn-primary) {
@@ -2011,8 +2014,8 @@ const goBack = () => {
 }
 
 :deep(.ant-btn-default) {
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--alpha-white-50);
+  border: 1px solid var(--alpha-black-10);
   color: var(--text-primary);
 }
 
@@ -2031,7 +2034,7 @@ const goBack = () => {
 }
 
 :deep(.ant-btn-text:hover) {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   color: var(--text-primary);
 }
 
@@ -2048,10 +2051,10 @@ const goBack = () => {
 /* Inputs & Selects */
 :deep(.ant-input),
 :deep(.ant-select-selector) {
-  background: rgba(255, 255, 255, 0.6) !important;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  background: var(--alpha-white-60) !important;
+  border: 1px solid var(--alpha-black-10) !important;
   color: var(--text-primary) !important;
-  border-radius: 8px !important;
+  border-radius: var(--radius-sm) !important;
 }
 
 
@@ -2068,12 +2071,12 @@ const goBack = () => {
 
 /* Tags */
 :deep(.ant-tag) {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: none;
 }
 
 :deep(.ant-tag-success) {
-  background: rgba(82, 196, 26, 0.2);
+  background: var(--success-bg);
   color: #73d13d;
 }
 
@@ -2088,7 +2091,7 @@ const goBack = () => {
 }
 
 :deep(.ant-tag-error) {
-  background: rgba(255, 77, 79, 0.2);
+  background: var(--error-bg);
   color: #ff7875;
 }
 
@@ -2120,13 +2123,13 @@ const goBack = () => {
 .install-log-output {
   background: #1e1e1e;
   color: #d4d4d4;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 16px;
   min-height: 400px;
   max-height: 600px;
   overflow-y: auto;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.6;
 }
 
@@ -2167,7 +2170,7 @@ const goBack = () => {
 
 .dark .page-header {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .ant-page-header-heading-title {
@@ -2183,11 +2186,11 @@ const goBack = () => {
 .dark .dns-card,
 .dark .cert-card {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .ant-card-head {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
   color: #e0e0e0;
 }
 
@@ -2196,18 +2199,18 @@ const goBack = () => {
 }
 
 .dark .ant-table-thead>tr>th {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
   color: #ccc;
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .ant-table-tbody>tr>td {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
   color: #e0e0e0;
 }
 
 .dark .ant-table-tbody>tr:hover>td {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: var(--alpha-white-05) !important;
 }
 
 .dark .ant-empty-description {
@@ -2219,7 +2222,7 @@ const goBack = () => {
 }
 
 .dark .extra-hint {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #aaa;
 }
 
@@ -2262,7 +2265,7 @@ const goBack = () => {
 }
 
 .dark .config-summary {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #ccc;
 }
 
@@ -2271,8 +2274,8 @@ const goBack = () => {
 }
 
 .dark .cert-content-section {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-05);
+  border-color: var(--alpha-white-10);
 }
 
 .dark .cert-content-header strong {
@@ -2284,14 +2287,14 @@ const goBack = () => {
 }
 
 .dark .ant-btn-default {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
+  border-color: var(--alpha-white-10);
   color: #e0e0e0;
 }
 
 .dark .ant-btn-default:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--alpha-white-20);
+  border-color: var(--alpha-white-20);
   color: #fff;
 }
 
@@ -2300,7 +2303,7 @@ const goBack = () => {
 }
 
 .dark .ant-btn-text:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #fff;
 }
 
@@ -2314,8 +2317,8 @@ const goBack = () => {
 
 .dark .ant-input,
 .dark .ant-select-selector {
-  background: rgba(0, 0, 0, 0.2) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--alpha-black-20) !important;
+  border-color: var(--alpha-white-10) !important;
   color: #e0e0e0 !important;
 }
 
@@ -2330,7 +2333,7 @@ const goBack = () => {
 }
 
 .dark .ant-tag-success {
-  background: rgba(82, 196, 26, 0.2);
+  background: var(--success-bg);
   color: #95de64;
 }
 
@@ -2345,51 +2348,51 @@ const goBack = () => {
 }
 
 .dark .ant-tag-error {
-  background: rgba(255, 77, 79, 0.2);
+  background: var(--error-bg);
   color: #ff9c6e;
 }
 
 /* Glass Modal Styles (Copied from ServerDocker.vue for consistency) */
 .glass-modal .ant-modal-content {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-80);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px var(--alpha-black-10);
+  border: 1px solid var(--alpha-white-50);
 }
 
 .glass-modal .ant-modal-header {
   background: transparent;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px 16px 0 0;
+  border-bottom: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg) 16px 0 0;
 }
 
 .glass-modal .ant-modal-title {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .glass-modal .ant-input,
 .glass-modal .ant-select-selector,
 .glass-modal .ant-input-number {
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
-  border-color: rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-sm);
+  background: var(--alpha-white-50);
+  border-color: var(--alpha-black-10);
 }
 
 .glass-modal .ant-btn {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 /* Dark Mode Modal */
 .dark .glass-modal .ant-modal-content {
   background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  border-color: var(--alpha-white-10);
+  box-shadow: 0 20px 50px var(--alpha-black-30);
 }
 
 .dark .glass-modal .ant-modal-header {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .glass-modal .ant-modal-title {
@@ -2403,8 +2406,8 @@ const goBack = () => {
 .dark .glass-modal .ant-input,
 .dark .glass-modal .ant-select-selector,
 .dark .glass-modal .ant-input-number {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #e0e0e0;
 }
 
@@ -2413,8 +2416,8 @@ const goBack = () => {
 }
 
 .form-section-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   margin: 16px 0 12px;
   padding-bottom: 8px;
@@ -2423,17 +2426,17 @@ const goBack = () => {
 
 .dark .form-section-title {
   color: #e0e0e0;
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+  border-bottom-color: var(--alpha-white-10);
 }
 
 .nginx-editor-container {
   height: 500px;
   border: 1px solid #d9d9d9;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
 .dark .nginx-editor-container {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--alpha-white-10);
 }
 </style>

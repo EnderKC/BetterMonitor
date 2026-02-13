@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -832,6 +833,7 @@ func CreateContainer(c *gin.Context) {
 }
 
 // 发送请求到Agent并处理响应
+// 【安全修复】添加success字段验证，确保Agent返回成功状态
 func sendAgentRequest(server *models.Server, message map[string]interface{}, requestID string) (map[string]interface{}, error) {
 	// 获取Agent连接
 	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
@@ -856,6 +858,10 @@ func sendAgentRequest(server *models.Server, message map[string]interface{}, req
 	dockerRequestMap.Store(requestID, agentConn)
 	defer dockerRequestMap.Delete(requestID)
 
+	// 【安全修复】注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(server.ID, requestID)
+	defer unregisterPendingRequest(server.ID, requestID)
+
 	// 转换消息为JSON字符串以便日志记录
 	messageBytes, _ := json.Marshal(message)
 	fmt.Printf("[调试] 发送Docker命令到服务器ID=%d, 请求ID=%s, 消息内容: %s\n",
@@ -870,7 +876,7 @@ func sendAgentRequest(server *models.Server, message map[string]interface{}, req
 	fmt.Printf("[调试] 消息已发送，等待服务器ID=%d的响应, 请求ID=%s\n", server.ID, requestID)
 
 	// 设置超时时间
-	timeout := time.After(30 * time.Second)
+	timeout := time.After(TimeoutSimpleQuery)
 
 	// 等待响应
 	select {
@@ -878,18 +884,168 @@ func sendAgentRequest(server *models.Server, message map[string]interface{}, req
 		fmt.Printf("[调试] 收到服务器ID=%d的响应, 请求ID=%s\n", server.ID, requestID)
 
 		// 转换响应数据
-		if responseData, ok := response.(map[string]interface{}); ok {
-			// 记录响应内容
-			responseBytes, _ := json.Marshal(responseData)
-			fmt.Printf("[调试] 响应内容: %s\n", string(responseBytes))
-			return responseData, nil
+		responseData, ok := response.(map[string]interface{})
+		if !ok {
+			fmt.Printf("[错误] 响应格式无效, 请求ID=%s, 类型: %T\n", requestID, response)
+			return nil, ErrInvalidResponseFormat
 		}
-		fmt.Printf("[错误] 响应格式无效, 请求ID=%s, 类型: %T\n", requestID, response)
-		return nil, ErrInvalidResponseFormat
+
+		// 记录响应内容
+		responseBytes, _ := json.Marshal(responseData)
+		fmt.Printf("[调试] 响应内容: %s\n", string(responseBytes))
+
+		// 【安全修复】验证Agent响应的success/error状态
+		if err := validateAgentResponse(responseData); err != nil {
+			fmt.Printf("[错误] Agent返回错误, 请求ID=%s: %v\n", requestID, err)
+			return nil, err
+		}
+
+		return responseData, nil
 	case <-timeout:
 		fmt.Printf("[错误] 请求超时, 服务器ID=%d, 请求ID=%s\n", server.ID, requestID)
 		return nil, ErrRequestTimeout
 	}
+}
+
+// validateAgentResponse 验证Agent响应是否成功
+// 检查多种可能的错误指示字段，支持多种类型的字段值
+func validateAgentResponse(resp map[string]interface{}) error {
+	// 检查 type 字段是否为 error
+	if respType, ok := resp["type"].(string); ok {
+		if respType == "error" || respType == "docker_error" {
+			errMsg := extractErrorMessage(resp)
+			return fmt.Errorf("Agent错误: %s", errMsg)
+		}
+	}
+
+	// 检查 success 字段（支持多种类型：bool, string, number）
+	if !getBoolish(resp, "success", true) {
+		errMsg := extractErrorMessage(resp)
+		return fmt.Errorf("操作失败: %s", errMsg)
+	}
+
+	// 检查 status 字段（支持 string 和 int 状态码）
+	if isErrorStatus(resp) {
+		errMsg := extractErrorMessage(resp)
+		return fmt.Errorf("Agent状态错误: %s", errMsg)
+	}
+
+	// 检查 error 字段是否存在且非空（支持 string, map, array）
+	if errText := getErrorField(resp); errText != "" {
+		return fmt.Errorf("Agent错误: %s", errText)
+	}
+
+	return nil
+}
+
+// getBoolish 从响应中提取布尔值，支持 bool/string/number 类型
+// 如果字段不存在，返回 defaultVal
+func getBoolish(resp map[string]interface{}, key string, defaultVal bool) bool {
+	val, exists := resp[key]
+	if !exists {
+		return defaultVal
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1" || v == "yes" || v == "ok"
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	default:
+		return defaultVal
+	}
+}
+
+// isErrorStatus 检查响应中的 status 字段是否表示错误
+// 支持 string 和 number 类型的状态码
+func isErrorStatus(resp map[string]interface{}) bool {
+	val, exists := resp["status"]
+	if !exists {
+		return false
+	}
+	switch v := val.(type) {
+	case string:
+		return v == "error" || v == "failed" || v == "failure"
+	case float64:
+		return v >= 400 // HTTP 错误状态码
+	case int:
+		return v >= 400
+	case int64:
+		return v >= 400
+	default:
+		return false
+	}
+}
+
+// getErrorField 从响应中提取 error 字段的值
+// 支持 string, map, array 类型
+func getErrorField(resp map[string]interface{}) string {
+	val, exists := resp["error"]
+	if !exists || val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case string:
+		return v
+	case map[string]interface{}:
+		// 如果 error 是 map，尝试提取其中的 message 或 error 字段
+		if msg, ok := v["message"].(string); ok && msg != "" {
+			return msg
+		}
+		if msg, ok := v["error"].(string); ok && msg != "" {
+			return msg
+		}
+		// 序列化为 JSON 字符串
+		if jsonBytes, err := json.Marshal(v); err == nil {
+			return string(jsonBytes)
+		}
+	case []interface{}:
+		// 如果 error 是数组，拼接所有字符串元素
+		var errMsgs []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				errMsgs = append(errMsgs, s)
+			}
+		}
+		if len(errMsgs) > 0 {
+			return strings.Join(errMsgs, "; ")
+		}
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+	return ""
+}
+
+// extractErrorMessage 从响应中提取错误信息
+// 支持多种响应格式和嵌套结构
+func extractErrorMessage(resp map[string]interface{}) string {
+	// 优先从 error 字段提取
+	if errText := getErrorField(resp); errText != "" {
+		return errText
+	}
+	// 从 message 字段提取
+	if msg, ok := resp["message"].(string); ok && msg != "" {
+		return msg
+	}
+	// 从 msg 字段提取（某些 Agent 可能使用 msg）
+	if msg, ok := resp["msg"].(string); ok && msg != "" {
+		return msg
+	}
+	// 从 data.error 或 data.message 字段提取
+	if data, ok := resp["data"].(map[string]interface{}); ok {
+		if errText := getErrorField(data); errText != "" {
+			return errText
+		}
+		if msg, ok := data["message"].(string); ok && msg != "" {
+			return msg
+		}
+	}
+	return "未知错误"
 }
 
 // HandleDockerResponse 处理Docker操作的响应

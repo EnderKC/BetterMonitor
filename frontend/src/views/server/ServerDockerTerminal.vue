@@ -122,23 +122,23 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #f5f5f7;
+  background-color: var(--body-bg);
 }
 
 .glass-header {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  backdrop-filter: blur(var(--blur-md));
+  border-bottom: 1px solid var(--alpha-black-05);
 }
 
 .terminal-wrapper {
   flex: 1;
   background: #1e1e1e;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   margin: 16px;
   padding: 12px;
   min-height: 400px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px var(--alpha-black-10);
   overflow: hidden;
 }
 
@@ -151,7 +151,7 @@ onMounted(() => {
 
 .dark .glass-header {
   background: rgba(30, 30, 30, 0.7);
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--alpha-white-05);
 }
 
 .dark .ant-page-header-heading-title {

@@ -16,7 +16,9 @@ import request from '../../utils/request';
 // 导入服务器状态store
 import { useServerStore } from '../../stores/serverStore';
 // 导入设置store
+// 导入设置store
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined } from '@ant-design/icons-vue';
 
 // 注册必须的组件
@@ -36,7 +38,9 @@ const serverId = ref<number>(Number(route.params.id));
 // 获取服务器状态store
 const serverStore = useServerStore();
 // 获取设置store
+// 获取设置store
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -329,6 +333,7 @@ const fetchHistoricalData = async () => {
     message.error('获取历史监控数据失败: ' + (error.message || '未知错误'));
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -1095,6 +1100,15 @@ const connectWebSocket = () => {
           console.error('服务器错误:', data.message);
           message.error(`服务器错误: ${data.message}`);
         }
+        // 处理Agent离线通知
+        else if (data.type === 'agent_offline') {
+          console.log('收到Agent离线通知:', data);
+          if (serverInfo.value) {
+            serverInfo.value.status = 'offline';
+            serverStore.updateServerStatus(serverId.value, 'offline');
+          }
+          message.warning(data.message || 'Agent连接已断开');
+        }
       } catch (error) {
         console.error('解析WebSocket消息失败:', error, '原始消息:', event.data);
       }
@@ -1586,12 +1600,12 @@ onUnmounted(() => {
 
 .chart-card {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   transition: all 0.3s ease;
 }
 
@@ -1610,8 +1624,8 @@ onUnmounted(() => {
 
 .chart-header h3 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   color: #1d1d1f;
   letter-spacing: -0.01em;
 }
@@ -1626,9 +1640,9 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   min-height: 400px;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
+  background: var(--alpha-white-50);
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--radius-lg);
   margin-top: 24px;
 }
 
@@ -1644,17 +1658,17 @@ onUnmounted(() => {
 /* Dark Mode Adaptation - Global Styles */
 .dark .chart-card {
   background: rgba(30, 30, 30, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--alpha-white-10);
+  box-shadow: 0 8px 32px var(--alpha-black-20);
 }
 
 .dark .chart-card:hover {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 40px var(--alpha-black-30);
   background: rgba(40, 40, 40, 0.7);
 }
 
 .dark .chart-header h3 {
-  color: #f5f5f7;
+  color: var(--body-bg);
 }
 
 .dark .no-data-container {

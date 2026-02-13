@@ -1172,8 +1172,8 @@ const debugShowServerBlocks = () => {
 /* 毛玻璃效果卡片 */
 .glass-card {
   background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.18);
   padding: 24px;
@@ -1187,32 +1187,32 @@ const debugShowServerBlocks = () => {
 
 .glass-card-inner {
   background: rgba(255, 255, 255, 0.7);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px var(--alpha-black-05);
+  border: 1px solid var(--alpha-white-50);
   padding: 20px;
   margin-bottom: 20px;
   transition: all 0.3s ease;
 }
 
 .glass-card-small {
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-80);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px var(--alpha-black-05);
+  border: 1px solid var(--alpha-white-50);
   padding: 16px;
   margin-bottom: 16px;
   transition: all 0.3s ease;
 }
 
 .glass-card-small:hover {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px var(--alpha-black-10);
 }
 
 /* 特殊卡片样式 */
 .error-card {
   background: rgba(255, 240, 240, 0.9);
-  border-left: 4px solid #ff4d4f;
+  border-left: 4px solid var(--error-color);
 }
 
 .server-selector-card {
@@ -1229,8 +1229,8 @@ const debugShowServerBlocks = () => {
 
 /* 标题样式 */
 .section-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: #2c3e50;
   margin-bottom: 16px;
   display: flex;
@@ -1243,8 +1243,8 @@ const debugShowServerBlocks = () => {
 }
 
 .subsection-title {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
   color: #2c3e50;
   margin: 16px 0 12px;
 }
@@ -1257,7 +1257,7 @@ const debugShowServerBlocks = () => {
 /* 帮助文本 */
 .helper-text {
   color: #8492a6;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   margin-top: 8px;
   display: flex;
   align-items: center;
@@ -1270,7 +1270,7 @@ const debugShowServerBlocks = () => {
 
 /* 现代表单控件 */
 .modern-input {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   height: 40px;
   transition: all 0.3s;
 }
@@ -1288,7 +1288,7 @@ const debugShowServerBlocks = () => {
 }
 
 .modern-input-number {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   height: 40px;
 }
 
@@ -1300,7 +1300,7 @@ const debugShowServerBlocks = () => {
 }
 
 .modern-textarea {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: all 0.3s;
 }
 
@@ -1311,11 +1311,11 @@ const debugShowServerBlocks = () => {
 
 .code-area {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .modern-checkbox {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .modern-radio-group {
@@ -1326,7 +1326,7 @@ const debugShowServerBlocks = () => {
 
 /* 按钮样式 */
 .modern-button-dashed {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   height: 40px;
   border-style: dashed;
   color: #4096ff;
@@ -1335,13 +1335,13 @@ const debugShowServerBlocks = () => {
 }
 
 .modern-button-dashed:hover {
-  color: #1677ff;
-  border-color: #1677ff;
+  color: var(--primary-color);
+  border-color: var(--primary-color);
   background: rgba(22, 119, 255, 0.1);
 }
 
 .modern-button-danger {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 77, 79, 0.05);
 }
 
@@ -1361,13 +1361,13 @@ const debugShowServerBlocks = () => {
 }
 
 .modern-tabs :deep(.ant-tabs-tab-active) {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .modern-tabs :deep(.ant-tabs-ink-bar) {
   height: 3px;
   border-radius: 3px;
-  background: linear-gradient(90deg, #4096ff, #1677ff);
+  background: linear-gradient(90deg, #4096ff, var(--primary-color));
 }
 
 .tab-content {
@@ -1400,14 +1400,14 @@ const debugShowServerBlocks = () => {
 }
 
 .server-block-header {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: #2c3e50;
   font-size: 15px;
 }
 
 .server-block-item.active .server-block-header {
-  color: #1677ff;
-  font-weight: 600;
+  color: var(--primary-color);
+  font-weight: var(--font-weight-semibold);
 }
 
 /* 代理和上游项目容器样式 */

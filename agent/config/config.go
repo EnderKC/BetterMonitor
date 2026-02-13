@@ -17,6 +17,9 @@ type Config struct {
 	SecretKey     string `mapstructure:"secret_key"`
 	RegisterToken string `mapstructure:"register_token"`
 
+	// Agent类型: "full" 或 "monitor"
+	AgentType string `mapstructure:"agent_type"`
+
 	// 监控设置
 	MonitorInterval time.Duration `mapstructure:"monitor_interval"`
 
@@ -55,6 +58,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("update_repo", "EnderKC/BetterMonitor")
 	v.SetDefault("update_channel", "stable")
 	v.SetDefault("update_mirror", "")
+	v.SetDefault("agent_type", "full")
 
 	// 配置文件路径
 	if configPath != "" {
@@ -98,12 +102,18 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.MonitorInterval = 30 * time.Second
 	}
 
+	// 兼容旧版配置文件（无 agent_type 字段）
+	if config.AgentType == "" {
+		config.AgentType = "full"
+	}
+
 	// 配置加载完成后输出配置值
 	fmt.Println("配置值:")
 	fmt.Printf("ServerURL: %s\n", config.ServerURL)
 	fmt.Printf("ServerID: %d\n", config.ServerID)
 	fmt.Printf("SecretKey: %s\n", config.SecretKey)
 	fmt.Printf("RegisterToken: %s\n", config.RegisterToken)
+	fmt.Printf("AgentType: %s\n", config.AgentType)
 	fmt.Printf("MonitorInterval: %s\n", config.MonitorInterval)
 	fmt.Printf("LogLevel: %s\n", config.LogLevel)
 	fmt.Printf("LogFile: %s\n", config.LogFile)
@@ -125,6 +135,7 @@ func SaveConfig(config *Config, configPath string) error {
 	v.Set("server_id", config.ServerID)
 	v.Set("secret_key", config.SecretKey)
 	v.Set("register_token", config.RegisterToken)
+	v.Set("agent_type", config.AgentType)
 	v.Set("monitor_interval", config.MonitorInterval.String())
 	v.Set("log_level", config.LogLevel)
 	v.Set("log_file", config.LogFile)

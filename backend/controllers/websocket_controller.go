@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/utils"
@@ -98,6 +98,15 @@ const (
 	TypeError           = "error"
 	TypeMonitor         = "monitor" // 监控数据类型
 	TypeSystemInfo      = "system_info"
+)
+
+// WebSocket 请求超时常量
+const (
+	TimeoutSimpleQuery   = 30 * time.Second  // 简单查询操作（容器列表、进程列表等）
+	TimeoutFileOperation = 60 * time.Second  // 文件操作（读取、保存、删除等）
+	TimeoutLongOperation = 120 * time.Second // 长时间操作（Docker pull/compose up、镜像构建等）
+	TimeoutTerminalCWD   = 10 * time.Second  // 终端工作目录查询
+	TimeoutProcessQuery  = 10 * time.Second  // 进程查询
 )
 
 // WebSocket连接升级器
@@ -248,11 +257,122 @@ func broadcastPublicMonitor(serverID uint, data map[string]interface{}) {
 	}
 }
 
-// 存储Docker命令的响应通道
+// dockerResponseChannels 通用 request-response 关联映射。
+// 虽然命名包含 "docker"，但实际被 Docker、Nginx、终端CWD查询等多种请求类型共用，
+// 用于将 Agent 响应路由到发起请求的 goroutine。
+// key: requestID (string), value: chan interface{} 或 chan map[string]interface{}
 var dockerResponseChannels sync.Map
 
 // 存储Docker命令的请求映射，用于将响应发送给正确的用户
 var dockerRequestMap sync.Map
+
+// 【安全修复】存储每个服务器的待处理请求列表，用于在连接断开时快速失败
+// 键: serverID (uint), 值: *pendingRequestSet
+var serverPendingRequests sync.Map
+
+// pendingRequestSet 用于跟踪某个服务器的所有待处理请求
+type pendingRequestSet struct {
+	mu         sync.Mutex
+	requestIDs map[string]struct{}
+}
+
+// registerPendingRequest 注册一个待处理请求
+func registerPendingRequest(serverID uint, requestID string) {
+	val, _ := serverPendingRequests.LoadOrStore(serverID, &pendingRequestSet{
+		requestIDs: make(map[string]struct{}),
+	})
+	set := val.(*pendingRequestSet)
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	set.requestIDs[requestID] = struct{}{}
+}
+
+// unregisterPendingRequest 取消注册一个待处理请求
+func unregisterPendingRequest(serverID uint, requestID string) {
+	val, ok := serverPendingRequests.Load(serverID)
+	if !ok {
+		return
+	}
+	set := val.(*pendingRequestSet)
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	delete(set.requestIDs, requestID)
+}
+
+// failAllPendingRequests 使某个服务器的所有待处理请求立即失败
+// 当Agent连接断开时调用
+func failAllPendingRequests(serverID uint) {
+	val, ok := serverPendingRequests.Load(serverID)
+	if !ok {
+		return
+	}
+	set := val.(*pendingRequestSet)
+	set.mu.Lock()
+	requestIDs := make([]string, 0, len(set.requestIDs))
+	for id := range set.requestIDs {
+		requestIDs = append(requestIDs, id)
+	}
+	set.requestIDs = make(map[string]struct{}) // 清空
+	set.mu.Unlock()
+
+	log.Printf("[安全修复] 服务器 %d 断开连接，使 %d 个待处理请求失败", serverID, len(requestIDs))
+
+	// 构造统一的错误响应
+	errorResponse := map[string]interface{}{
+		"type":    "error",
+		"error":   "Agent连接已断开",
+		"message": "服务器Agent连接已断开，请求失败",
+	}
+
+	// 通知所有等待的响应通道
+	for _, requestID := range requestIDs {
+		// 尝试从Docker响应通道获取并发送错误
+		// 使用类型开关处理多种可能的通道类型
+		if respChanVal, ok := dockerResponseChannels.LoadAndDelete(requestID); ok {
+			notifyDockerChannel(respChanVal, requestID, errorResponse)
+		}
+		// 清理Docker请求映射
+		dockerRequestMap.Delete(requestID)
+
+		// 尝试从文件请求通道获取并发送错误
+		fileRequestMutex.Lock()
+		if respChan, ok := fileRequestMap[requestID]; ok {
+			delete(fileRequestMap, requestID)
+			fileRequestMutex.Unlock()
+			select {
+			case respChan <- errorResponse:
+				log.Printf("[安全修复] 已通知文件请求 %s 失败（Agent断开）", requestID)
+			default:
+				log.Printf("[安全修复] 文件请求 %s 的响应通道已满或关闭", requestID)
+			}
+		} else {
+			fileRequestMutex.Unlock()
+		}
+	}
+}
+
+// notifyDockerChannel 使用类型开关安全地向Docker响应通道发送错误
+// 支持 chan interface{} 和 chan map[string]interface{} 两种通道类型
+func notifyDockerChannel(respChanVal interface{}, requestID string, errorResponse map[string]interface{}) {
+	switch ch := respChanVal.(type) {
+	case chan interface{}:
+		select {
+		case ch <- errorResponse:
+			log.Printf("[安全修复] 已通知Docker请求 %s 失败（Agent断开）", requestID)
+		default:
+			log.Printf("[安全修复] Docker请求 %s 的响应通道已满或关闭", requestID)
+		}
+	case chan map[string]interface{}:
+		select {
+		case ch <- errorResponse:
+			log.Printf("[安全修复] 已通知Docker请求 %s 失败（Agent断开，map通道）", requestID)
+		default:
+			log.Printf("[安全修复] Docker请求 %s 的响应通道已满或关闭（map通道）", requestID)
+		}
+	default:
+		log.Printf("[安全修复] Docker请求 %s 的响应通道类型未知: %T", requestID, respChanVal)
+	}
+}
 
 // 以下变量已经在process_controller.go中定义，这里注释掉
 // var processResponseChannels sync.Map
@@ -365,85 +485,6 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 			PacketLoss      float64 `json:"packet_loss"`
 		}
 
-		// maskIP 对 IP 地址进行脱敏处理，支持 IPv4 和 IPv6
-		var maskIP func(string) string
-		maskIP = func(rawIP string) string {
-			rawIP = strings.TrimSpace(rawIP)
-			if rawIP == "" {
-				return ""
-			}
-
-			// 处理多个IP地址（用逗号、空格或分号分隔）
-			if strings.ContainsAny(rawIP, ",; ") {
-				// 分割多个IP
-				var maskedIPs []string
-				for _, ip := range strings.FieldsFunc(rawIP, func(r rune) bool {
-					return r == ',' || r == ';' || r == ' ' || r == '\t'
-				}) {
-					ip = strings.TrimSpace(ip)
-					if ip != "" {
-						maskedIPs = append(maskedIPs, maskIP(ip))
-					}
-				}
-				return strings.Join(maskedIPs, ", ")
-			}
-
-			// 提取zone id（如 %eth0）
-			zone := ""
-			if idx := strings.Index(rawIP, "%"); idx >= 0 {
-				zone = rawIP[idx:]
-				rawIP = rawIP[:idx]
-			}
-
-			// 检测是 IPv4 还是 IPv6
-			isIPv6 := strings.Contains(rawIP, ":")
-
-			if !isIPv6 {
-				// IPv4 处理：1.2.3.4 -> 1.2.*.*
-				parts := strings.Split(rawIP, ".")
-				if len(parts) == 4 {
-					maskedIP := parts[0] + "." + parts[1] + ".*.*"
-					if zone != "" {
-						maskedIP += zone
-					}
-					return maskedIP
-				}
-				// 如果格式不正确，返回完全隐藏
-				return "****"
-			}
-
-			// IPv6 处理：保留前两个段，其余用 * 隐藏
-			// 支持完整格式（2001:db8:...）和压缩格式（::1, fe80::）
-			segments := strings.Split(rawIP, ":")
-
-			// 收集非空段
-			var nonEmptySegments []string
-			for _, seg := range segments {
-				if seg != "" {
-					nonEmptySegments = append(nonEmptySegments, seg)
-				}
-			}
-
-			// 构建脱敏后的IPv6地址
-			var maskedIP string
-			if len(nonEmptySegments) >= 2 {
-				// 保留前两个段
-				maskedIP = nonEmptySegments[0] + ":" + nonEmptySegments[1] + ":****:****:****:****:****:****"
-			} else if len(nonEmptySegments) == 1 {
-				// 只有一个段（如 ::1）
-				maskedIP = nonEmptySegments[0] + ":****:****:****:****:****:****:****"
-			} else {
-				// 完全压缩（::）
-				maskedIP = "****:****:****:****:****:****:****:****"
-			}
-
-			if zone != "" {
-				maskedIP += zone
-			}
-
-			return maskedIP
-		}
-
 		var list []PublicServer
 		for _, server := range servers {
 			systemInfo := make(map[string]interface{})
@@ -532,6 +573,20 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	// 独立 goroutine 处理读消息，检测客户端断开
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Printf("公开服务器WebSocket关闭: %v", err)
+				}
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ticker.C:
@@ -539,14 +594,8 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 				log.Printf("刷新公开服务器列表失败: %v", err)
 				return
 			}
-		default:
-			conn.SetReadDeadline(time.Now().Add(35 * time.Second))
-			if _, _, err := conn.ReadMessage(); err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("公开服务器WebSocket关闭: %v", err)
-				}
-				return
-			}
+		case <-readDone:
+			return
 		}
 	}
 }
@@ -790,7 +839,7 @@ func WebSocketHandler(c *gin.Context) {
 
 	if !authenticated {
 		token := c.Query("token")
-		log.Printf("尝试Secret Key认证: 传入Token=%s, 服务器SecretKey=%s", token, server.SecretKey)
+		log.Printf("尝试Secret Key认证: token_len=%d, match=%t", len(token), token == server.SecretKey)
 		if token != "" && token == server.SecretKey {
 			authenticated = true
 			isAgent = true // 标记为Agent连接
@@ -848,10 +897,43 @@ func WebSocketHandler(c *gin.Context) {
 		// 存储新连接
 		ActiveAgentConnections.Store(server.ID, safeConn)
 
-		// 设置函数在连接关闭时从映射中移除
+		// 设置函数在连接关闭时从映射中移除，并使所有待处理请求失败
 		defer func(id uint) {
 			log.Printf("Agent连接关闭，从映射中移除，服务器ID: %d", id)
 			ActiveAgentConnections.Delete(id)
+			// 【安全修复】使该服务器的所有待处理请求立即失败
+			failAllPendingRequests(id)
+
+			// 通知前端监控订阅者Agent已离线
+			broadcastPublicMonitor(id, map[string]interface{}{
+				"type":      "agent_offline",
+				"server_id": id,
+				"message":   "Agent连接已断开",
+				"timestamp": time.Now().Unix(),
+			})
+
+			// 通知该服务器所有终端会话用户Agent已断开
+			terminalSessions.Range(func(key, value interface{}) bool {
+				session, ok := value.(TerminalSession)
+				if !ok || session.ServerID != id {
+					return true
+				}
+				sessionID, ok := key.(string)
+				if !ok {
+					return true
+				}
+				if userConnVal, ok := ActiveTerminalConnections.Load(sessionID); ok {
+					if userConn, ok := userConnVal.(*SafeConn); ok {
+						userConn.WriteJSON(map[string]interface{}{
+							"type":       "terminal_error",
+							"session_id": sessionID,
+							"message":    "Agent连接已断开，终端会话不可用",
+							"timestamp":  time.Now().Unix(),
+						})
+					}
+				}
+				return true
+			})
 		}(server.ID)
 
 		// 更新服务器状态为在线
@@ -1008,6 +1090,33 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 		}(sessionParam)
 	}
 
+	// Agent连接启用ping/pong心跳，及时感知断连
+	if isAgent {
+		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		conn.SetPongHandler(func(appData string) error {
+			conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+			return nil
+		})
+
+		pingDone := make(chan struct{})
+		defer close(pingDone)
+		go func() {
+			pingTicker := time.NewTicker(30 * time.Second)
+			defer pingTicker.Stop()
+			for {
+				select {
+				case <-pingTicker.C:
+					if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+						log.Printf("服务器 %d 的ping发送失败: %v", server.ID, err)
+						return
+					}
+				case <-pingDone:
+					return
+				}
+			}
+		}()
+	}
+
 	// 处理接收到的消息
 	for {
 		// 读取消息
@@ -1034,15 +1143,6 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 		case TypeShellCommand:
 			// Shell命令的处理
 			handleShellCommand(conn, server, msg.Payload)
-		case TypeFileList:
-			// 文件列表的处理
-			handleFileList(conn, server, msg.Payload)
-		case TypeFileContent:
-			// 文件内容的处理
-			handleFileContent(conn, server, msg.Payload)
-		case TypeFileUpload:
-			// 文件上传的处理
-			handleFileUpload(conn, server, msg.Payload)
 		case TypeProcessList:
 			// 进程列表的处理
 			handleProcessList(conn, server, msg.Payload)
@@ -1052,9 +1152,6 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 		case TypeDockerCommand:
 			// Docker命令的处理
 			handleDockerCommand(conn, server, msg.Payload)
-		case TypeNginxCommand:
-			// Nginx命令的处理
-			handleNginxCommand(conn, server, msg.Payload)
 		case TypeMonitor:
 			// Agent 上报监控数据
 			if !isAgent {
@@ -1167,6 +1264,13 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				}
 			}
 
+			if agentType, ok := systemInfoData["agent_type"].(string); ok {
+				agentType = strings.TrimSpace(agentType)
+				if agentType == "full" || agentType == "monitor" {
+					server.AgentType = agentType
+				}
+			}
+
 			if memoryTotal, ok := systemInfoData["memory_total"].(float64); ok && memoryTotal > 0 {
 				server.MemoryTotal = int64(memoryTotal)
 			}
@@ -1185,16 +1289,17 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			}
 
 			updates := map[string]interface{}{
-				"system_info":  server.SystemInfo,
-				"ip":           server.IP,
-				"public_ip":    server.PublicIP,
-				"os":           server.OS,
-				"arch":         server.Arch,
-				"cpu_cores":    server.CPUCores,
-				"cpu_model":    server.CPUModel,
+				"system_info":   server.SystemInfo,
+				"ip":            server.IP,
+				"public_ip":     server.PublicIP,
+				"os":            server.OS,
+				"arch":          server.Arch,
+				"cpu_cores":     server.CPUCores,
+				"cpu_model":     server.CPUModel,
 				"agent_version": server.AgentVersion,
-				"memory_total": server.MemoryTotal,
-				"disk_total":   server.DiskTotal,
+				"agent_type":    server.AgentType,
+				"memory_total":  server.MemoryTotal,
+				"disk_total":    server.DiskTotal,
 			}
 
 			if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
@@ -1504,6 +1609,17 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			} else {
 				log.Printf("收到Agent升级响应: server=%d request_id=%s", server.ID, upgradeResp.RequestID)
 			}
+
+			// 推送升级状态到前端监控订阅者
+			broadcastPublicMonitor(server.ID, map[string]interface{}{
+				"type":       "agent_upgrade_status",
+				"server_id":  server.ID,
+				"request_id": upgradeResp.RequestID,
+				"status":     status,
+				"message":    msgText,
+				"data":       upgradeResp.Data,
+				"timestamp":  time.Now().Unix(),
+			})
 		default:
 			log.Printf("未知的消息类型: %s", msg.Type)
 			sendErrorMessage(conn, "未知的消息类型")
@@ -1537,7 +1653,7 @@ func handleShellCommand(conn *SafeConn, server *models.Server, payload json.RawM
 
 	// 检查会话是否存在（仅处理input和resize类型的消息）
 	if (cmdData.Type == "input" || cmdData.Type == "resize") && !isDockerSession {
-		_, ok := terminalSessions[sessionID]
+		_, ok := terminalSessions.Load(sessionID)
 		if !ok {
 			log.Printf("会话不存在: %s", sessionID)
 			sendErrorMessage(conn, "会话不存在或已过期")
@@ -1557,7 +1673,7 @@ func handleShellCommand(conn *SafeConn, server *models.Server, payload json.RawM
 
 		// 从活跃会话中删除
 		ActiveTerminalConnections.Delete(sessionID)
-		delete(terminalSessions, sessionID)
+		terminalSessions.Delete(sessionID)
 	}
 
 	payloadData := map[string]interface{}{
@@ -1611,29 +1727,6 @@ func handleShellCommand(conn *SafeConn, server *models.Server, payload json.RawM
 }
 
 // 处理文件列表
-func handleFileList(conn *SafeConn, server *models.Server, payload json.RawMessage) {
-	// 实现文件列表的处理逻辑
-	// 这里需要根据实际需求实现
-	log.Printf("收到文件列表请求，服务器ID: %d", server.ID)
-	sendErrorMessage(conn, "文件列表处理逻辑未实现")
-}
-
-// 处理文件内容
-func handleFileContent(conn *SafeConn, server *models.Server, payload json.RawMessage) {
-	// 实现文件内容处理逻辑
-	// 这里需要根据实际需求实现
-	log.Printf("收到文件内容请求，服务器ID: %d", server.ID)
-	sendErrorMessage(conn, "文件内容处理逻辑未实现")
-}
-
-// 处理文件上传
-func handleFileUpload(conn *SafeConn, server *models.Server, payload json.RawMessage) {
-	// 实现文件上传的处理逻辑
-	// 这里需要根据实际需求实现
-	log.Printf("收到文件上传请求，服务器ID: %d", server.ID)
-	sendErrorMessage(conn, "文件上传处理逻辑未实现")
-}
-
 // 处理进程列表
 func handleProcessList(conn *SafeConn, server *models.Server, payload json.RawMessage) {
 	log.Printf("处理进程列表请求，服务器ID: %d", server.ID)
@@ -1826,97 +1919,27 @@ func handleDockerCommand(conn *SafeConn, server *models.Server, payload json.Raw
 	log.Printf("Docker命令请求已发送到Agent，请求ID: %s", requestID)
 }
 
-// 处理Nginx命令
-func handleNginxCommand(conn *SafeConn, server *models.Server, payload json.RawMessage) {
-	log.Printf("处理Nginx命令，服务器ID: %d", server.ID)
-
-	// 解析Nginx命令请求
-	var reqData struct {
-		Action string          `json:"action"`
-		Params json.RawMessage `json:"params,omitempty"`
-	}
-	if err := json.Unmarshal(payload, &reqData); err != nil {
-		log.Printf("解析Nginx命令请求参数失败: %v", err)
-		sendErrorMessage(conn, "Nginx请求格式错误")
-		return
-	}
-
-	log.Printf("收到Nginx命令请求: 操作=%s", reqData.Action)
-
-	// 生成请求ID
-	requestID := generateRequestID()
-
-	// 构建发送到Agent的消息
-	message := map[string]interface{}{
-		"type":       "nginx_command",
-		"request_id": requestID,
-		"payload": map[string]interface{}{
-			"action": reqData.Action,
-		},
-	}
-
-	// 添加可选参数
-	if len(reqData.Params) > 0 {
-		var paramsMap map[string]interface{}
-		if err := json.Unmarshal(reqData.Params, &paramsMap); err == nil {
-			for k, v := range paramsMap {
-				message["payload"].(map[string]interface{})[k] = v
-			}
-		}
-	}
-
-	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
-	if !ok {
-		log.Printf("服务器 %d 的Agent未连接", server.ID)
-		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-		sendErrorMessage(conn, "服务器连接错误")
-		return
-	}
-
-	// 创建响应通道 - 使用与Docker相同的结构来处理响应
-	responseChan := make(chan interface{}, 1)
-	dockerResponseChannels.Store(requestID, responseChan)
-
-	// 在函数返回时清理通道
-	defer dockerResponseChannels.Delete(requestID)
-
-	// 将用户连接与请求ID关联，以便将响应发送回用户
-	dockerRequestMap.Store(requestID, conn)
-	defer dockerRequestMap.Delete(requestID)
-
-	// 发送消息到Agent
-	if err := agentConn.WriteJSON(message); err != nil {
-		log.Printf("发送Nginx命令请求到Agent失败: %v", err)
-		sendErrorMessage(conn, "发送请求到Agent失败")
-		return
-	}
-
-	log.Printf("Nginx命令请求已发送到Agent，请求ID: %s", requestID)
-}
-
 // 发送错误消息
-func sendErrorMessage(conn *SafeConn, message string) {
-	// 生成详细的错误消息
+// 可选的 requestIDs 参数用于关联原始请求ID，便于前端追踪错误来源。
+// 不传则自动生成新的请求ID。
+func sendErrorMessage(conn *SafeConn, message string, requestIDs ...string) {
+	reqID := generateRequestID()
+	if len(requestIDs) > 0 && requestIDs[0] != "" {
+		reqID = requestIDs[0]
+	}
+
 	errMsg := struct {
 		Type      string `json:"type"`
 		Message   string `json:"message"`
 		Timestamp int64  `json:"timestamp"`
-		RequestID string `json:"request_id"` // 添加请求ID用于跟踪错误
+		RequestID string `json:"request_id"`
 	}{
 		Type:      TypeError,
 		Message:   message,
 		Timestamp: time.Now().Unix(),
-		RequestID: generateRequestID(), // 生成唯一请求ID
+		RequestID: reqID,
 	}
 
-	// 记录详细的错误日志
 	log.Printf("发送错误消息 [%s]: %s", errMsg.RequestID, message)
 
 	if err := conn.WriteJSON(errMsg); err != nil {
@@ -1925,9 +1948,9 @@ func sendErrorMessage(conn *SafeConn, message string) {
 }
 
 // 生成唯一的请求ID
+// 【安全修复】使用UUID替代math/rand，提供更强的唯一性保证和密码学安全性
 func generateRequestID() string {
-	// 生成基于时间戳和随机数的唯一ID
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(1000000))
+	return uuid.New().String()
 }
 
 // 发送终端错误消息给特定会话的用户
@@ -1999,7 +2022,7 @@ func sendTerminalClose(sessionID string) {
 
 	// 从活跃会话中移除
 	ActiveTerminalConnections.Delete(sessionID)
-	delete(terminalSessions, sessionID)
+	terminalSessions.Delete(sessionID)
 }
 
 // 导出函数：获取ActiveAgentConnections中的agent连接
@@ -2049,6 +2072,18 @@ func requestTerminalWorkingDirectoryViaWebSocket(serverID uint, sessionID string
 		return "", fmt.Errorf("服务器连接类型错误")
 	}
 
+	// 创建请求ID
+	requestID := fmt.Sprintf("cwd_%s_%d", sessionID, time.Now().UnixNano())
+
+	// 创建 buffered(1) 响应通道，存入 dockerResponseChannels
+	responseChan := make(chan map[string]interface{}, 1)
+	dockerResponseChannels.Store(requestID, responseChan)
+	defer dockerResponseChannels.Delete(requestID)
+
+	// 注册待处理请求，以便在Agent断开时能快速失败
+	registerPendingRequest(serverID, requestID)
+	defer unregisterPendingRequest(serverID, requestID)
+
 	// 构造获取工作目录的消息
 	request := map[string]interface{}{
 		"type": "shell_command",
@@ -2058,36 +2093,6 @@ func requestTerminalWorkingDirectoryViaWebSocket(serverID uint, sessionID string
 		},
 	}
 
-	// 创建响应通道
-	responseChan := make(chan map[string]interface{}, 1)
-	timeout := 10 * time.Second
-
-	// 存储响应处理器
-	requestID := fmt.Sprintf("cwd_%s_%d", sessionID, time.Now().UnixNano())
-	dockerResponseChannels.Store(requestID, responseChan)
-	defer dockerResponseChannels.Delete(requestID)
-
-	// 监听WebSocket消息中的工作目录响应
-	go func() {
-		defer close(responseChan)
-
-		// 设置监听超时
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-
-		for {
-			select {
-			case <-timer.C:
-				// 超时
-				return
-			default:
-				// 这里应该由WebSocket消息处理器接收到working_directory消息后
-				// 调用responseChan发送响应
-				// 为了简化，我们使用一个全局的响应映射
-			}
-		}
-	}()
-
 	// 发送请求
 	if err := agentConn.WriteJSON(request); err != nil {
 		return "", fmt.Errorf("发送请求失败: %v", err)
@@ -2096,11 +2101,14 @@ func requestTerminalWorkingDirectoryViaWebSocket(serverID uint, sessionID string
 	// 等待响应或超时
 	select {
 	case resp := <-responseChan:
+		if resp == nil {
+			return "", fmt.Errorf("Agent连接已断开")
+		}
 		if workingDir, ok := resp["working_dir"].(string); ok {
 			return workingDir, nil
 		}
 		return "", fmt.Errorf("无效的响应格式")
-	case <-time.After(timeout):
+	case <-time.After(TimeoutTerminalCWD):
 		return "", fmt.Errorf("请求超时")
 	}
 }

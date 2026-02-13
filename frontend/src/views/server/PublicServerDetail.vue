@@ -11,6 +11,7 @@ import { useServerStore } from '../../stores/serverStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useThemeStore } from '../../stores/theme';
 import { storeToRefs } from 'pinia';
+import { useUIStore } from '../../stores/uiStore';
 // 导入图表组件
 import CpuUsageChartCard from '../../components/server/monitor/CpuUsageChartCard.vue';
 import MemoryUsageChartCard from '../../components/server/monitor/MemoryUsageChartCard.vue';
@@ -25,7 +26,9 @@ const serverId = ref<number>(Number(route.params.id));
 const serverStore = useServerStore();
 const settingsStore = useSettingsStore();
 const themeStore = useThemeStore();
+
 const { isDark } = storeToRefs(themeStore);
+const uiStore = useUIStore();
 
 // 定义数据点类型
 type DataPoint = {
@@ -136,6 +139,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -617,7 +621,7 @@ onUnmounted(() => {
           <span class="gradient-title">
             {{ serverInfo.name }}
             <span v-if="serverInfo.hostname && serverInfo.hostname !== '未知'" class="hostname-tag">{{ serverInfo.hostname
-              }}</span>
+            }}</span>
           </span>
         </template>
         <template #subTitle>
@@ -717,7 +721,7 @@ onUnmounted(() => {
               <span class="sys-item">{{ serverInfo.os }}</span>
             </div>
             <small>{{ serverInfo.arch }} • {{ serverInfo.region !== '未知' ? serverInfo.region : serverInfo.hostname
-            }}</small>
+              }}</small>
           </div>
 
           <!-- 描述 (全宽) -->
@@ -808,8 +812,8 @@ onUnmounted(() => {
 
 .detail-header {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-bottom: 1px solid var(--card-border);
   padding: 0 24px;
   position: sticky;
@@ -822,16 +826,16 @@ onUnmounted(() => {
 }
 
 .gradient-title {
-  font-size: 24px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #1677ff, #4096ff);
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  background: linear-gradient(135deg, var(--primary-color), #4096ff);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .sub-title {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-family: "SF Mono", Menlo, monospace;
   color: var(--text-secondary);
 }
@@ -843,7 +847,7 @@ onUnmounted(() => {
 }
 
 .status-tag {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   border-radius: 4px;
 }
 
@@ -863,11 +867,11 @@ onUnmounted(() => {
 
 .overview-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   display: flex;
@@ -876,13 +880,13 @@ onUnmounted(() => {
 
 .overview-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
   border-color: rgba(22, 119, 255, 0.3);
 }
 
 .overview-card .label {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   margin-bottom: 8px;
   text-transform: uppercase;
@@ -891,8 +895,8 @@ onUnmounted(() => {
 
 .overview-card h3 {
   margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   letter-spacing: -0.5px;
   font-family: "SF Mono", Menlo, monospace;
@@ -903,7 +907,7 @@ onUnmounted(() => {
   margin-top: auto;
   padding-top: 8px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: normal;
   overflow: visible;
 }
@@ -918,13 +922,13 @@ onUnmounted(() => {
 .status-dot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  background-color: #ff4d4f;
+  border-radius: var(--radius-circle);
+  background-color: var(--error-color);
   box-shadow: 0 0 8px rgba(255, 77, 79, 0.4);
 }
 
 .status-dot.online {
-  background-color: #52c41a;
+  background-color: var(--success-color);
   box-shadow: 0 0 8px rgba(82, 196, 26, 0.4);
 }
 
@@ -942,22 +946,22 @@ onUnmounted(() => {
 
 .speed-value {
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
-  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
 }
 
 .arrow {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: bold;
 }
 
 .arrow.up {
-  color: #52c41a;
+  color: var(--success-color);
 }
 
 .arrow.down {
-  color: #1677ff;
+  color: var(--primary-color);
 }
 
 /* Monitor Section */
@@ -973,8 +977,8 @@ onUnmounted(() => {
 }
 
 .section-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   margin: 0;
 }
@@ -987,11 +991,11 @@ onUnmounted(() => {
 
 .chart-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
   border: 1px solid var(--card-border);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   height: 320px;
@@ -1000,12 +1004,12 @@ onUnmounted(() => {
 }
 
 .chart-card:hover {
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
 }
 
 .chart-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   margin-bottom: 16px;
   color: var(--text-primary);
 }
@@ -1030,18 +1034,18 @@ onUnmounted(() => {
 }
 
 .hostname-tag {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: normal;
   color: var(--text-secondary);
   margin-left: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   padding: 2px 8px;
   border-radius: 4px;
 }
 
 .description-text {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.5;
   margin: 0;
   white-space: pre-wrap;
@@ -1057,13 +1061,13 @@ onUnmounted(() => {
 /* Dark Mode Overrides */
 .dark .detail-header {
   background: rgba(20, 20, 20, 0.85);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--alpha-white-10);
 }
 
 .dark .overview-card,
 .dark .chart-card {
   background: rgba(30, 30, 30, 0.6);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--alpha-white-08);
 }
 
 .dark .overview-card:hover,
@@ -1071,5 +1075,4 @@ onUnmounted(() => {
   background: rgba(40, 40, 40, 0.8);
   border-color: rgba(22, 119, 255, 0.4);
 }
-
 </style>

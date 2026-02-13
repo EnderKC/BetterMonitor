@@ -243,16 +243,16 @@ const getFileIcon = (file: FileItem) => {
 }
 
 .path-breadcrumb {
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .file-list-container {
   flex: 1;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--alpha-white-50);
+  backdrop-filter: blur(var(--blur-sm));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--alpha-black-05);
 }
 
 .file-name-cell {
@@ -263,26 +263,26 @@ const getFileIcon = (file: FileItem) => {
 }
 
 .file-icon {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   color: #8c8c8c;
 }
 
 .file-icon.is-dir {
-  color: #1890ff;
+  color: var(--primary-color);
 }
 
 .file-name {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .mac-search :deep(.ant-input) {
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.6);
+  border-radius: var(--radius-xs);
+  background: var(--alpha-white-60);
   backdrop-filter: blur(5px);
 }
 
 .mac-btn {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .mac-table :deep(.ant-table) {
@@ -290,16 +290,16 @@ const getFileIcon = (file: FileItem) => {
 }
 
 .mac-table :deep(.ant-table-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  font-weight: 600;
+  background: var(--alpha-black-02);
+  font-weight: var(--font-weight-semibold);
 }
 
 .mac-table :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid var(--alpha-black-03);
 }
 
 .mac-table :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 </style>
 
@@ -307,27 +307,27 @@ const getFileIcon = (file: FileItem) => {
 /* Dark mode support */
 .dark .file-list-container {
   background: rgba(30, 30, 30, 0.5);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--alpha-white-10);
 }
 
 .dark .mac-search .ant-input {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-10);
   color: #fff;
 }
 
 .dark .mac-table .ant-table-thead>tr>th {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
   color: #e6e6e6;
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
 }
 
 .dark .mac-table .ant-table-tbody>tr>td {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--alpha-white-05);
   color: #e6e6e6;
 }
 
 .dark .mac-table .ant-table-tbody>tr:hover>td {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 </style>

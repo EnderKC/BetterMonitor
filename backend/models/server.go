@@ -30,6 +30,7 @@ type Server struct {
 	Status          string    `json:"status" gorm:"default:'offline'"`        // 服务器状态
 	SystemInfo      string    `json:"system_info" gorm:"type:text"`           // 系统信息 JSON
 	AgentVersion    string    `json:"agent_version" gorm:"type:varchar(64)"`  // Agent版本
+	AgentType       string    `json:"agent_type" gorm:"type:varchar(20);default:'full'"` // Agent类型: full 或 monitor
 	CountryCode     string    `json:"country_code" gorm:"type:varchar(10)"`   // 国家代码
 	NetworkInTotal  uint64    `json:"network_in_total" gorm:"default:0"`      // 总入网流量
 	NetworkOutTotal uint64    `json:"network_out_total" gorm:"default:0"`     // 总出网流量

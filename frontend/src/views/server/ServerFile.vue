@@ -27,6 +27,7 @@ import request from '../../utils/request';
 import { getToken } from '../../utils/auth';
 // 导入服务器状态store
 import { useServerStore } from '../../stores/serverStore';
+import { useUIStore } from '../../stores/uiStore';
 // 导入CodeMirror相关组件
 import { Codemirror } from 'vue-codemirror';
 // 导入 xterm
@@ -106,6 +107,7 @@ const getQueryPath = (): string => {
 const initialPath = ref<string>(normalizePath(getQueryPath()));
 // 获取服务器状态store
 const serverStore = useServerStore();
+const uiStore = useUIStore();
 
 // 服务器详情
 const serverInfo = ref<any>({});
@@ -301,6 +303,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -947,6 +950,14 @@ onMounted(async () => {
   }
 });
 
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeTerminal);
+  // 清理ResizeObserver
+  if (terminal.value && (terminal.value as any)._resizeObserver) {
+    (terminal.value as any)._resizeObserver.disconnect();
+  }
+});
+
 watch(
   () => route.query.path,
   (newVal) => {
@@ -964,6 +975,10 @@ const goBack = () => {
   const from = route.query.from;
   if (from === 'nginx') {
     router.push(`/admin/servers/${serverId.value}/nginx`);
+    return;
+  }
+  if (from === 'docker') {
+    router.push(`/admin/servers/${serverId.value}/docker`);
     return;
   }
   router.push(`/admin/servers/${serverId.value}`);
@@ -1032,10 +1047,44 @@ const initTerminal = () => {
   fitAddon.value = new FitAddon();
   terminal.value.loadAddon(fitAddon.value);
   terminal.value.open(terminalRef.value);
-  fitAddon.value.fit();
+
+  // 延时执行适应大小，确保DOM已经渲染完成
+  setTimeout(() => {
+    resizeTerminal();
+  }, 100);
 
   // 连接WebSocket
   connectTerminalWs();
+
+  // 添加resize监听
+  window.addEventListener('resize', resizeTerminal);
+};
+
+// 调整终端大小
+const resizeTerminal = () => {
+  if (!fitAddon.value || !terminal.value) return;
+
+  try {
+    fitAddon.value.fit();
+
+    // 如果连接已建立，通知后端调整大小
+    if (terminalWs && terminalWs.readyState === WebSocket.OPEN && terminalSessionId.value) {
+      const resizeCommand = {
+        type: 'shell_command',
+        payload: {
+          type: 'resize',
+          data: JSON.stringify({
+            cols: terminal.value.cols,
+            rows: terminal.value.rows
+          }),
+          session: terminalSessionId.value
+        }
+      };
+      terminalWs.send(JSON.stringify(resizeCommand));
+    }
+  } catch (e) {
+    console.error('Resize terminal error:', e);
+  }
 };
 
 // 连接终端WebSocket
@@ -1061,18 +1110,35 @@ const connectTerminalWs = () => {
     console.log('Terminal WebSocket connected');
     terminal.value?.write(`正在连接到文件管理器终端...\r\n`);
 
+    // 先发送 create 命令在 Agent 端创建终端会话
+    const createCommand = {
+      type: 'shell_command',
+      payload: {
+        type: 'create',
+        data: '',
+        session: terminalSessionId.value
+      }
+    };
+    terminalWs?.send(JSON.stringify(createCommand));
+
     // 发送 cd 命令切换到当前目录
     setTimeout(() => {
-      const cdCommand = {
-        type: 'shell_command',
-        payload: {
-          type: 'input',
-          data: `cd ${terminalWorkingDir.value}\n`,
-          session: terminalSessionId.value
-        }
-      };
-      terminalWs?.send(JSON.stringify(cdCommand));
-    }, 500);
+      // 先发送resize确保后端知道当前终端大小
+      resizeTerminal();
+
+      // 延迟发送 cd 命令，确保 resize 已被处理
+      setTimeout(() => {
+        const cdCommand = {
+          type: 'shell_command',
+          payload: {
+            type: 'input',
+            data: `cd ${terminalWorkingDir.value}\n`,
+            session: terminalSessionId.value
+          }
+        };
+        terminalWs?.send(JSON.stringify(cdCommand));
+      }, 100);
+    }, 200);
   };
 
   terminalWs.onmessage = (event) => {
@@ -1480,11 +1546,11 @@ const customRow = (record: any) => {
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 12px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 50px var(--alpha-black-15);
+  border: 1px solid var(--alpha-white-40);
   overflow: hidden;
 }
 
@@ -1498,7 +1564,7 @@ const customRow = (record: any) => {
   justify-content: space-between;
   padding: 0 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-50);
   -webkit-app-region: drag;
   /* 模拟可拖动区域 */
 }
@@ -1520,7 +1586,7 @@ const customRow = (record: any) => {
 .control-dot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 .control-dot.red {
@@ -1549,8 +1615,8 @@ const customRow = (record: any) => {
 }
 
 .window-title {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
@@ -1561,9 +1627,9 @@ const customRow = (record: any) => {
 }
 
 .path-breadcrumb {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   max-width: 400px;
   overflow: hidden;
   white-space: nowrap;
@@ -1582,18 +1648,18 @@ const customRow = (record: any) => {
 
 .search-input {
   width: 160px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .action-btn {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-secondary);
 }
 
 .action-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   color: var(--text-primary);
 }
 
@@ -1624,7 +1690,7 @@ const customRow = (record: any) => {
 .sidebar {
   width: 220px;
   background: rgba(245, 245, 245, 0.6);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--blur-sm));
   border-right: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
@@ -1640,7 +1706,7 @@ const customRow = (record: any) => {
 
 .section-title {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   margin-bottom: 8px;
   padding-left: 8px;
@@ -1652,12 +1718,12 @@ const customRow = (record: any) => {
 }
 
 .sidebar-tree :deep(.ant-tree-node-content-wrapper) {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 4px 0;
 }
 
 .sidebar-tree :deep(.ant-tree-node-selected .ant-tree-node-content-wrapper) {
-  background: rgba(0, 122, 255, 0.15) !important;
+  background: var(--info-bg) !important;
   color: var(--primary-color);
 }
 
@@ -1666,7 +1732,7 @@ const customRow = (record: any) => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--alpha-white-40);
 }
 
 
@@ -1682,7 +1748,7 @@ const customRow = (record: any) => {
 :deep(.ant-table-thead > tr > th) {
   background: transparent;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   padding: 8px 16px;
 }
@@ -1691,7 +1757,7 @@ const customRow = (record: any) => {
 
 :deep(.ant-table-tbody > tr > td) {
   padding: 8px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid var(--alpha-black-03);
 }
 
 
@@ -1699,7 +1765,7 @@ const customRow = (record: any) => {
 
 :deep(.ant-upload-hint) {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 /* Zebra Striping */
@@ -1715,7 +1781,7 @@ const customRow = (record: any) => {
 }
 
 .name-text {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
 }
 
@@ -1738,7 +1804,7 @@ const customRow = (record: any) => {
   gap: 16px;
   font-size: 11px;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--alpha-white-30);
 }
 
 
@@ -1754,17 +1820,17 @@ const customRow = (record: any) => {
 }
 
 .file-name {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .file-size {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: "SF Mono", Menlo, monospace;
 }
 
@@ -1793,7 +1859,7 @@ const customRow = (record: any) => {
   background: var(--primary-color);
   border-radius: 10px;
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
@@ -1807,10 +1873,10 @@ const customRow = (record: any) => {
 
 /* Modal Styling */
 :global(.macos-modal .ant-modal-content) {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(20px);
+  background: var(--alpha-white-90);
+  backdrop-filter: blur(var(--blur-md));
 }
 
 
@@ -1902,7 +1968,7 @@ const customRow = (record: any) => {
 
 /* Editor Dark Mode */
 :root.dark .editor-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--alpha-white-05);
 }
 
 :root.dark .file-name {
@@ -1911,7 +1977,7 @@ const customRow = (record: any) => {
 
 :root.dark .file-lang {
   color: #61afef;
-  background: rgba(97, 175, 239, 0.15);
+  background: var(--primary-light);
 }
 
 :root.dark .file-info {
@@ -1919,12 +1985,12 @@ const customRow = (record: any) => {
 }
 
 :root.dark .file-explorer {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--alpha-white-10);
 }
 
 :root.dark .file-sidebar {
   background: rgba(33, 37, 43, 0.9);
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid var(--alpha-white-10);
 }
 
 :root.dark .sidebar-header h4 {
@@ -1937,7 +2003,7 @@ const customRow = (record: any) => {
 
 :root.dark .file-toolbar {
   background: rgba(33, 37, 43, 0.8);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--alpha-white-10);
 }
 
 :root.dark .current-path {
@@ -1945,12 +2011,12 @@ const customRow = (record: any) => {
 }
 
 :root.dark .selected-file {
-  background: rgba(97, 175, 239, 0.1);
+  background: var(--primary-bg);
   border: 1px solid rgba(97, 175, 239, 0.2);
 }
 
 :root.dark .path-jump-tip {
-  background: rgba(97, 175, 239, 0.1);
+  background: var(--primary-bg);
   border-left: 3px solid #61afef;
   color: #abb2bf;
 }
@@ -1970,26 +2036,26 @@ const customRow = (record: any) => {
 /* Migrated Dark Mode Styles */
 .dark .macos-window {
   background: rgba(30, 30, 30, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--alpha-white-10);
+  box-shadow: 0 20px 50px var(--alpha-black-40);
 }
 
 .dark .window-toolbar {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--alpha-white-08);
+  background: var(--alpha-white-05);
 }
 
 .dark .path-breadcrumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
 }
 
 .dark .action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
 }
 
 .dark .sidebar {
-  background: rgba(0, 0, 0, 0.2);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--alpha-black-20);
+  border-right: 1px solid var(--alpha-white-08);
 }
 
 .dark .main-view {
@@ -1997,7 +2063,7 @@ const customRow = (record: any) => {
 }
 
 .dark .ant-table-thead>tr>th {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--alpha-white-08);
 }
 
 .dark .ant-table-tbody>tr>td {
@@ -2009,8 +2075,8 @@ const customRow = (record: any) => {
 }
 
 .dark .status-bar {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--alpha-white-08);
+  background: var(--alpha-white-05);
 }
 
 .dark .macos-modal .ant-modal-content {
@@ -2018,7 +2084,7 @@ const customRow = (record: any) => {
 }
 
 .dark .macos-modal .ant-modal-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--alpha-white-08);
 }
 
 .dark .file-lang {
@@ -2065,6 +2131,6 @@ const customRow = (record: any) => {
 :global(.terminal-modal .ant-modal-title) {
   color: #ccc;
   font-family: 'SF Mono', Menlo, monospace;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 </style>

@@ -36,26 +36,26 @@ const statusText = computed(() => {
   align-items: center;
   padding: 4px 12px;
   border-radius: var(--radius-md);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
 }
 
 .status-online {
-  background-color: rgba(82, 196, 26, 0.1);
+  background-color: var(--success-bg);
   color: var(--success-color);
-  border: 1px solid rgba(82, 196, 26, 0.2);
+  border: 1px solid var(--success-bg);
 }
 
 .status-offline {
-  background-color: rgba(255, 77, 79, 0.1);
+  background-color: var(--error-bg);
   color: var(--error-color);
-  border: 1px solid rgba(255, 77, 79, 0.2);
+  border: 1px solid var(--error-bg);
 }
 
 .status-indicator {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   margin-right: 8px;
 }
 

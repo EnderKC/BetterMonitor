@@ -100,3 +100,9 @@ func persistMonitorPayload(server *models.Server, payload *MonitorPayload) (*mod
 
 	return &record, nil
 }
+
+// isMonitorOnlyServer 检查服务器是否为监控模式（monitor-only）
+// 监控模式的服务器不支持终端、文件、进程、Docker、Nginx、证书等操作命令
+func isMonitorOnlyServer(server *models.Server) bool {
+	return server.AgentType == "monitor"
+}

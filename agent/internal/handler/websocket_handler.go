@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/server-ops-agent/internal/monitor"
 )
 
 // HandleCommand 处理来自面板端的命令
@@ -50,36 +49,9 @@ func HandleCommand(c *websocket.Conn, serverID uint, secretKey string, message [
 
 	// 根据Action分发到不同的处理函数
 	switch {
-	// 文件管理相关命令
-	case strings.HasPrefix(req.Action, "file_"):
-		response, err = monitor.HandleFileCommand(req.Action, req.Params)
+	case isOperationAction(req.Action):
+		response, err = handleOperationAction(req.Action, req.Params)
 
-	// 进程管理相关命令
-	case strings.HasPrefix(req.Action, "process_"):
-		response, err = monitor.HandleProcessCommand(req.Action, req.Params)
-
-	// Docker管理相关命令
-	case strings.HasPrefix(req.Action, "docker_"):
-		response, err = monitor.HandleDockerCommand(req.Action, req.Params)
-
-	// Nginx管理相关命令
-	case strings.HasPrefix(req.Action, "nginx_"):
-		response, err = monitor.HandleNginxCommand(req.Action, req.Params)
-
-	// 终端相关命令
-	case req.Action == "terminal_create":
-		response, err = monitor.CreateTerminalSession(req.Params)
-
-	case req.Action == "terminal_resize":
-		response, err = monitor.ResizeTerminal(req.Params)
-
-	case req.Action == "terminal_input":
-		response, err = monitor.SendTerminalInput(req.Params)
-
-	case req.Action == "terminal_close":
-		response, err = monitor.CloseTerminalSession(req.Params)
-
-	// 其他命令
 	case req.Action == "ping":
 		response = `{"status":"pong"}`
 
@@ -131,5 +103,22 @@ func SendSuccessResponse(c *websocket.Conn, data string) {
 	// 添加错误处理
 	if err := c.WriteMessage(websocket.TextMessage, []byte(data)); err != nil {
 		fmt.Printf("发送成功响应失败: %v\n", err)
+	}
+}
+
+// isOperationAction 判断 action 是否为操作类命令（terminal/file/process/docker/nginx）
+func isOperationAction(action string) bool {
+	switch {
+	case strings.HasPrefix(action, "file_"),
+		strings.HasPrefix(action, "process_"),
+		strings.HasPrefix(action, "docker_"),
+		strings.HasPrefix(action, "nginx_"),
+		action == "terminal_create",
+		action == "terminal_resize",
+		action == "terminal_input",
+		action == "terminal_close":
+		return true
+	default:
+		return false
 	}
 } 

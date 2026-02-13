@@ -12,6 +12,7 @@ import {
 import request from '@/utils/request';
 import type { LifeProbeSummary } from '@/types/life';
 import { getToken } from '@/utils/auth';
+import { useUIStore } from '@/stores/uiStore';
 
 const router = useRouter();
 const loading = ref(true);
@@ -22,7 +23,9 @@ const submitting = ref(false);
 const editingId = ref<number | null>(null);
 const lifeWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
+
 const lifeReconnectTimer = ref<number | null>(null);
+const uiStore = useUIStore();
 
 const form = reactive({
   name: '',
@@ -109,6 +112,7 @@ const connectLifeProbeListWS = () => {
       if (data.type === 'life_probe_list' && Array.isArray(data.life_probes)) {
         probes.value = data.life_probes;
         loading.value = false;
+        uiStore.stopLoading();
       }
     } catch (error) {
       console.error('解析生命探针列表数据失败:', error);
@@ -119,6 +123,7 @@ const connectLifeProbeListWS = () => {
     console.error('生命探针列表WebSocket错误:', error);
     message.error('生命探针列表连接失败');
     loading.value = false;
+    uiStore.stopLoading();
   };
 
   ws.onclose = () => {
@@ -340,7 +345,7 @@ const totalSteps = computed(() =>
 .page-header h1 {
   margin: 0;
   font-size: 26px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: rgba(0, 0, 0, 0.85);
 }
 
@@ -363,9 +368,9 @@ const totalSteps = computed(() =>
 .stat-item {
   flex: 1;
   background: var(--card-bg) !important;
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(var(--blur-md)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(180%);
+  border: 1px solid var(--alpha-white-50);
   border-radius: 20px;
   padding: 20px;
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
@@ -380,25 +385,25 @@ const totalSteps = computed(() =>
 .stat-item p {
   margin: 0 0 6px;
   color: rgba(0, 0, 0, 0.45);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .stat-item h3 {
   margin: 0;
-  font-size: 24px;
-  font-weight: 600;
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-semibold);
   color: rgba(0, 0, 0, 0.85);
 }
 
 /* Table Styling */
 .life-table {
   background: var(--card-bg) !important;
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(var(--blur-md)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(180%);
   border-radius: 20px;
   padding: 16px;
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--alpha-white-50);
 }
 
 .life-table :deep(.ant-table) {
@@ -406,22 +411,22 @@ const totalSteps = computed(() =>
 }
 
 .life-table :deep(.ant-table-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.5);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  font-weight: 600;
+  background: var(--alpha-white-50);
+  border-bottom: 1px solid var(--alpha-black-05);
+  font-weight: var(--font-weight-semibold);
 }
 
 .life-table :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid var(--alpha-black-05);
 }
 
 .life-table :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(255, 255, 255, 0.4) !important;
+  background: var(--alpha-white-40) !important;
 }
 
 .life-table :deep(.ant-pagination-item-active) {
   background: transparent;
-  border-color: #1890ff;
+  border-color: var(--primary-color);
 }
 
 .life-table :deep(.ant-pagination-item a) {
@@ -432,8 +437,6 @@ const totalSteps = computed(() =>
   margin-left: 8px;
   color: rgba(0, 0, 0, 0.45);
 }
-
-
 </style>
 
 <style>
@@ -447,12 +450,12 @@ const totalSteps = computed(() =>
 
 .dark .stat-item {
   background: var(--card-bg) !important;
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  border-color: var(--alpha-white-10);
+  box-shadow: 0 8px 32px 0 var(--alpha-black-20);
 }
 
 .dark .stat-item:hover {
-  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 40px 0 var(--alpha-black-30);
 }
 
 .dark .stat-item p {
@@ -465,23 +468,23 @@ const totalSteps = computed(() =>
 
 .dark .life-table {
   background: var(--card-bg) !important;
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  border-color: var(--alpha-white-10);
+  box-shadow: 0 8px 32px 0 var(--alpha-black-20);
 }
 
-.dark .life-table .ant-table-thead > tr > th {
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+.dark .life-table .ant-table-thead>tr>th {
+  background: var(--alpha-white-05);
+  border-bottom: 1px solid var(--alpha-white-05);
   color: rgba(255, 255, 255, 0.85);
 }
 
-.dark .life-table .ant-table-tbody > tr > td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+.dark .life-table .ant-table-tbody>tr>td {
+  border-bottom: 1px solid var(--alpha-white-05);
   color: rgba(255, 255, 255, 0.85);
 }
 
-.dark .life-table .ant-table-tbody > tr:hover > td {
-  background: rgba(255, 255, 255, 0.08) !important;
+.dark .life-table .ant-table-tbody>tr:hover>td {
+  background: var(--alpha-white-08) !important;
 }
 
 .dark .life-table .ant-pagination-item-active {

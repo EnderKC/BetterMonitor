@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,8 +21,9 @@ type TerminalSession struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// 存储终端会话的内存映射
-var terminalSessions = make(map[string]TerminalSession)
+// 存储终端会话的内存映射（并发安全）
+// key: string (sessionID), value: TerminalSession
+var terminalSessions sync.Map
 
 // CreateTerminalSession 创建一个新的终端会话
 func CreateTerminalSession(c *gin.Context) {
@@ -64,8 +66,7 @@ func CreateTerminalSession(c *gin.Context) {
 	if request.ID != "" {
 		// 使用自定义ID，如果已存在则先删除旧会话
 		sessionID = request.ID
-		if _, exists := terminalSessions[sessionID]; exists {
-			delete(terminalSessions, sessionID)
+		if _, loaded := terminalSessions.LoadAndDelete(sessionID); loaded {
 			log.Printf("已删除旧的终端会话: %s", sessionID)
 		}
 	} else {
@@ -83,7 +84,7 @@ func CreateTerminalSession(c *gin.Context) {
 	}
 
 	// 存储会话
-	terminalSessions[sessionID] = session
+	terminalSessions.Store(sessionID, session)
 
 	// 检查服务器是否在线
 	if server.Status != "online" {
@@ -128,11 +129,16 @@ func GetTerminalSessions(c *gin.Context) {
 
 	// 查找该用户和该服务器的会话
 	var sessions []TerminalSession
-	for _, session := range terminalSessions {
+	terminalSessions.Range(func(key, value interface{}) bool {
+		session, ok := value.(TerminalSession)
+		if !ok {
+			return true
+		}
 		if session.ServerID == serverID && session.UserID == userID {
 			sessions = append(sessions, session)
 		}
-	}
+		return true
+	})
 
 	// 返回会话列表，确保即使没有会话也返回空数组[]而不是null
 	if sessions == nil {
@@ -179,11 +185,12 @@ func DeleteTerminalSession(c *gin.Context) {
 	userID := userIDInterface.(uint)
 
 	// 检查会话是否存在
-	session, ok := terminalSessions[sessionID]
+	sessionVal, ok := terminalSessions.Load(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
 		return
 	}
+	session := sessionVal.(TerminalSession)
 
 	// 检查会话是否属于当前用户
 	if session.UserID != userID || session.ServerID != serverID {
@@ -192,7 +199,7 @@ func DeleteTerminalSession(c *gin.Context) {
 	}
 
 	// 删除会话
-	delete(terminalSessions, sessionID)
+	terminalSessions.Delete(sessionID)
 
 	// 返回成功消息
 	c.JSON(http.StatusOK, gin.H{
@@ -238,11 +245,12 @@ func GetTerminalWorkingDirectory(c *gin.Context) {
 	userID := userIDInterface.(uint)
 
 	// 检查会话是否存在
-	session, ok := terminalSessions[sessionID]
+	sessionVal, ok := terminalSessions.Load(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
 		return
 	}
+	session := sessionVal.(TerminalSession)
 
 	// 检查会话是否属于当前用户
 	if session.UserID != userID || session.ServerID != serverID {

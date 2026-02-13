@@ -367,10 +367,10 @@ onMounted(() => {
                     @click="showUpdateModal(record.id)">
                     <DownloadOutlined /> 升级
                   </Button>
-                  <span v-else-if="record.status !== 1" style="color: #999">
+                  <span v-else-if="record.status !== 1" class="text-offline">
                     离线
                   </span>
-                  <span v-else style="color: #52c41a">
+                  <span v-else class="text-latest">
                     {{ latestAgentVersion ? '已是最新版本' : '最新版本' }}
                   </span>
                 </Space>
@@ -417,7 +417,7 @@ onMounted(() => {
       </p>
       <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
       </p>
-      <p style="color: #faad14;">
+      <p class="warning-text">
         <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
       </p>
     </Modal>
@@ -426,8 +426,7 @@ onMounted(() => {
     <Modal v-model:open="updateAllModalVisible" title="确认批量升级" :confirmLoading="updatingAll" @ok="performUpdateAll"
       @cancel="cancelUpdateAll">
       <p>确定要更新以下 <strong>{{ serversToUpdate.length }}</strong> 台服务器的Agent吗？</p>
-      <div
-        style="max-height: 200px; overflow-y: auto; margin: 10px 0; background: #f5f5f5; padding: 10px; border-radius: 4px;">
+      <div class="update-server-list">
         <div v-for="server in serversToUpdate" :key="server.id" style="margin-bottom: 4px;">
           <Space>
             <span>{{ server.name }}</span>
@@ -437,7 +436,7 @@ onMounted(() => {
       </div>
       <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
       </p>
-      <p style="color: #faad14;">
+      <p class="warning-text">
         <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
       </p>
     </Modal>
@@ -450,19 +449,52 @@ onMounted(() => {
 }
 
 code {
-  background: #f5f5f5;
+  background: var(--alpha-black-02);
   padding: 2px 4px;
   border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
 }
 
 .release-notes .notes {
-  background: #f7f7f8;
-  border-radius: 6px;
+  background: var(--alpha-black-03);
+  border-radius: var(--radius-xs);
   padding: 12px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: pre-wrap;
+  color: var(--text-primary);
+}
+
+.text-offline {
+  color: var(--text-hint);
+}
+
+.text-latest {
+  color: var(--success-color);
+}
+
+.warning-text {
+  color: var(--warning-color);
+}
+
+.update-server-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 10px 0;
+  background: var(--alpha-black-03);
+  padding: 10px;
+  border-radius: var(--radius-xs);
+}
+</style>
+
+<style>
+/* Dark Mode Overrides */
+.dark .update-server-list {
+  background: var(--alpha-white-05);
+}
+
+.dark .release-notes .notes {
+  background: var(--alpha-white-05);
 }
 </style>

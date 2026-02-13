@@ -1,12 +1,8 @@
 <template>
   <div class="server-terminal-page">
     <!-- 顶部导航栏 -->
-    <a-page-header
-      class="terminal-header"
-      :title="serverInfo.name || `服务器 ${serverId}`"
-      :sub-title="serverInfo.ip"
-      @back="goBack"
-    >
+    <a-page-header class="terminal-header" :title="serverInfo.name || `服务器 ${serverId}`" :sub-title="serverInfo.ip"
+      @back="goBack">
       <template #tags>
         <a-tag :color="serverInfo.online ? 'success' : 'error'">
           {{ serverInfo.online ? '在线' : '离线' }}
@@ -16,7 +12,8 @@
       <template #extra>
         <a-space>
           <a-tooltip title="文件管理器">
-            <a-button @click="toggleFileManager" :type="fileManagerVisible ? 'primary' : 'default'" :disabled="!serverInfo.online">
+            <a-button @click="toggleFileManager" :type="fileManagerVisible ? 'primary' : 'default'"
+              :disabled="!serverInfo.online">
               <template #icon>
                 <FolderOpenOutlined />
               </template>
@@ -30,12 +27,14 @@
                 <EditOutlined />
               </template>
               编辑器
-              <a-badge v-if="editorTabs.length > 0" :count="editorTabs.length" :offset="[10, -5]" style="margin-left: 4px;" />
+              <a-badge v-if="editorTabs.length > 0" :count="editorTabs.length" :offset="[10, -5]"
+                style="margin-left: 4px;" />
             </a-button>
           </a-tooltip>
 
           <a-tooltip title="系统状态">
-            <a-button @click="toggleSystemStatus" :type="systemStatusVisible ? 'primary' : 'default'" :disabled="!serverInfo.online">
+            <a-button @click="toggleSystemStatus" :type="systemStatusVisible ? 'primary' : 'default'"
+              :disabled="!serverInfo.online">
               <template #icon>
                 <MenuOutlined />
               </template>
@@ -60,19 +59,9 @@
     <div class="main-content">
       <!-- 文件管理器侧边栏 -->
       <div v-if="fileManagerVisible" class="file-manager-sidebar" :style="{ width: fileManagerWidth + 'px' }">
-        <FileManager
-          :files="fileList"
-          :current-path="currentPath"
-          :loading="fileLoading"
-          @navigate="handleNavigate"
-          @refresh="refreshFileList"
-          @edit="editFile"
-          @download="handleDownloadFile"
-          @delete="handleDeleteFile"
-          @create-file="showCreateFileModal"
-          @create-folder="showCreateFolderModal"
-          @upload="triggerUpload"
-        />
+        <FileManager :files="fileList" :current-path="currentPath" :loading="fileLoading" @navigate="handleNavigate"
+          @refresh="refreshFileList" @edit="editFile" @download="handleDownloadFile" @delete="handleDeleteFile"
+          @create-file="showCreateFileModal" @create-folder="showCreateFolderModal" @upload="triggerUpload" />
       </div>
 
       <!-- 主要工作区域 (编辑器 + 终端) -->
@@ -141,13 +130,9 @@
                 <a-spin size="large" tip="正在加载文件内容..." />
               </div>
               <div v-else class="code-editor-wrapper">
-                <CodeEditor
-                  v-model:value="activeTab.content"
-                  :filename="activeTab.file.name"
-                  :language="activeTab.language"
-                  @change="(content) => onEditorContentChange(content)"
-                  @save="saveActiveTab"
-                />
+                <CodeEditor v-model:value="activeTab.content" :filename="activeTab.file.name"
+                  :language="activeTab.language" @change="(content) => onEditorContentChange(content)"
+                  @save="saveActiveTab" />
               </div>
             </div>
           </div>
@@ -182,13 +167,8 @@
             <div v-else class="terminal-container-wrapper">
               <!-- 终端主体 -->
               <div class="terminal-wrapper">
-                <TerminalView
-                  ref="terminalViewRef"
-                  :socket-url="terminalSocketUrl"
-                  @connected="onTerminalConnected"
-                  @disconnected="onTerminalDisconnected"
-                  @error="onTerminalError"
-                />
+              <TerminalView ref="terminalViewRef" :socket-url="terminalSocketUrl" :session="currentSession"
+                  @connected="onTerminalConnected" @disconnected="onTerminalDisconnected" @error="onTerminalError" />
               </div>
 
               <!-- 会话管理控制器 (右下角) -->
@@ -333,7 +313,8 @@
     </a-modal>
 
     <!-- 新建文件对话框 -->
-    <a-modal v-model:visible="newFileModalVisible" title="新建文件" @ok="handleNewFile" @cancel="newFileModalVisible = false">
+    <a-modal v-model:visible="newFileModalVisible" title="新建文件" @ok="handleNewFile"
+      @cancel="newFileModalVisible = false">
       <a-form layout="vertical">
         <a-form-item label="文件名" required>
           <a-input v-model:value="newFileName" placeholder="请输入文件名（如：example.txt）" @pressEnter="handleNewFile" />
@@ -377,6 +358,7 @@ import {
 } from '@ant-design/icons-vue';
 import service from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { useUIStore } from '../../stores/uiStore';
 
 // Import reusable components
 import TerminalView from '../../components/server/TerminalView.vue';
@@ -438,6 +420,7 @@ const sessionModalVisible = ref<boolean>(false);
 const checkingHeartbeat = ref(false);
 const agentNotConnected = ref(false);
 let statusWs: WebSocket | null = null;
+const uiStore = useUIStore();
 
 // 文件管理器状态
 const fileManagerVisible = ref(false);
@@ -520,6 +503,7 @@ const fetchServerInfo = async () => {
     message.error('获取服务器信息失败');
   } finally {
     loading.value = false;
+    uiStore.stopLoading();
   }
 };
 
@@ -943,7 +927,7 @@ const connectStatusWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
   const wsUrl = `${protocol}//${host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
-  
+
   statusWs = new WebSocket(wsUrl);
   statusWs.onmessage = (event) => {
     try {
@@ -951,8 +935,11 @@ const connectStatusWebSocket = () => {
       if (data.type === 'welcome' || data.type === 'status' || data.type === 'heartbeat' || data.type === 'monitor') {
         if (data.data) updateSystemStatusData(data.data);
         if (data.data?.status) serverInfo.value.online = data.data.status === 'online';
+      } else if (data.type === 'agent_offline') {
+        serverInfo.value.online = false;
+        message.warning(data.message || 'Agent连接已断开');
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 };
 
@@ -1112,8 +1099,8 @@ onUnmounted(() => {
 
 .terminal-header {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(var(--blur-md));
+  border-bottom: 1px solid var(--alpha-black-05);
 }
 
 .main-content {
@@ -1126,15 +1113,16 @@ onUnmounted(() => {
   padding: 0 16px 16px 16px;
 }
 
-.file-manager-sidebar, .system-status-sidebar {
+.file-manager-sidebar,
+.system-status-sidebar {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
 }
 
 .workspace-container {
@@ -1147,12 +1135,12 @@ onUnmounted(() => {
 
 .editor-container {
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--alpha-black-05);
   position: relative;
 }
 
@@ -1161,8 +1149,8 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0 8px;
-  background: rgba(0, 0, 0, 0.03);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-03);
+  border-bottom: 1px solid var(--alpha-black-05);
   height: 40px;
 }
 
@@ -1178,7 +1166,7 @@ onUnmounted(() => {
   padding: 0 12px;
   height: 40px;
   cursor: pointer;
-  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  border-right: 1px solid var(--alpha-black-05);
   background: transparent;
   transition: all 0.2s;
   min-width: 120px;
@@ -1186,12 +1174,12 @@ onUnmounted(() => {
 }
 
 .editor-tab:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 
 .editor-tab-active {
   background: white;
-  border-top: 2px solid #1890ff;
+  border-top: 2px solid var(--primary-color);
 }
 
 .tab-content {
@@ -1203,7 +1191,7 @@ onUnmounted(() => {
 }
 
 .tab-name {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1212,14 +1200,14 @@ onUnmounted(() => {
 .tab-language {
   font-size: 10px;
   color: #999;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--alpha-black-05);
   padding: 1px 4px;
   border-radius: 4px;
 }
 
 .tab-dirty-indicator {
-  font-size: 12px;
-  color: #faad14;
+  font-size: var(--font-size-xs);
+  color: var(--warning-color);
 }
 
 .editor-content {
@@ -1241,7 +1229,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--alpha-black-02);
 }
 
 .empty-content {
@@ -1263,13 +1251,13 @@ onUnmounted(() => {
 }
 
 .editor-resize-handle:hover {
-  background: rgba(24, 144, 255, 0.1);
+  background: var(--info-bg);
 }
 
 .resize-line {
   width: 40px;
   height: 3px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--alpha-black-10);
   border-radius: 2px;
 }
 
@@ -1278,11 +1266,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 16px;
+  backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--alpha-black-05);
+  border-radius: var(--radius-lg);
   padding: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px var(--alpha-black-05);
   overflow: hidden;
 }
 
@@ -1297,10 +1285,10 @@ onUnmounted(() => {
 .terminal-wrapper {
   flex: 1;
   background: #1e1e1e;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   padding: 12px;
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 20px var(--alpha-black-50);
   position: relative;
 }
 
@@ -1309,13 +1297,14 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-50);
   padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--alpha-black-05);
 }
 
-.session-select-compact, .session-actions-compact {
+.session-select-compact,
+.session-actions-compact {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1323,8 +1312,8 @@ onUnmounted(() => {
 
 .system-status-header {
   padding: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid var(--alpha-black-05);
+  background: var(--alpha-white-50);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1334,7 +1323,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .system-status-content {
@@ -1347,10 +1336,10 @@ onUnmounted(() => {
 }
 
 .status-item {
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
+  background: var(--alpha-white-50);
+  border-radius: var(--radius-md);
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--alpha-white-50);
 }
 
 .status-header {
@@ -1360,14 +1349,14 @@ onUnmounted(() => {
 }
 
 .status-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 .status-value {
   font-family: monospace;
-  font-weight: 700;
-  color: #1890ff;
+  font-weight: var(--font-weight-bold);
+  color: var(--primary-color);
 }
 
 .status-detail {
@@ -1377,27 +1366,30 @@ onUnmounted(() => {
   text-align: right;
 }
 
-.load-metrics, .network-metrics {
+.load-metrics,
+.network-metrics {
   display: flex;
   justify-content: space-between;
 }
 
-.load-item, .network-item {
+.load-item,
+.network-item {
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
-.load-label, .network-label {
+.load-label,
+.network-label {
   font-size: 11px;
   color: #999;
 }
 
-.load-value, .network-value {
-  font-size: 13px;
-  font-weight: 600;
+.load-value,
+.network-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
-
 </style>
 
 <style>
@@ -1408,19 +1400,19 @@ onUnmounted(() => {
 .dark .editor-container,
 .dark .terminal-section {
   background: rgba(30, 30, 30, 0.7);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--alpha-white-10);
 }
 
 .dark .editor-header,
 .dark .session-controller,
 .dark .system-status-header,
 .dark .status-item {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-black-20);
+  border-color: var(--alpha-white-05);
 }
 
 .dark .editor-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--alpha-white-05);
 }
 
 .dark .editor-tab-active {
@@ -1429,12 +1421,12 @@ onUnmounted(() => {
 }
 
 .dark .tab-language {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--alpha-white-10);
   color: #bbb;
 }
 
 .dark .editor-empty {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--alpha-black-10);
 }
 
 .dark .status-title {

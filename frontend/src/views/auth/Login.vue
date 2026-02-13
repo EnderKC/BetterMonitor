@@ -130,8 +130,8 @@ const rules = {
   align-items: center;
   background-color: var(--body-bg);
   background-image:
-    radial-gradient(at 30% 20%, rgba(0, 122, 255, 0.15) 0px, transparent 50%),
-    radial-gradient(at 80% 40%, rgba(52, 199, 89, 0.1) 0px, transparent 50%),
+    radial-gradient(at 30% 20%, var(--bg-radial-primary) 0px, transparent 50%),
+    radial-gradient(at 80% 40%, var(--bg-radial-success) 0px, transparent 50%),
     radial-gradient(at 10% 70%, rgba(255, 149, 0, 0.08) 0px, transparent 50%);
   background-attachment: fixed;
   position: relative;
@@ -140,16 +140,16 @@ const rules = {
 
 .login-card {
   width: 420px;
-  padding: 48px 40px;
+  padding: var(--spacing-3xl) var(--spacing-2xl);
   position: relative;
   z-index: 1;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.7) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 24px;
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--alpha-white-40);
 }
 
 .login-card::before {
@@ -159,7 +159,7 @@ const rules = {
   left: 10%;
   width: 80%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+  background: linear-gradient(90deg, transparent, var(--alpha-white-80), transparent);
   z-index: 2;
 }
 
@@ -171,11 +171,11 @@ const rules = {
 }
 
 .login-title h2 {
-  margin-bottom: 12px;
-  font-weight: 700;
-  font-size: 28px;
+  margin-bottom: var(--spacing-sm);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-4xl);
   letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #007AFF, #5856D6);
+  background: var(--gradient-brand);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -183,8 +183,8 @@ const rules = {
 
 .login-title p {
   color: var(--text-secondary);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
 }
 
 .login-form {
@@ -192,20 +192,19 @@ const rules = {
   z-index: 2;
 }
 
-
 :deep(.ant-form-item-label > label) {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
 }
 
 :deep(.ant-input-affix-wrapper) {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   box-shadow: none;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--input-border);
   transition: var(--transition);
-  background: rgba(255, 255, 255, 0.6);
-  padding: 10px 12px;
-  backdrop-filter: blur(10px);
+  background: var(--input-bg);
+  padding: 10px var(--spacing-sm);
+  backdrop-filter: blur(var(--blur-sm));
 }
 
 :deep(.ant-input-affix-wrapper .ant-input) {
@@ -216,8 +215,8 @@ const rules = {
 :deep(.ant-input-affix-wrapper:focus),
 :deep(.ant-input-affix-wrapper-focused) {
   border-color: var(--primary-color);
-  background: #fff;
-  box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
+  background: var(--input-focus-bg);
+  box-shadow: var(--input-focus-shadow);
 }
 
 :deep(.ant-input-prefix) {
@@ -227,47 +226,47 @@ const rules = {
 
 .login-button {
   height: 48px;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   letter-spacing: 0.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   transition: var(--transition);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: var(--spacing-sm);
   background: var(--primary-color);
   border: none;
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .login-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(0, 122, 255, 0.4);
+  box-shadow: var(--btn-primary-hover-shadow);
   background: var(--primary-hover);
 }
 
 .login-tips {
   text-align: center;
-  margin-top: 24px;
-  margin-bottom: 24px;
+  margin-top: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
   color: var(--text-hint);
-  font-size: 13px;
-  background: rgba(0, 0, 0, 0.03);
-  padding: 8px;
-  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  background: var(--alpha-black-03);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
 }
 
 .other-links {
   text-align: center;
-  margin-top: 24px;
+  margin-top: var(--spacing-lg);
 }
 
 .dashboard-link {
   display: inline-flex;
   align-items: center;
   color: var(--primary-color);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   transition: var(--transition);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .dashboard-link:hover {
@@ -277,13 +276,13 @@ const rules = {
 }
 
 .dashboard-link span {
-  margin-right: 4px;
+  margin-right: var(--spacing-xs);
 }
 
-/* 装饰元素 */
+/* Decoration circles */
 .decoration-circle {
   position: absolute;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: linear-gradient(135deg, var(--primary-color), var(--info-color));
   opacity: 0.15;
   filter: blur(60px);
@@ -305,16 +304,16 @@ const rules = {
   background: linear-gradient(135deg, var(--success-color), var(--primary-color));
 }
 
-/* 响应式调整 */
+/* Responsive */
 @media (max-width: 480px) {
   .login-card {
     width: 90%;
     max-width: 360px;
-    padding: 40px 24px;
+    padding: var(--spacing-2xl) var(--spacing-lg);
   }
 
   .login-title h2 {
-    font-size: 24px;
+    font-size: var(--font-size-3xl);
   }
 }
 </style>
@@ -324,56 +323,56 @@ const rules = {
 .dark .login-container {
   background-color: #0f0f12;
   background-image:
-    radial-gradient(at 30% 20%, rgba(0, 122, 255, 0.15) 0px, transparent 50%),
-    radial-gradient(at 80% 40%, rgba(52, 199, 89, 0.1) 0px, transparent 50%),
+    radial-gradient(at 30% 20%, var(--bg-radial-primary) 0px, transparent 50%),
+    radial-gradient(at 80% 40%, var(--bg-radial-success) 0px, transparent 50%),
     radial-gradient(at 10% 70%, rgba(255, 149, 0, 0.08) 0px, transparent 50%);
 }
 
 .dark .login-card {
   background: rgba(30, 30, 35, 0.65) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--alpha-white-08);
+  box-shadow: 0 20px 40px var(--alpha-black-40);
 }
 
 .dark .login-card::before {
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, var(--alpha-white-15), transparent);
 }
 
 .dark .login-title p {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--alpha-white-60);
 }
 
 .dark .login-form-item .ant-form-item-label>label {
-  color: rgba(255, 255, 255, 0.85) !important;
+  color: var(--alpha-white-80) !important;
 }
 
 .dark .ant-input-affix-wrapper {
-  background: rgba(0, 0, 0, 0.3) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: var(--alpha-black-30) !important;
+  border-color: var(--alpha-white-08) !important;
 }
 
 .dark .ant-input-affix-wrapper .ant-input {
-  color: rgba(255, 255, 255, 0.9) !important;
+  color: var(--alpha-white-90) !important;
 }
 
 .dark .ant-input-affix-wrapper .ant-input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--alpha-white-30);
 }
 
 .dark .ant-input-prefix {
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--alpha-white-40) !important;
 }
 
 .dark .ant-input-affix-wrapper:hover,
 .dark .ant-input-affix-wrapper:focus,
 .dark .ant-input-affix-wrapper-focused {
-  background: rgba(0, 0, 0, 0.5) !important;
+  background: var(--alpha-black-50) !important;
   border-color: var(--primary-color) !important;
 }
 
 .dark .login-tips {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-05);
+  color: var(--alpha-white-50);
 }
 
 .dark .decoration-circle {

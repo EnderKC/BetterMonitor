@@ -9,6 +9,7 @@ import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useUIStore } from '../../stores/uiStore';
 import type { LifeProbeSummary } from '@/types/life';
 import {
   DesktopOutlined,
@@ -42,6 +43,7 @@ const router = useRouter();
 const isLoggedIn = computed(() => !!getToken());
 // 获取系统设置
 const settingsStore = useSettingsStore();
+const uiStore = useUIStore();
 
 // 登录或进入控制台
 const goToLoginOrAdmin = () => {
@@ -164,6 +166,7 @@ const fetchServers = () => {
 
       if (data.type === 'server_list' && Array.isArray(data.servers)) {
         loading.value = false;
+        uiStore.stopLoading();
 
         const processedServers = data.servers.map((server: any) => {
           const status = server.status || 'offline';
@@ -399,6 +402,21 @@ const connectWebSocket = (serverId: number) => {
             updateServerMonitorData(serverId, data.data);
           } else {
             updateServerMonitorData(serverId, data);
+          }
+        }
+
+        // Agent离线通知
+        if (data.type === 'agent_offline') {
+          updateServerStatus(serverId, false);
+        }
+
+        // Agent升级状态推送
+        if (data.type === 'agent_upgrade_status') {
+          const status = data.status;
+          if (status === 'completed' || status === 'success') {
+            message.success(`服务器 ${serverId} Agent升级完成`);
+          } else if (status === 'failed' || status === 'error') {
+            message.error(`服务器 ${serverId} Agent升级失败: ${data.message || '未知错误'}`);
           }
         }
       } catch (error) {
@@ -1198,9 +1216,9 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .dashboard-title h1 {
-  font-size: 28px;
+  font-size: var(--font-size-4xl);
   margin-bottom: 4px;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.5px;
 }
 
@@ -1226,18 +1244,18 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   flex-direction: column;
   height: 100%;
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   border: 1px solid var(--card-border);
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
 }
 
 .server-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
-  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
+  border-color: var(--alpha-white-60);
 }
 
 /* Header */
@@ -1257,7 +1275,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .flag-icon {
-  font-size: 20px;
+  font-size: var(--font-size-2xl);
   line-height: 1;
 }
 
@@ -1284,8 +1302,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .server-name {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   margin: 0;
@@ -1299,9 +1317,9 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .server-ip-tag {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--alpha-black-04);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: "SF Mono", Menlo, monospace;
@@ -1317,7 +1335,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .server-link {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
   display: flex;
   align-items: center;
   transition: color 0.2s;
@@ -1335,7 +1353,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .os-icon {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   color: var(--error-color);
   display: flex;
   align-items: center;
@@ -1344,7 +1362,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background-color: var(--error-color);
   box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2);
 }
@@ -1375,9 +1393,9 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   gap: 8px;
   margin-bottom: 20px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 8px;
-  font-size: 13px;
+  background: var(--alpha-black-02);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -1385,7 +1403,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1399,14 +1417,14 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .info-config {
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
 .cpu-model-tag {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--alpha-black-04);
   padding: 1px 6px;
   border-radius: 4px;
   margin-left: auto;
@@ -1422,13 +1440,13 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .config-value {
-  font-size: 13px;
-  background: rgba(0, 0, 0, 0.04);
+  font-size: var(--font-size-sm);
+  background: var(--alpha-black-04);
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   width: 100%;
   text-align: center;
 }
@@ -1438,7 +1456,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 .metric-row {
   display: flex;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .metric-icon {
@@ -1454,7 +1472,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .metric-val {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   font-family: "SF Mono", Menlo, monospace;
 }
@@ -1483,7 +1501,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .down-icon {
@@ -1496,7 +1514,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .net-val {
   font-family: "SF Mono", Menlo, monospace;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .net-val.success {
@@ -1511,7 +1529,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -1526,7 +1544,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .latency-item {
@@ -1538,7 +1556,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .latency-val {
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   font-family: "SF Mono", Menlo, monospace;
 }
 
@@ -1560,11 +1578,11 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin-top: auto;
   padding-top: 16px;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  border-top: 1px solid var(--alpha-black-05);
 }
 
 .footer-item {
@@ -1581,7 +1599,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   text-align: center;
   padding: 24px 0;
   color: var(--text-hint);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 
@@ -1597,48 +1615,48 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .stat-card {
   background: var(--card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   border-radius: var(--radius-lg);
   padding: 24px;
   display: flex;
   align-items: center;
   border: 1px solid var(--card-border);
-  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -1px var(--alpha-black-05);
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .stat-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.1);
-  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 12px 32px -4px var(--alpha-black-10);
+  border-color: var(--alpha-white-60);
 }
 
 .stat-icon {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: var(--font-size-4xl);
   margin-right: 20px;
   flex-shrink: 0;
 }
 
 .server-total-icon {
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.1), rgba(0, 122, 255, 0.05));
-  color: #007aff;
+  background: linear-gradient(135deg, var(--primary-light), var(--primary-bg));
+  color: var(--primary-color);
 }
 
 .server-offline-icon {
   background: linear-gradient(135deg, rgba(255, 59, 48, 0.1), rgba(255, 59, 48, 0.05));
-  color: #ff3b30;
+  color: var(--error-color);
 }
 
 .bandwidth-icon {
-  background: linear-gradient(135deg, rgba(52, 199, 89, 0.1), rgba(52, 199, 89, 0.05));
-  color: #34c759;
+  background: linear-gradient(135deg, var(--success-bg), rgba(52, 199, 89, 0.05));
+  color: var(--success-color);
 }
 
 .stat-info {
@@ -1647,8 +1665,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   line-height: 1.2;
   margin-bottom: 4px;
@@ -1659,13 +1677,13 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .stat-label {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .country-flag {
-  font-size: 28px;
+  font-size: var(--font-size-4xl);
   line-height: 1;
 }
 
@@ -1702,18 +1720,18 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .life-count {
   color: var(--text-secondary);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .life-card-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--font-size-xl);
 }
 
 .life-card-header p {
   margin: 4px 0 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .life-metrics {
@@ -1731,34 +1749,34 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .life-metric p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .life-metric h4 {
   margin: 2px 0 0;
-  font-size: 18px;
+  font-size: var(--font-size-xl);
 }
 
 .life-metric-icon {
   width: 34px;
   height: 34px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   color: #fff;
 }
 
 .life-probe-card {
   cursor: pointer;
-  border: 1px solid rgba(255, 77, 79, 0.2);
+  border: 1px solid var(--error-bg);
 }
 
 .life-probe-card:hover {
   border-color: rgba(255, 77, 79, 0.5);
-  box-shadow: 0 12px 32px -4px rgba(255, 77, 79, 0.15);
+  box-shadow: 0 12px 32px -4px var(--error-bg);
 }
 
 .server-probe-card {
@@ -1767,7 +1785,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .server-probe-card:hover {
   transform: translateY(-6px);
-  box-shadow: 0 16px 40px -6px rgba(0, 122, 255, 0.15);
+  box-shadow: 0 16px 40px -6px var(--info-bg);
 }
 
 .life-metrics-grid {
@@ -1778,7 +1796,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .heart-icon-active {
-  color: #ff4d4f;
+  color: var(--error-color);
   animation: heartbeat 1.5s ease-in-out infinite;
 }
 
@@ -1806,8 +1824,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 
 .focus-tag {
   margin: 0;
-  border-radius: 6px;
-  font-weight: 500;
+  border-radius: var(--radius-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .life-metric-icon.heart {
@@ -1818,7 +1836,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .life-metric-icon.steps {
-  background: linear-gradient(135deg, #1677ff, #69c0ff);
+  background: linear-gradient(135deg, var(--primary-color), #69c0ff);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -1834,7 +1852,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 .life-progress .progress-label {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -1843,18 +1861,18 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
   margin-top: 12px;
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 </style>
 
 <style>
 .dark .server-ip-tag {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--alpha-white-08);
 }
 
 .dark .cpu-model-tag {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--alpha-white-08);
 }
 
 .dark .server-info-bar {
@@ -1862,19 +1880,19 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
 }
 
 .dark .config-value {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--alpha-white-08);
 }
 
 /* Dark mode specific adjustments */
 .dark .server-card,
 .dark .stat-card {
   background: rgba(30, 30, 30, 0.6);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--alpha-white-08);
 }
 
 .dark .server-card:hover,
 .dark .stat-card:hover {
   background: rgba(40, 40, 40, 0.8);
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: var(--alpha-white-15);
 }
 </style>
