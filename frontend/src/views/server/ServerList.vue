@@ -6,7 +6,18 @@ defineOptions({
 import { ref, reactive, onMounted, h, computed, nextTick, watch, onActivated, onDeactivated } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Modal, Tag } from 'ant-design-vue';
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, KeyOutlined, CopyOutlined, HolderOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons-vue';
+import {
+  PlusOutlined,
+  EyeOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  KeyOutlined,
+  CopyOutlined,
+  HolderOutlined,
+  SaveOutlined,
+  CloseOutlined,
+  MoreOutlined
+} from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import Sortable from 'sortablejs';
 // 导入服务器状态Badge组件和store
@@ -166,6 +177,7 @@ const showEditForm = (record: any) => {
   formState.id = record.id;
   formState.name = record.name;
   formState.description = record.notes || '';
+  formState.agent_type = record.agent_type || 'full'; // Fill current agent type
 
   formVisible.value = true;
 };
@@ -211,7 +223,25 @@ const handleSubmit = () => {
           name: formState.name,
           notes: formState.description
         });
-        message.success('服务器更新成功');
+
+        // Check if agent type changed
+        // We need to find the original record to compare, or trust formState was init correctly
+        const originalServer = servers.value.find((s: any) => s.id === formState.id);
+        if (originalServer && originalServer.agent_type !== formState.agent_type) {
+          try {
+            const switchRes = await request.post(`/servers/${formState.id}/switch-agent-type`, {
+              target_agent_type: formState.agent_type
+            });
+            if (switchRes && switchRes.message) {
+              message.success(switchRes.message);
+            }
+          } catch (switchErr) {
+            console.error('切换 Agent 类型失败:', switchErr);
+            message.error('基本信息已更新，但切换 Agent 类型失败');
+          }
+        } else {
+          message.success('服务器更新成功');
+        }
       }
 
       // 刷新列表
@@ -438,27 +468,25 @@ onDeactivated(() => {
                 查看
               </a-button>
 
-              <a-button type="default" size="small" @click="viewToken(record)" class="action-btn">
-                <template #icon>
-                  <KeyOutlined />
+              <a-dropdown :trigger="['click']">
+                <a-button type="text" size="small" class="action-btn more-btn">
+                  <MoreOutlined />
+                </a-button>
+                <template #overlay>
+                  <a-menu class="action-menu glass-card">
+                    <a-menu-item key="token" @click="viewToken(record)">
+                      <KeyOutlined /> 令牌
+                    </a-menu-item>
+                    <a-menu-item key="edit" @click="showEditForm(record)">
+                      <EditOutlined /> 编辑
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="delete" @click="handleDelete(record.id)" danger>
+                      <DeleteOutlined /> 删除
+                    </a-menu-item>
+                  </a-menu>
                 </template>
-                令牌
-              </a-button>
-
-              <a-button type="default" size="small" @click="showEditForm(record)" class="action-btn">
-                <template #icon>
-                  <EditOutlined />
-                </template>
-                编辑
-              </a-button>
-
-              <a-button type="primary" danger size="small" @click="handleDelete(record.id)"
-                class="action-btn glow-effect-error">
-                <template #icon>
-                  <DeleteOutlined />
-                </template>
-                删除
-              </a-button>
+              </a-dropdown>
             </div>
             <div v-else style="color: #999; font-size: 12px;">
               拖动行调整顺序
@@ -476,26 +504,57 @@ onDeactivated(() => {
     </div>
 
     <!-- 添加/编辑服务器表单 -->
-    <a-modal :visible="formVisible" :title="formTitle" :confirmLoading="formLoading" @cancel="handleCancel"
-      @ok="handleSubmit" okText="保存" cancelText="取消" width="500px" class="glass-modal">
-      <a-form :model="formState" :rules="rules" ref="formRef" layout="vertical">
+    <a-modal :visible="formVisible" :title="null" :footer="null" :width="480" @cancel="handleCancel"
+      class="glass-modal apple-modal">
+      <div class="modal-header">
+        <h3>{{ formTitle }}</h3>
+        <p>配置您的服务器实例信息</p>
+      </div>
+
+      <a-form :model="formState" :rules="rules" ref="formRef" layout="vertical" class="apple-form">
         <a-form-item name="name" label="服务器名称">
-          <a-input v-model:value="formState.name" placeholder="输入一个易于识别的名称" :maxLength="50" />
+          <a-input v-model:value="formState.name" placeholder="例如：生产环境-Web01" :maxLength="50" class="apple-input" />
         </a-form-item>
 
         <a-form-item name="description" label="备注">
-          <a-textarea v-model:value="formState.description" placeholder="可选的服务器描述" :rows="4" :maxLength="500" />
+          <a-textarea v-model:value="formState.description" placeholder="可选的服务器描述" :rows="3" :maxLength="500"
+            class="apple-input" />
         </a-form-item>
 
-        <a-form-item v-if="formMode === 'create'" name="agent_type" label="Agent 类型">
-          <a-radio-group v-model:value="formState.agent_type">
-            <a-radio value="full">全功能版</a-radio>
-            <a-radio value="monitor">最小监控版</a-radio>
-          </a-radio-group>
-          <div style="margin-top: 4px; color: var(--text-tertiary); font-size: 12px;">
-            {{ formState.agent_type === 'monitor' ? '仅包含系统监控功能，不支持终端、文件管理、Docker 等操作' : '包含所有功能：监控、终端、文件管理、Docker、Nginx 等' }}
+        <a-form-item name="agent_type" label="Agent 类型">
+          <div class="agent-type-selector">
+            <div class="type-option" :class="{ active: formState.agent_type === 'full' }"
+              @click="formState.agent_type = 'full'">
+              <div class="type-header">
+                <div class="radio-circle"></div>
+                <span class="type-title">全功能版</span>
+              </div>
+              <div class="type-desc">包含监控、终端、文件管理、Docker、Nginx 等所有功能</div>
+            </div>
+
+            <div class="type-option" :class="{ active: formState.agent_type === 'monitor' }"
+              @click="formState.agent_type = 'monitor'">
+              <div class="type-header">
+                <div class="radio-circle"></div>
+                <span class="type-title">最小监控版</span>
+              </div>
+              <div class="type-desc">仅包含系统监控功能，轻量级运行</div>
+            </div>
+          </div>
+
+          <div v-if="formMode === 'edit'" class="warning-box">
+            <span class="warning-icon">⚠️</span>
+            <div class="warning-content">
+              <span class="warning-title">注意</span>
+              <span>切换类型可能需要 Agent 在线以触发自动更新。如果 Agent 离线，请在上线后手动更新。</span>
+            </div>
           </div>
         </a-form-item>
+
+        <div class="modal-footer">
+          <a-button @click="handleCancel" class="cancel-btn">取消</a-button>
+          <a-button type="primary" :loading="formLoading" @click="handleSubmit" class="save-btn">保存</a-button>
+        </div>
       </a-form>
     </a-modal>
     <!-- 部署 Agent 弹窗 -->
@@ -533,121 +592,335 @@ onDeactivated(() => {
   padding: 16px;
 }
 
-.modern-table {
-  width: 100%;
+.modern-table :deep(.ant-table-wrapper),
+.modern-table :deep(.ant-spin-nested-loading),
+.modern-table :deep(.ant-spin-container),
+.modern-table :deep(.ant-table) {
+  background: transparent;
 }
 
 .modern-table :deep(.ant-table-thead > tr > th) {
-  font-weight: var(--font-weight-semibold);
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 16px 24px;
+  /* Increased padding */
+}
+
+/* Row Styling */
+.modern-table :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 20px 24px;
+  /* Increased padding for card-like feel */
+  background: transparent;
+  transition: background 0.3s ease;
+}
+
+.modern-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: var(--alpha-black-03);
 }
 
 .action-buttons {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
 .action-btn {
-  transition: var(--transition);
+  border-radius: 8px;
+  /* Rounded corners for buttons */
 }
 
-.action-btn:hover {
-  transform: translateY(-2px);
+.more-btn {
+  color: var(--text-secondary);
+  font-size: 16px;
+  padding: 0 4px;
 }
 
-.empty-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 40px 0;
+.more-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--alpha-black-05);
 }
 
-.empty-content button {
-  margin-top: 16px;
+/* Dropdown Menu */
+:deep(.action-menu) {
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  border-radius: 8px;
 }
 
-/* 排序拖拽相关样式 */
-.sortable-ghost {
-  opacity: 0.4;
-  background: var(--primary-color);
+:deep(.action-menu .ant-dropdown-menu-item) {
+  border-radius: 6px;
+  padding: 6px 12px;
 }
 
-.drag-handle {
+:deep(.action-menu .ant-dropdown-menu-item-danger:hover) {
+  background-color: var(--error-bg);
+  color: var(--error-color);
+}
+
+/* Apple-style Modal & Form */
+.apple-modal .ant-modal-content {
+  padding: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+/* Ensure body has no padding so we handle it */
+.apple-modal .ant-modal-body {
+  padding: 0;
+}
+
+/* Fix close button position */
+.apple-modal .ant-modal-close {
+  top: 16px;
+  right: 16px;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  background: transparent;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
 }
 
-.drag-handle:hover {
-  color: var(--primary-color);
+.apple-modal .ant-modal-close:hover {
+  background: var(--alpha-black-05);
+  color: var(--text-primary);
 }
 
-:deep(.glass-modal .ant-modal-content) {
+.dark .apple-modal .ant-modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.modal-header {
+  padding: 24px 24px 16px;
   background: var(--card-bg);
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--card-border);
+  /* Use theme var */
+  /* Remove explicit border-bottom to let it blend or use a very subtle one */
 }
 
+.modal-header h3 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
+.modal-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
 
-/* 响应式调整 */
-@media (max-width: 768px) {
-  .server-list-container {
-    padding: 0;
-  }
+.apple-form {
+  padding: 0 24px 24px;
+}
 
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-    padding: 16px;
-  }
+.apple-input {
+  background: var(--input-bg);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+  box-shadow: none !important;
+}
 
-  .server-list-content {
-    padding: 16px;
-  }
+.apple-input:hover {
+  background: var(--input-bg);
+  /* Keep same on hover, maybe slightly darker */
+}
 
-  .action-buttons {
-    flex-wrap: wrap;
-  }
+.apple-input:focus {
+  background: var(--input-focus-bg);
+  /* White or lighter */
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-light) !important;
+}
+
+/* Agent Type Selector */
+.agent-type-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.type-option {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--card-bg);
+}
+
+.type-option:hover {
+  border-color: var(--primary-color);
+  background: var(--alpha-black-02);
+}
+
+.type-option.active {
+  border-color: var(--primary-color);
+  background: var(--primary-light);
+}
+
+.type-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.radio-circle {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--text-hint);
+  position: relative;
+  transition: all 0.2s;
+}
+
+.type-option.active .radio-circle {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+}
+
+.type-option.active .radio-circle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+}
+
+.type-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.type-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 24px;
+  /* Align with text, skipping radio */
+  line-height: 1.4;
+}
+
+/* Warning Box */
+.warning-box {
+  margin-top: 12px;
+  background: var(--warning-bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  border: 1px solid rgba(255, 149, 0, 0.2);
+}
+
+.warning-icon {
+  font-size: 16px;
+}
+
+.warning-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.warning-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--warning-color);
+  margin-bottom: 2px;
+}
+
+.warning-content span:not(.warning-title) {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.modal-footer button {
+  height: 36px;
+  padding: 0 20px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.cancel-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.cancel-btn:hover {
+  color: var(--text-primary);
+  background: var(--alpha-black-05);
+}
+
+.save-btn {
+  background: var(--primary-color);
+  box-shadow: 0 4px 12px var(--primary-light);
+  border: none;
+}
+
+.save-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
 }
 </style>
 
 <style>
-.dark .modern-table .ant-table-thead>tr>th {
-  background: #2d2d2d;
-  color: #ccc;
-  border-bottom: 1px solid #333;
+/* Dark Mode Overrides - targeted specifically */
+.dark .modern-table :deep(.ant-table-thead > tr > th) {
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.dark .modern-table .ant-table-tbody>tr>td {
-  border-bottom: 1px solid #333;
-  color: #ccc;
+.dark .modern-table :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.dark .modern-table .ant-table-tbody>tr:hover>td {
-  background: #2a2d2e !important;
+.dark .modern-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: var(--alpha-white-05) !important;
 }
 
-.dark .glass-modal .ant-modal-content {
-  background: #252526;
-  border: 1px solid #333;
-  color: #e0e0e0;
+.dark :deep(.glass-modal .ant-modal-content) {
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
 }
 
-.dark .glass-modal .ant-modal-header {
-  background: #252526;
-  border-bottom: 1px solid #333;
+.dark :deep(.glass-modal .ant-modal-header) {
+  background: transparent;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.dark .glass-modal .ant-modal-title {
-  color: #e0e0e0;
+.dark .more-btn:hover {
+  background-color: var(--alpha-white-08);
+  color: var(--text-primary);
 }
 
-.dark .glass-modal .ant-modal-close {
-  color: #ccc;
+.dark :deep(.action-menu) {
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
 }
 </style>
