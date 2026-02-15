@@ -187,10 +187,10 @@ func (r *AlertRecord) GetFormattedChannelIDs() []uint {
 	if r.ChannelIDs == "" {
 		return []uint{}
 	}
-	
+
 	idStrs := strings.Split(r.ChannelIDs, ",")
 	ids := make([]uint, 0, len(idStrs))
-	
+
 	for _, idStr := range idStrs {
 		var id uint
 		fmt.Sscanf(idStr, "%d", &id)
@@ -198,6 +198,13 @@ func (r *AlertRecord) GetFormattedChannelIDs() []uint {
 			ids = append(ids, id)
 		}
 	}
-	
+
 	return ids
+}
+
+// DeleteAlertRecordsBefore 永久删除指定时间之前的预警记录
+// 使用 Unscoped 绕过 gorm 软删除，执行物理删除以释放存储空间
+func DeleteAlertRecordsBefore(cutoff time.Time) (int64, error) {
+	result := DB.Unscoped().Where("created_at < ?", cutoff).Delete(&AlertRecord{})
+	return result.RowsAffected, result.Error
 } 

@@ -29,6 +29,9 @@ type SystemSettings struct {
 	// 监控数据保留策略
 	DataRetentionDays int `json:"data_retention_days" gorm:"default:7"` // 服务器监控数据保留天数
 
+	// 预警记录保留策略
+	AlertRetentionDays int `json:"alert_retention_days" gorm:"default:7"` // 预警记录保留天数，0表示永久保留
+
 	// 生命探针数据保留策略（JSON格式，支持更细粒度控制）
 	LifeProbeRetentionJSON string `json:"life_probe_retention_json" gorm:"type:text"` // JSON格式存储
 
@@ -80,6 +83,7 @@ var defaultSettings = SystemSettings{
 	UIRefreshInterval: "10s",
 	ChartHistoryHours: 24,
 	DataRetentionDays: 7,
+	AlertRetentionDays: 7,
 	LifeProbeRetentionJSON: `{
 		"heart_rate_days": 90,
 		"step_detail_days": 180,
