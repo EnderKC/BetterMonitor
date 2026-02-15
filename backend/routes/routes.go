@@ -158,7 +158,7 @@ func SetupRoutes(r *gin.Engine) {
 
 				ops.GET("/servers/:id/docker/images", controllers.GetImages)
 				ops.POST("/servers/:id/docker/images/pull", controllers.PullImage)
-				ops.DELETE("/servers/:id/docker/images/:id", controllers.RemoveImage)
+				ops.DELETE("/servers/:id/docker/images/:image_id", controllers.RemoveImage)
 
 				ops.GET("/servers/:id/docker/composes", controllers.GetComposes)
 				ops.GET("/servers/:id/docker/composes/:name/config", controllers.GetComposeConfig)
