@@ -100,10 +100,22 @@ func cleanupOldData() {
 	// 2. 清理生命探针数据（使用新的分类保留策略）
 	jobs.CleanupLifeProbeData()
 
-	// 3. 清理生命探针事件日志（保留30天）
+	// 3. 清理过期预警记录
+	alertRetention := settings.AlertRetentionDays
+	if alertRetention > 0 {
+		alertCutoff := time.Now().AddDate(0, 0, -alertRetention)
+		log.Printf("清理 %s 之前的预警记录（保留%d天）", alertCutoff.Format("2006-01-02 15:04:05"), alertRetention)
+		if deleted, err := models.DeleteAlertRecordsBefore(alertCutoff); err != nil {
+			log.Printf("清理过期预警记录失败: %v", err)
+		} else {
+			log.Printf("成功清理过期预警记录，共删除 %d 条", deleted)
+		}
+	}
+
+	// 4. 清理生命探针事件日志（保留30天）
 	jobs.CleanupLifeLoggerEvents()
 
-	// 4. 检查长时间未同步的探针
+	// 5. 检查长时间未同步的探针
 	jobs.CleanupStaleLifeProbes()
 }
 

@@ -16,7 +16,8 @@ import {
   HolderOutlined,
   SaveOutlined,
   CloseOutlined,
-  MoreOutlined
+  MoreOutlined,
+  SearchOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import Sortable from 'sortablejs';
@@ -35,6 +36,7 @@ const uiStore = useUIStore();
 
 // 数据状态
 const loading = ref(false);
+const searchKeyword = ref('');
 // 使用计算属性从store获取服务器列表
 const servers = computed(() => serverStore.getAllServers);
 
@@ -380,7 +382,14 @@ const cancelSort = () => {
 
 // 当前显示的服务器列表（排序模式下使用本地列表，否则使用 store 的列表）
 const displayServers = computed(() => {
-  return sortMode.value ? localServerOrder.value : servers.value;
+  if (sortMode.value) return localServerOrder.value;
+
+  const keyword = searchKeyword.value.trim().toLowerCase();
+  if (!keyword) return servers.value;
+
+  return servers.value.filter((s: any) =>
+    String(s?.name ?? '').toLowerCase().includes(keyword)
+  );
 });
 
 // 页面加载时获取数据
@@ -411,13 +420,24 @@ onDeactivated(() => {
       <div class="header-actions">
         <!-- 排序模式控制按钮 -->
         <template v-if="!sortMode">
-          <a-button @click="handleRefresh" class="glow-effect" style="margin-right: 8px;">
+          <div class="server-search-wrapper">
+            <a-input
+              v-model:value="searchKeyword"
+              placeholder="搜索服务器..."
+              allow-clear
+            >
+              <template #prefix>
+                <SearchOutlined style="color: var(--text-hint);" />
+              </template>
+            </a-input>
+          </div>
+          <a-button @click="handleRefresh" class="glow-effect">
             <template #icon>
               <ReloadOutlined />
             </template>
             刷新
           </a-button>
-          <a-button @click="enterSortMode" class="glow-effect" style="margin-right: 8px;" v-if="servers.length > 0">
+          <a-button @click="enterSortMode" class="glow-effect" v-if="servers.length > 0">
             <template #icon>
               <HolderOutlined />
             </template>
@@ -431,8 +451,7 @@ onDeactivated(() => {
           </a-button>
         </template>
         <template v-else>
-          <a-button type="primary" @click="saveOrder" :loading="savingOrder" class="glow-effect"
-            style="margin-right: 8px;">
+          <a-button type="primary" @click="saveOrder" :loading="savingOrder" class="glow-effect">
             <template #icon>
               <SaveOutlined />
             </template>
@@ -588,8 +607,41 @@ onDeactivated(() => {
   margin: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .server-list-content {
   padding: 16px;
+}
+
+.server-search-wrapper {
+  width: 200px;
+}
+
+.server-search-wrapper :deep(.ant-input-affix-wrapper) {
+  background: var(--card-bg);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.server-search-wrapper :deep(.ant-input-affix-wrapper:hover) {
+  border-color: var(--primary-color);
+}
+
+.server-search-wrapper :deep(.ant-input-affix-wrapper-focused) {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.server-search-wrapper :deep(.ant-input) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--text-primary);
 }
 
 .modern-table :deep(.ant-table-wrapper),
@@ -922,5 +974,24 @@ onDeactivated(() => {
 .dark :deep(.action-menu) {
   background: var(--card-bg);
   border: 1px solid var(--border-subtle);
+}
+
+/* 覆盖 App.vue 全局 .ant-input 样式，避免搜索框内出现双层圆角矩形 */
+:root.dark .server-search-wrapper .ant-input,
+:root.dark .server-search-wrapper .ant-input:focus,
+:root.dark .server-search-wrapper .ant-input:hover {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.server-search-wrapper .ant-input,
+.server-search-wrapper .ant-input:focus,
+.server-search-wrapper .ant-input:hover {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
 }
 </style>

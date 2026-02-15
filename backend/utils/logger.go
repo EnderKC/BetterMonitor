@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -35,7 +37,7 @@ const (
 type Logger struct {
 	Level  LogLevel
 	logger *log.Logger
-	file   *os.File
+	writer *lumberjack.Logger
 }
 
 // 初始化日志系统
@@ -77,21 +79,31 @@ func InitLoggers() error {
 }
 
 // 创建新的日志实例
+// 使用 lumberjack 实现日志自动轮转：单文件最大50MB，保留3个备份，最多保留7天，旧日志自动压缩
 func NewLogger(filePath string, level LogLevel) (*Logger, error) {
-	// 打开或创建日志文件
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("打开日志文件失败: %w", err)
+	// 确保日志目录存在
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return nil, fmt.Errorf("创建日志目录失败: %w", err)
+	}
+
+	// 使用 lumberjack 实现日志轮转
+	writer := &lumberjack.Logger{
+		Filename:   filePath,
+		MaxSize:    50,   // 单文件最大 50MB
+		MaxBackups: 3,    // 最多保留 3 个旧日志文件
+		MaxAge:     7,    // 旧日志最多保留 7 天
+		Compress:   true, // 压缩旧日志
+		LocalTime:  true, // 使用本地时间命名轮转文件
 	}
 
 	// 创建多输出 (同时输出到控制台和文件)
-	multiWriter := io.MultiWriter(os.Stdout, file)
+	multiWriter := io.MultiWriter(os.Stdout, writer)
 	logger := log.New(multiWriter, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 	return &Logger{
 		Level:  level,
 		logger: logger,
-		file:   file,
+		writer: writer,
 	}, nil
 }
 
@@ -133,8 +145,8 @@ func (l *Logger) Fatal(format string, v ...interface{}) {
 
 // 关闭日志
 func (l *Logger) Close() {
-	if l.file != nil {
-		l.file.Close()
+	if l.writer != nil {
+		l.writer.Close()
 	}
 }
 
@@ -186,7 +198,7 @@ func LogTerminalCreate(serverID uint, sessionID string) {
 
 func LogTerminalCommand(serverID uint, sessionID string, commandType string) {
 	if TerminalLogger != nil {
-		TerminalLogger.Debug("终端命令: 服务器ID=%d, 会话ID=%s, 类型=%s", 
+		TerminalLogger.Debug("终端命令: 服务器ID=%d, 会话ID=%s, 类型=%s",
 			serverID, sessionID, commandType)
 	}
 }
@@ -200,4 +212,4 @@ func LogTerminalClose(serverID uint, sessionID string) {
 // 工具函数: 获取当前时间戳字符串
 func GetTimestamp() string {
 	return time.Now().Format("2006-01-02 15:04:05.000")
-} 
+}

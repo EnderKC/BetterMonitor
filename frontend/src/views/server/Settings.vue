@@ -55,6 +55,7 @@ const form = reactive({
   ui_refresh_interval: '10s',
   chart_history_hours: 24,
   data_retention_days: 7,
+  alert_retention_days: 7,
   life_data_retention_days: 7,
   allow_public_life_probe_access: true,
   agent_release_repo: '',
@@ -110,6 +111,7 @@ const loadSettings = async () => {
       ui_refresh_interval?: string;
       chart_history_hours?: number;
       data_retention_days?: number;
+      alert_retention_days?: number;
       life_data_retention_days?: number;
       allow_public_life_probe_access?: boolean;
       agent_release_repo?: string;
@@ -132,6 +134,10 @@ const loadSettings = async () => {
 
     if (settings.data_retention_days !== undefined) {
       form.data_retention_days = settings.data_retention_days;
+    }
+
+    if (settings.alert_retention_days !== undefined) {
+      form.alert_retention_days = settings.alert_retention_days;
     }
 
     if (settings.life_data_retention_days !== undefined) {
@@ -180,6 +186,11 @@ const validateForm = () => {
   // 检查数据保留天数
   if (form.data_retention_days === undefined || form.data_retention_days < 1) {
     message.error('数据保留天数必须大于等于1');
+    return false;
+  }
+
+  if (form.alert_retention_days === undefined || form.alert_retention_days < 0) {
+    message.error('预警记录保留天数不能为负数（0表示永久保留）');
     return false;
   }
 
@@ -363,6 +374,12 @@ onMounted(async () => {
                     <a-input-number v-model:value="form.data_retention_days" :min="1" :max="90"
                       class="ios-input-number" />
                     <div class="form-help">历史监控数据的保留天数，超出将被自动清理</div>
+                  </a-form-item>
+
+                  <a-form-item label="预警记录保留天数">
+                    <a-input-number v-model:value="form.alert_retention_days" :min="0" :max="365"
+                      class="ios-input-number" />
+                    <div class="form-help">预警记录的保留天数，超出将被永久清理；设为 0 表示永久保留</div>
                   </a-form-item>
 
                   <a-form-item label="生命探针数据保留天数">

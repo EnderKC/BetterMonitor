@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -10,6 +11,11 @@ import (
 	"time"
 
 	"github.com/user/server-ops-backend/models"
+)
+
+const (
+	releaseMaxRetries    = 3
+	releaseRetryBaseWait = 500 * time.Millisecond
 )
 
 type httpDoer interface {
@@ -137,9 +143,31 @@ func fetchReleaseFromGitHub(repo, channel string) (*githubRelease, error) {
 		endpoint = fmt.Sprintf("%s/repos/%s/releases?per_page=1", releaseAPIBaseURL, repo)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt < releaseMaxRetries; attempt++ {
+		if attempt > 0 {
+			wait := releaseRetryBaseWait * (1 << (attempt - 1)) // 500ms, 1s
+			log.Printf("GitHub API 请求失败，%v 后进行第 %d 次重试: %v", wait, attempt+1, lastErr)
+			time.Sleep(wait)
+		}
+
+		release, retryable, err := doFetchRelease(endpoint)
+		if err == nil {
+			return release, nil
+		}
+		lastErr = err
+		if !retryable {
+			return nil, lastErr
+		}
+	}
+	return nil, fmt.Errorf("请求发布信息失败（已重试 %d 次）: %w", releaseMaxRetries, lastErr)
+}
+
+// doFetchRelease 执行单次 GitHub API 请求，返回结果、是否可重试、错误
+func doFetchRelease(endpoint string) (*githubRelease, bool, error) {
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, false, fmt.Errorf("创建请求失败: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 
@@ -149,30 +177,34 @@ func fetchReleaseFromGitHub(repo, channel string) (*githubRelease, error) {
 
 	resp, err := releaseHTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求发布信息失败: %w", err)
+		// 网络错误（超时、DNS、连接拒绝等）可重试
+		return nil, true, fmt.Errorf("请求发布信息失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API 状态码异常: %d", resp.StatusCode)
+		retryable := resp.StatusCode == http.StatusForbidden ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode >= http.StatusInternalServerError
+		return nil, retryable, fmt.Errorf("GitHub API 状态码异常: %d", resp.StatusCode)
 	}
 
 	if strings.Contains(endpoint, "/releases?") {
 		var list []githubRelease
 		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-			return nil, fmt.Errorf("解析发布列表失败: %w", err)
+			return nil, false, fmt.Errorf("解析发布列表失败: %w", err)
 		}
 		if len(list) == 0 {
-			return nil, fmt.Errorf("发布列表为空")
+			return nil, false, fmt.Errorf("发布列表为空")
 		}
-		return &list[0], nil
+		return &list[0], false, nil
 	}
 
 	var release githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("解析发布信息失败: %w", err)
+		return nil, false, fmt.Errorf("解析发布信息失败: %w", err)
 	}
-	return &release, nil
+	return &release, false, nil
 }
 
 func convertGithubRelease(release *githubRelease) *AgentReleaseInfo {
