@@ -1267,7 +1267,15 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			if agentType, ok := systemInfoData["agent_type"].(string); ok {
 				agentType = strings.TrimSpace(agentType)
 				if agentType == "full" || agentType == "monitor" {
-					server.AgentType = agentType
+					// 仅在数据库中 agent_type 为空时初始化，避免覆盖 SwitchAgentType 的设置。
+					// Agent 上报的是编译时类型，在类型切换期间（旧二进制尚未替换），
+					// 无条件覆盖会将用户刚切换的类型回写为旧值，产生竞态。
+					if server.AgentType == "" {
+						server.AgentType = agentType
+					} else if server.AgentType != agentType {
+						log.Printf("server=%d agent_type 不一致: db=%s, reported=%s (以数据库为准，跳过覆盖)",
+							server.ID, server.AgentType, agentType)
+					}
 				}
 			}
 
@@ -1297,10 +1305,10 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				"cpu_cores":     server.CPUCores,
 				"cpu_model":     server.CPUModel,
 				"agent_version": server.AgentVersion,
-				"agent_type":    server.AgentType,
 				"memory_total":  server.MemoryTotal,
 				"disk_total":    server.DiskTotal,
 			}
+			// agent_type 不在 system_info 路径中更新，完全由 SwitchAgentType 和创建时管理
 
 			if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
 				log.Printf("更新服务器信息失败: %v", err)
