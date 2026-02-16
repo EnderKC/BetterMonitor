@@ -805,7 +805,7 @@ download_agent() {
     releases_json=$(curl -fsSL \
         -H "Accept: application/vnd.github+json" \
         -H "User-Agent: better-monitor-agent-installer" \
-        "${auth_header[@]}" \
+        ${auth_header[@]:+"${auth_header[@]}"} \
         "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
         || error "无法从 GitHub 获取 Release 信息，请检查仓库 ${GITHUB_REPO}"
 
@@ -834,7 +834,7 @@ download_agent() {
     fi
 
     info "开始下载 Agent..."
-    curl -fL --retry 3 --retry-delay 2 "${download_header[@]}" -o "$downloaded" "$download_url" \
+    curl -fL --retry 3 --retry-delay 2 ${download_header[@]:+"${download_header[@]}"} -o "$downloaded" "$download_url" \
         || error "下载失败，请稍后再试"
 
     if [[ -n "${checksum_url:-}" ]]; then
@@ -848,7 +848,7 @@ download_agent() {
         if [[ "${#auth_header[@]}" -ne 0 && "$checksum_download_url" == https://github.com/* ]]; then
             checksum_header=("${auth_header[@]}")
         fi
-        curl -fL --retry 3 --retry-delay 2 "${checksum_header[@]}" -o "$checksum_file" "$checksum_download_url" \
+        curl -fL --retry 3 --retry-delay 2 ${checksum_header[@]:+"${checksum_header[@]}"} -o "$checksum_file" "$checksum_download_url" \
             || warn "下载校验文件失败（将跳过校验）"
         if [[ -f "$checksum_file" ]]; then
             verify_download_checksum "$checksum_file" "$asset_name" "$downloaded"
