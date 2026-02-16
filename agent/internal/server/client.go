@@ -1,24 +1,22 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-agent/config"
 	"github.com/user/server-ops-agent/internal/monitor"
+	"github.com/user/server-ops-agent/internal/upgrader"
 	"github.com/user/server-ops-agent/pkg/logger"
 	"github.com/user/server-ops-agent/pkg/version"
 )
@@ -40,10 +38,8 @@ type Client struct {
 	// WebSocket写入锁，防止并发写入
 	wsWriteMutex sync.Mutex // WebSocket写入锁
 
-	// 升级配置
-	releaseRepo    string
-	releaseChannel string
-	releaseMirror  string
+	// 升级并发保护：同一时间只允许一个升级任务
+	upgrading int32
 
 	// 操作类功能字段（通过 build tag 控制）
 	clientOpsFields
@@ -57,12 +53,15 @@ func New(config *config.Config, log *logger.Logger) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		secretKey:      config.SecretKey,
-		releaseRepo:    config.UpdateRepo,
-		releaseChannel: config.UpdateChannel,
-		releaseMirror:  config.UpdateMirror,
+		secretKey: config.SecretKey,
 	}
 	c.initOpsFields()
+
+	// 将升级相关配置同步到环境变量，供 upgrader 包使用
+	if c.cfg.UpdateRepo != "" {
+		os.Setenv("BETTER_MONITOR_AGENT_GITHUB_REPO", c.cfg.UpdateRepo)
+	}
+
 	return c
 }
 
@@ -307,7 +306,7 @@ func (c *Client) handleWebSocketMessages() {
 		// 根据消息类型使用不同的结构体解析
 		switch baseMsg.Type {
 		case "agent_upgrade":
-			// 处理Agent升级请求 - 异步处理
+			// 处理Agent升级请求 - 委托给 upgrader 包的统一升级流程
 			go c.handleAgentUpgrade(msgCopy)
 
 		case "error":
@@ -530,23 +529,22 @@ func (c *Client) FetchSettings() error {
 		c.log.Warn("服务器返回的监控间隔为空")
 	}
 
-	if repo := strings.TrimSpace(response.AgentReleaseRepo); repo != "" && repo != c.releaseRepo {
-		c.log.Info("更新Release仓库: %s -> %s", c.releaseRepo, repo)
-		c.releaseRepo = repo
+	if repo := strings.TrimSpace(response.AgentReleaseRepo); repo != "" && repo != c.cfg.UpdateRepo {
+		c.log.Info("更新Release仓库: %s -> %s", c.cfg.UpdateRepo, repo)
 		c.cfg.UpdateRepo = repo
+		// 同步到环境变量，供 upgrader 包的 resolveDownloadURL 使用
+		os.Setenv("BETTER_MONITOR_AGENT_GITHUB_REPO", repo)
 		configChanged = true
 	}
 
-	if ch := strings.TrimSpace(response.AgentReleaseChannel); ch != "" && ch != c.releaseChannel {
-		c.log.Info("更新Release通道: %s -> %s", c.releaseChannel, ch)
-		c.releaseChannel = ch
+	if ch := strings.TrimSpace(response.AgentReleaseChannel); ch != "" && ch != c.cfg.UpdateChannel {
+		c.log.Info("更新Release通道: %s -> %s", c.cfg.UpdateChannel, ch)
 		c.cfg.UpdateChannel = ch
 		configChanged = true
 	}
 
-	if mirror := strings.TrimSpace(response.AgentReleaseMirror); mirror != c.releaseMirror {
-		c.log.Info("更新Release镜像: %s -> %s", c.releaseMirror, mirror)
-		c.releaseMirror = mirror
+	if mirror := strings.TrimSpace(response.AgentReleaseMirror); mirror != c.cfg.UpdateMirror {
+		c.log.Info("更新Release镜像: %s -> %s", c.cfg.UpdateMirror, mirror)
 		c.cfg.UpdateMirror = mirror
 		configChanged = true
 	}
@@ -611,696 +609,174 @@ func (c *Client) IsConnectionError(err error) bool {
 	return false
 }
 
-// 处理Agent升级请求
+// ─── Agent 升级（统一使用 upgrader 包） ─────────────────────────────────────────
+
+type agentUpgradePayload struct {
+	Action          string `json:"action"`
+	TargetVersion   string `json:"target_version"`
+	Channel         string `json:"channel"`
+	ServerID        uint   `json:"server_id"`
+	DownloadURL     string `json:"download_url,omitempty"`
+	SHA256          string `json:"sha256,omitempty"`
+	TargetAgentType string `json:"target_agent_type,omitempty"`
+}
+
+// handleAgentUpgrade 处理面板端下发的升级指令，委托给 upgrader 包执行
 func (c *Client) handleAgentUpgrade(message []byte) {
 	c.log.Info("收到Agent升级请求")
 
-	var upgradeMsg struct {
-		Type      string `json:"type"`
-		RequestID string `json:"request_id"`
-		Payload   struct {
-			Action        string `json:"action"`
-			TargetVersion string `json:"target_version"`
-			Channel       string `json:"channel"`
-			ServerID      uint64 `json:"server_id"`
-		} `json:"payload"`
+	// 并发保护：同一时间只允许一个升级任务
+	if !atomic.CompareAndSwapInt32(&c.upgrading, 0, 1) {
+		c.log.Warn("升级任务正在进行中，忽略重复请求")
+		return
 	}
+	defer atomic.StoreInt32(&c.upgrading, 0)
 
-	if err := json.Unmarshal(message, &upgradeMsg); err != nil {
+	var envelope struct {
+		RequestID string          `json:"request_id"`
+		Payload   json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(message, &envelope); err != nil {
 		c.log.Error("解析升级消息失败: %v", err)
 		return
 	}
 
-	channel := c.effectiveChannel(upgradeMsg.Payload.Channel)
-	targetVersion := strings.TrimSpace(upgradeMsg.Payload.TargetVersion)
+	requestID := strings.TrimSpace(envelope.RequestID)
+	if requestID == "" {
+		requestID = fmt.Sprintf("upgrade-%d-%d", c.cfg.ServerID, time.Now().Unix())
+	}
 
-	c.sendResponse(upgradeMsg.RequestID, "agent_upgrade_response", map[string]interface{}{
-		"status":         "started",
-		"message":        "开始执行升级流程",
-		"target_version": targetVersion,
-		"channel":        channel,
+	c.sendUpgradeStatus(requestID, "received", "收到升级指令", map[string]interface{}{
+		"platform": runtime.GOOS,
+		"arch":     runtime.GOARCH,
 	})
 
-	go c.performAgentUpgrade(upgradeMsg.RequestID, targetVersion, channel)
-}
+	var p agentUpgradePayload
+	if err := json.Unmarshal(envelope.Payload, &p); err != nil {
+		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("解析升级 payload 失败: %v", err), nil)
+		return
+	}
 
-// 执行升级流程
-func (c *Client) performAgentUpgrade(requestID, targetVersion, channel string) {
-	repo := c.getReleaseRepo()
-	if repo == "" {
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": "未配置Agent Release仓库",
+	if p.ServerID == 0 {
+		p.ServerID = uint(c.cfg.ServerID)
+	}
+	if strings.TrimSpace(p.Action) == "" {
+		p.Action = "upgrade"
+	}
+	if p.Action != "upgrade" {
+		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("不支持的升级动作: %s", p.Action), nil)
+		return
+	}
+	if strings.TrimSpace(p.TargetVersion) == "" {
+		c.sendUpgradeStatus(requestID, "failed", "缺少 target_version", nil)
+		return
+	}
+	if strings.TrimSpace(p.Channel) == "" {
+		p.Channel = "stable"
+	}
+
+	current := version.GetVersion()
+	if current != nil && strings.TrimSpace(current.Version) != "" &&
+		strings.TrimSpace(current.Version) == strings.TrimSpace(p.TargetVersion) {
+		c.sendUpgradeStatus(requestID, "noop", "当前版本已是目标版本，无需升级", map[string]interface{}{
+			"current_version": current.Version,
+			"target_version":  p.TargetVersion,
 		})
 		return
 	}
 
-	asset, err := c.resolveReleaseAsset(repo, targetVersion, channel)
-	if err != nil {
-		c.log.Error("解析发布信息失败: %v", err)
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": fmt.Sprintf("获取发布信息失败: %v", err),
-		})
-		return
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	req := upgrader.UpgradeRequest{
+		RequestID:       requestID,
+		TargetVersion:   strings.TrimSpace(p.TargetVersion),
+		Channel:         strings.TrimSpace(p.Channel),
+		DownloadURL:     strings.TrimSpace(p.DownloadURL),
+		SHA256:          strings.TrimSpace(p.SHA256),
+		TargetAgentType: strings.TrimSpace(p.TargetAgentType),
+		ServerID:        p.ServerID,
+		SecretKey:       c.secretKey,
+		Args:            os.Args,
+		Env:             os.Environ(),
 	}
 
-	c.log.Info("准备下载版本 %s，下载地址: %s", asset.Version, asset.DownloadURL)
-	c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-		"status":  "downloading",
-		"message": fmt.Sprintf("正在下载版本 %s", asset.Version),
+	c.sendUpgradeStatus(requestID, "starting", "开始执行升级流程", map[string]interface{}{
+		"current_version": safeVersion(current),
+		"target_version":  req.TargetVersion,
+		"channel":         req.Channel,
 	})
 
-	tempFile, err := c.downloadReleaseFile(asset.DownloadURL)
-	if err != nil {
-		c.log.Error("下载版本失败: %v", err)
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": fmt.Sprintf("下载失败: %v", err),
-		})
-		return
-	}
-	defer os.Remove(tempFile)
-
-	if err := c.verifyReleaseFile(tempFile, asset.Checksum); err != nil {
-		c.log.Error("校验下载文件失败: %v", err)
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": fmt.Sprintf("校验失败: %v", err),
-		})
-		return
-	}
-
-	backupFile, err := c.backupCurrentProgram()
-	if err != nil {
-		c.log.Error("备份当前程序失败: %v", err)
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": fmt.Sprintf("备份失败: %v", err),
-		})
-		return
-	}
-
-	c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-		"status":  "installing",
-		"message": "正在安装新版本",
+	err := upgrader.Upgrade(ctx, req, func(pr upgrader.Progress) {
+		fields := map[string]interface{}{
+			"current_version": safeVersion(version.GetVersion()),
+			"target_version":  req.TargetVersion,
+			"channel":         req.Channel,
+		}
+		if pr.DownloadURL != "" {
+			fields["download_url"] = pr.DownloadURL
+		}
+		if pr.SHA256 != "" {
+			fields["sha256"] = pr.SHA256
+		}
+		if pr.BytesDownloaded > 0 {
+			fields["bytes_downloaded"] = pr.BytesDownloaded
+		}
+		c.sendUpgradeStatus(requestID, pr.Status, pr.Message, fields)
 	})
-
-	if err := c.installReleaseFile(tempFile); err != nil {
-		c.log.Error("安装新版本失败: %v", err)
-		if restoreErr := c.restoreBackup(backupFile); restoreErr != nil {
-			c.log.Error("恢复备份失败: %v", restoreErr)
-		}
-		c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-			"status":  "failed",
-			"message": fmt.Sprintf("安装失败: %v", err),
-		})
+	if err != nil {
+		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("升级失败: %v", err), nil)
 		return
 	}
 
-	c.sendResponse(requestID, "agent_upgrade_response", map[string]interface{}{
-		"status":  "completed",
-		"message": fmt.Sprintf("升级完成，版本 %s 即将生效", asset.Version),
-		"version": asset.Version,
-	})
+	// Upgrade 成功时通常会直接触发进程重启（Unix: exec；Windows: 退出后由 updater 拉起），
+	// 不会执行到这里。但若到达此处，仍发送 success 状态。
+	c.sendUpgradeStatus(requestID, "success", "升级流程完成", nil)
+}
 
-	// Windows 不能在运行中替换/启动自身（文件锁），需要退出让外部 updater 完成替换并拉起新进程。
-	if runtime.GOOS == "windows" {
-		time.Sleep(1 * time.Second)
-		os.Exit(0)
+func safeVersion(info *version.Info) string {
+	if info == nil {
+		return ""
+	}
+	return strings.TrimSpace(info.Version)
+}
+
+// sendUpgradeStatus 向面板端发送升级状态消息
+func (c *Client) sendUpgradeStatus(requestID, status, message string, extra map[string]interface{}) {
+	info := version.GetVersion()
+
+	payload := map[string]interface{}{
+		"status":  status,
+		"message": message,
+		"time":    time.Now().UTC().Format(time.RFC3339),
+		"agent": map[string]interface{}{
+			"version":    safeVersion(info),
+			"commit":     strings.TrimSpace(info.Commit),
+			"build_date": strings.TrimSpace(info.BuildDate),
+			"go_version": strings.TrimSpace(info.GoVersion),
+			"platform":   strings.TrimSpace(info.Platform),
+			"arch":       strings.TrimSpace(info.Arch),
+		},
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+
+	msg := map[string]interface{}{
+		"type":       "agent_upgrade_status",
+		"request_id": requestID,
+		"payload":    payload,
+	}
+
+	b, err := json.Marshal(msg)
+	if err != nil {
+		c.log.Error("序列化升级状态消息失败: %v", err)
 		return
 	}
 
-	time.Sleep(2 * time.Second)
-	c.restartAgent()
-}
-
-type releaseAsset struct {
-	Version     string
-	DownloadURL string
-	Checksum    string
-}
-
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Name    string `json:"name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-	} `json:"assets"`
-}
-
-func (c *Client) resolveReleaseAsset(repo, targetVersion, channel string) (*releaseAsset, error) {
-	channel = c.effectiveChannel(channel)
-	apiBase := "https://api.github.com"
-	tag := strings.TrimSpace(targetVersion)
-
-	var endpoint string
-	if tag != "" {
-		endpoint = fmt.Sprintf("%s/repos/%s/releases/tags/%s", apiBase, repo, c.formatTag(tag))
-	} else if channel == "stable" || channel == "" {
-		endpoint = fmt.Sprintf("%s/repos/%s/releases/latest", apiBase, repo)
-	} else {
-		endpoint = fmt.Sprintf("%s/repos/%s/releases?per_page=1", apiBase, repo)
+	c.wsWriteMutex.Lock()
+	defer c.wsWriteMutex.Unlock()
+	if c.wsConn != nil {
+		_ = c.wsConn.WriteMessage(websocket.TextMessage, b)
 	}
-
-	release, err := c.fetchRelease(endpoint, channel != "stable" && channel != "")
-	if err != nil {
-		return nil, err
-	}
-
-	assetURL, err := c.pickAssetURL(release)
-	if err != nil {
-		return nil, err
-	}
-
-	return &releaseAsset{
-		Version:     strings.TrimPrefix(release.TagName, "v"),
-		DownloadURL: c.applyDownloadMirror(assetURL),
-		Checksum:    "",
-	}, nil
-}
-
-func (c *Client) fetchRelease(endpoint string, isList bool) (*githubRelease, error) {
-	req, err := http.NewRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	if token := c.githubToken(); token != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API返回状态码: %d", resp.StatusCode)
-	}
-
-	if isList {
-		var list []githubRelease
-		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-			return nil, err
-		}
-		if len(list) == 0 {
-			return nil, fmt.Errorf("发布列表为空")
-		}
-		return &list[0], nil
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, err
-	}
-	return &release, nil
-}
-
-func (c *Client) pickAssetURL(release *githubRelease) (string, error) {
-	if release == nil || len(release.Assets) == 0 {
-		return "", fmt.Errorf("发布中没有可用的资产")
-	}
-
-	targetOS := runtime.GOOS
-	targetArch := runtime.GOARCH
-	targetSignature := fmt.Sprintf("%s-%s", targetOS, targetArch)
-
-	// 升级类型锁：monitor 版只匹配 monitor 变体资产，full 版排除 monitor 变体
-	isMonitor := version.AgentType == "monitor"
-
-	var fallback string
-	for _, asset := range release.Assets {
-		nameLower := strings.ToLower(asset.Name)
-
-		// 类型锁过滤: monitor 版只能匹配含 "monitor" 的资产，full 版排除含 "-monitor-" 的资产
-		containsMonitor := strings.Contains(nameLower, "-monitor-")
-		if isMonitor && !containsMonitor {
-			continue
-		}
-		if !isMonitor && containsMonitor {
-			continue
-		}
-
-		if strings.Contains(nameLower, targetSignature) {
-			return asset.BrowserDownloadURL, nil
-		}
-		if strings.Contains(nameLower, targetOS) {
-			fallback = asset.BrowserDownloadURL
-		}
-	}
-
-	if fallback != "" {
-		return fallback, nil
-	}
-
-	// 如果过滤后没有匹配，说明 Release 中没有对应变体的资产
-	return "", fmt.Errorf("未找到适用于 %s 变体的 %s 资产", version.AgentType, targetSignature)
-}
-
-func (c *Client) effectiveChannel(channel string) string {
-	val := strings.TrimSpace(channel)
-	if val != "" {
-		return strings.ToLower(val)
-	}
-	if c.releaseChannel != "" {
-		return strings.ToLower(c.releaseChannel)
-	}
-	if c.cfg.UpdateChannel != "" {
-		return strings.ToLower(c.cfg.UpdateChannel)
-	}
-	return "stable"
-}
-
-func (c *Client) getReleaseRepo() string {
-	if c.releaseRepo != "" {
-		return c.releaseRepo
-	}
-	return c.cfg.UpdateRepo
-}
-
-func (c *Client) releaseMirrorHost() string {
-	if c.releaseMirror != "" {
-		return strings.TrimRight(c.releaseMirror, "/")
-	}
-	if c.cfg.UpdateMirror != "" {
-		return strings.TrimRight(c.cfg.UpdateMirror, "/")
-	}
-	return ""
-}
-
-func (c *Client) formatTag(version string) string {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return version
-	}
-	if strings.HasPrefix(version, "v") {
-		return version
-	}
-	return "v" + version
-}
-
-func (c *Client) applyDownloadMirror(url string) string {
-	mirror := c.releaseMirrorHost()
-	if mirror == "" {
-		return url
-	}
-	if strings.HasPrefix(url, "https://github.com") {
-		return mirror + strings.TrimPrefix(url, "https://github.com")
-	}
-	return url
-}
-
-func (c *Client) githubToken() string {
-	if token := strings.TrimSpace(os.Getenv("AGENT_RELEASE_GITHUB_TOKEN")); token != "" {
-		return token
-	}
-	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-}
-
-// 下载发布文件
-func (c *Client) downloadReleaseFile(downloadURL string) (string, error) {
-	// 创建临时文件
-	tempFile, err := os.CreateTemp("", "ota_update_*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("创建临时文件失败: %v", err)
-	}
-	defer tempFile.Close()
-
-	c.log.Info("开始下载升级包: %s", downloadURL)
-
-	req, err := http.NewRequest("GET", downloadURL, nil)
-	if err != nil {
-		_ = os.Remove(tempFile.Name())
-		return "", fmt.Errorf("创建下载请求失败: %v", err)
-	}
-	req.Header.Set("User-Agent", "better-monitor-agent")
-	req.Header.Set("Accept", "application/octet-stream")
-
-	// 下载升级包可能比普通 API 请求耗时更久，避免复用 10s 的短超时导致在慢网络下升级必然失败。
-	downloadClient := &http.Client{Timeout: 20 * time.Minute}
-	if c.httpClient != nil {
-		clone := *c.httpClient
-		clone.Timeout = 20 * time.Minute
-		downloadClient = &clone
-	}
-
-	// 发送HTTP请求
-	resp, err := downloadClient.Do(req)
-	if err != nil {
-		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("下载文件失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("下载请求失败，状态码: %d", resp.StatusCode)
-	}
-
-	// 将响应内容写入临时文件
-	_, err = io.Copy(tempFile, resp.Body)
-	if err != nil {
-		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("写入临时文件失败: %v", err)
-	}
-
-	_ = tempFile.Sync()
-	c.log.Info("升级包下载完成: %s", tempFile.Name())
-
-	return tempFile.Name(), nil
-}
-
-// 验证发布文件
-func (c *Client) verifyReleaseFile(filePath string, expectedChecksum string) error {
-	// 检查文件是否存在
-	if _, err := os.Stat(filePath); err != nil {
-		return fmt.Errorf("文件不存在: %v", err)
-	}
-
-	// 检查文件是否为可执行文件
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %v", err)
-	}
-
-	if fileInfo.Size() == 0 {
-		return fmt.Errorf("文件为空")
-	}
-
-	// 计算文件校验和
-	if expectedChecksum != "" {
-		actualChecksum, err := c.calculateFileChecksum(filePath)
-		if err != nil {
-			return fmt.Errorf("计算文件校验和失败: %v", err)
-		}
-
-		if actualChecksum != expectedChecksum {
-			return fmt.Errorf("文件校验和不匹配: 期望 %s, 实际 %s", expectedChecksum, actualChecksum)
-		}
-		c.log.Info("文件校验和验证成功")
-	}
-
-	// 在Unix系统上检查文件权限
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(filePath, 0755); err != nil {
-			return fmt.Errorf("设置文件权限失败: %v", err)
-		}
-	}
-
-	return nil
-}
-
-// calculateFileChecksum 计算文件校验和
-func (c *Client) calculateFileChecksum(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// 备份当前程序
-func (c *Client) backupCurrentProgram() (string, error) {
-	// 获取当前程序的路径
-	currentPath, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("获取当前程序路径失败: %v", err)
-	}
-
-	// 创建备份文件名
-	backupPath := currentPath + ".backup"
-
-	// 复制当前程序到备份文件
-	sourceFile, err := os.Open(currentPath)
-	if err != nil {
-		return "", fmt.Errorf("打开当前程序失败: %v", err)
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(backupPath)
-	if err != nil {
-		return "", fmt.Errorf("创建备份文件失败: %v", err)
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
-		os.Remove(backupPath)
-		return "", fmt.Errorf("复制文件失败: %v", err)
-	}
-
-	// 设置备份文件权限
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(backupPath, 0755); err != nil {
-			c.log.Warn("设置备份文件权限失败: %v", err)
-		}
-	}
-
-	return backupPath, nil
-}
-
-// 安装发布文件
-func (c *Client) installReleaseFile(tempFile string) error {
-	// 获取当前程序的路径
-	currentPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("获取当前程序路径失败: %v", err)
-	}
-
-	// 在Windows上需要特殊处理
-	if runtime.GOOS == "windows" {
-		// Windows 下运行中的 exe 被锁定，无法 rename/overwrite。
-		// 采用外部 PowerShell updater：等待当前 PID 退出后，再完成替换并拉起新进程。
-		if err := c.startWindowsUpdater(currentPath, tempFile); err != nil {
-			return fmt.Errorf("启动 updater 失败: %v", err)
-		}
-	} else {
-		// 在Unix系统上，可以直接替换
-		if err := c.copyFile(tempFile, currentPath); err != nil {
-			return fmt.Errorf("复制新程序失败: %v", err)
-		}
-	}
-
-	return nil
-}
-
-func (c *Client) startWindowsUpdater(oldExePath, newExePath string) error {
-	// 仅在 Windows 上调用；为保证跨平台编译，这里不使用 Windows 特有的 syscall 字段。
-	argsJSON, _ := json.Marshal(os.Args[1:]) // 不包含 argv[0]
-
-	dir := filepath.Dir(oldExePath)
-	scriptPath := filepath.Join(dir, fmt.Sprintf("bm-agent-upgrade-%d.ps1", time.Now().UnixNano()))
-	script := strings.TrimSpace(`
-param(
-  [Parameter(Mandatory=$true)][int]$Pid,
-  [Parameter(Mandatory=$true)][string]$OldExe,
-  [Parameter(Mandatory=$true)][string]$NewExe,
-  [Parameter(Mandatory=$false)][string]$ArgsJson
-)
-
-function Try-Remove([string]$Path) {
-  try { if (Test-Path $Path) { Remove-Item -Force -ErrorAction SilentlyContinue $Path } } catch {}
-}
-
-function Try-Move([string]$From, [string]$To) {
-  try { Move-Item -Force -ErrorAction Stop $From $To; return $true } catch { return $false }
-}
-
-$args = @()
-try {
-  if ($ArgsJson -and $ArgsJson.Trim().Length -gt 0) {
-    $args = ConvertFrom-Json -InputObject $ArgsJson
-  }
-} catch {
-  $args = @()
-}
-
-# wait for old process to exit (max ~120s)
-for ($i = 0; $i -lt 120; $i++) {
-  try {
-    $p = Get-Process -Id $Pid -ErrorAction Stop
-    Start-Sleep -Seconds 1
-  } catch {
-    break
-  }
-}
-
-$backup = "$OldExe.old"
-Try-Remove $backup
-
-# replace: OldExe -> backup, NewExe -> OldExe (retry a few times)
-for ($i = 0; $i -lt 30; $i++) {
-  try {
-    if (Test-Path $OldExe) { Try-Move $OldExe $backup | Out-Null }
-    if (Try-Move $NewExe $OldExe) { break }
-  } catch {}
-  Start-Sleep -Milliseconds 500
-}
-
-try {
-  Start-Process -FilePath $OldExe -ArgumentList $args -WindowStyle Hidden
-} catch {
-  # best-effort rollback
-  try {
-    if (Test-Path $backup) { Try-Move $backup $OldExe | Out-Null }
-  } catch {}
-}
-
-Try-Remove $NewExe
-Try-Remove $MyInvocation.MyCommand.Path
-`) + "\r\n"
-
-	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
-		return fmt.Errorf("写入 updater 脚本失败: %v", err)
-	}
-
-	pid := os.Getpid()
-	var lastErr error
-	for _, ps := range []string{"powershell.exe", "powershell", "pwsh"} {
-		cmd := exec.Command(
-			ps,
-			"-NoProfile",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-File",
-			scriptPath,
-			"-Pid",
-			strconv.Itoa(pid),
-			"-OldExe",
-			oldExePath,
-			"-NewExe",
-			newExePath,
-			"-ArgsJson",
-			string(argsJSON),
-		)
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		if err := cmd.Start(); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-
-	_ = os.Remove(scriptPath)
-	if lastErr != nil {
-		return fmt.Errorf("启动 PowerShell 失败: %v", lastErr)
-	}
-	return fmt.Errorf("启动 PowerShell 失败")
-}
-
-// 恢复备份
-func (c *Client) restoreBackup(backupFile string) error {
-	// 获取当前程序的路径
-	currentPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("获取当前程序路径失败: %v", err)
-	}
-
-	// 复制备份文件到当前位置
-	return c.copyFile(backupFile, currentPath)
-}
-
-// 重启Agent
-func (c *Client) restartAgent() {
-	c.log.Info("正在重启Agent...")
-
-	// 获取当前程序的路径
-	currentPath, err := os.Executable()
-	if err != nil {
-		c.log.Error("获取当前程序路径失败: %v", err)
-		return
-	}
-
-	argv := append([]string{currentPath}, os.Args[1:]...)
-
-	// Unix 上优先使用 exec 替换当前进程，避免 systemd/OpenRC 等服务管理器误判为"退出并重启"导致双进程。
-	// Windows 不支持该行为（execSelf 会返回错误），会走下方的 fallback。
-	if err := execSelf(currentPath, argv); err != nil {
-		c.log.Warn("exec 重启失败，尝试启动新进程: %v", err)
-	}
-
-	// 在新进程中启动程序
-	cmd := exec.Command(currentPath, os.Args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Start(); err != nil {
-		c.log.Error("启动新进程失败: %v", err)
-		return
-	}
-
-	c.log.Info("新进程已启动，PID: %d", cmd.Process.Pid)
-
-	// 当前进程退出
-	os.Exit(0)
-}
-
-// 复制文件的辅助方法
-func (c *Client) copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("打开源文件失败: %v", err)
-	}
-	defer sourceFile.Close()
-
-	// 直接对正在运行的可执行文件做 os.Create(dst) 可能触发 ETXTBSY（text file busy）。
-	// 使用"同目录临时文件 + rename"的方式原子替换，避免写入目标路径。
-	dir := filepath.Dir(dst)
-	base := filepath.Base(dst)
-	destFile, err := os.CreateTemp(dir, base+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("创建临时目标文件失败: %v", err)
-	}
-	tempPath := destFile.Name()
-
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
-		destFile.Close()
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("复制文件内容失败: %v", err)
-	}
-	_ = destFile.Sync()
-	if err := destFile.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("关闭临时目标文件失败: %v", err)
-	}
-
-	// 设置文件权限（仅在Unix系统上）
-	if runtime.GOOS != "windows" {
-		sourceInfo, err := os.Stat(src)
-		if err != nil {
-			_ = os.Remove(tempPath)
-			return fmt.Errorf("获取源文件权限失败: %v", err)
-		}
-
-		if err := os.Chmod(tempPath, sourceInfo.Mode()); err != nil {
-			_ = os.Remove(tempPath)
-			return fmt.Errorf("设置临时目标文件权限失败: %v", err)
-		}
-	}
-
-	// Windows 下 os.Rename 不能覆盖已存在的文件；行为上与旧实现（Create+Truncate）一致，尽力移除旧文件。
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(dst)
-	}
-
-	if err := os.Rename(tempPath, dst); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("替换目标文件失败: %v", err)
-	}
-
-	return nil
 }

@@ -1593,9 +1593,10 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 					"data": fileResponse.Data,
 				})
 			}
-		case "agent_upgrade_response":
-			// Agent 升级进度/结果回传（用于日志/后续扩展 UI 显示）。
-			// 旧版本未处理该类型会触发默认分支向 Agent 回发 error，导致 Agent 侧出现"未知类型/错误"噪音。
+		case "agent_upgrade_response", "agent_upgrade_status":
+			// Agent 升级进度/结果回传，兼容两种消息格式：
+			//   旧路径 (client.go)  → type="agent_upgrade_response", 数据在 "data" 字段
+			//   新路径 (handler包)  → type="agent_upgrade_status",   数据在 "payload" 字段
 			if !isAgent {
 				continue
 			}
@@ -1604,14 +1605,25 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				Type      string                 `json:"type"`
 				RequestID string                 `json:"request_id"`
 				Data      map[string]interface{} `json:"data"`
+				Payload   map[string]interface{} `json:"payload"`
 			}
 			if err := json.Unmarshal(message, &upgradeResp); err != nil {
 				log.Printf("解析Agent升级响应失败: %v", err)
 				continue
 			}
 
-			status, _ := upgradeResp.Data["status"].(string)
-			msgText, _ := upgradeResp.Data["message"].(string)
+			// 统一取数据：优先从 data 取（旧路径），若为空则从 payload 取（新路径）
+			upgradeData := upgradeResp.Data
+			if len(upgradeData) == 0 {
+				upgradeData = upgradeResp.Payload
+			}
+			if len(upgradeData) == 0 {
+				log.Printf("收到空的Agent升级消息: server=%d request_id=%s type=%s", server.ID, upgradeResp.RequestID, upgradeResp.Type)
+				continue
+			}
+
+			status, _ := upgradeData["status"].(string)
+			msgText, _ := upgradeData["message"].(string)
 			if status != "" || msgText != "" {
 				log.Printf("收到Agent升级状态: server=%d request_id=%s status=%s message=%s", server.ID, upgradeResp.RequestID, status, msgText)
 			} else {
@@ -1625,7 +1637,7 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				"request_id": upgradeResp.RequestID,
 				"status":     status,
 				"message":    msgText,
-				"data":       upgradeResp.Data,
+				"data":       upgradeData,
 				"timestamp":  time.Now().Unix(),
 			})
 		default:
