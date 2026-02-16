@@ -1,49 +1,83 @@
+<div align="center">
+
 # Better Monitor
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org/)
-[![Vue](https://img.shields.io/badge/Vue-3-green.svg)](https://vuejs.org/)
-[![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://docker.com/)
+**轻量级跨平台服务器监控与运维管理平台**
 
-轻量级服务器监控与运维管理平台。Dashboard 1.2.0 / Agent 1.2.0
+Dashboard 1.2.2 / Agent 1.2.2
 
-**技术栈**: Vue 3 + TypeScript + Vite | Go 1.24 + Gin + GORM | SQLite/MySQL
+[![License](https://img.shields.io/github/license/EnderKC/BetterMonitor?style=flat-square)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://golang.org/)
+[![Vue](https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com/)
 
-## 目录
+[![GitHub Stars](https://img.shields.io/github/stars/EnderKC/BetterMonitor?style=social)](https://github.com/EnderKC/BetterMonitor/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/EnderKC/BetterMonitor?style=social)](https://github.com/EnderKC/BetterMonitor/network/members)
+[![GitHub Release](https://img.shields.io/github/v/release/EnderKC/BetterMonitor?style=flat-square&color=orange)](https://github.com/EnderKC/BetterMonitor/releases)
+[![GitHub Downloads](https://img.shields.io/github/downloads/EnderKC/BetterMonitor/total?style=flat-square&color=blueviolet)](https://github.com/EnderKC/BetterMonitor/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/enderhkc/better-monitor?style=flat-square&color=2496ED)](https://hub.docker.com/r/enderhkc/better-monitor)
 
-- [功能特性](#功能特性)
-- [快速入门](#快速入门)
-- [部署方式](#部署方式)
-  - [Docker Compose](#docker-compose)
-  - [Docker Run](#docker-run)
-  - [手动部署](#手动部署)
-- [Agent 安装](#agent-安装)
-  - [Linux / macOS](#linux--macos)
-  - [Windows](#windows)
-  - [Android](#android)
-- [环境变量](#环境变量)
-- [许可证](#许可证)
+**技术栈** : Vue 3 + TypeScript + Vite | Go 1.24 + Gin + GORM | SQLite / MySQL
+
+[快速入门](#-快速入门) · [部署方式](#-部署方式) · [Agent 安装](#-agent-安装) · [环境变量](#-环境变量)
+
+</div>
+
+---
 
 ## 功能特性
 
-| 分类 | 功能 |
-|------|------|
-| 实时监控 | CPU / 内存 / 磁盘 / 网络流量实时采集，历史趋势分析，可配置数据保留策略 |
-| Web 终端 | 浏览器内 SSH 终端，支持多会话管理 |
-| 文件管理 | 在线浏览、编辑、上传、下载，支持拖拽操作 |
-| 进程管理 | 实时进程列表、资源占用监控 |
-| Docker 管理 | 容器 / 镜像 / Compose 编排，容器日志查看与文件管理 |
-| Nginx 管理 | 配置在线编辑与验证、虚拟主机管理、网站创建 |
-| SSL 证书 | Let's Encrypt 自动申请与续期 |
-| Agent 类型 | 支持 full（完整功能）和 monitor（只读监控）两种模式 |
-| 自动升级 | Dashboard 下发指令，Agent 自动从 GitHub Releases 拉取新版本 |
-| 健康数据 | LifeProbe 集成：心率、步数、睡眠、专注状态监控 |
+<table>
+<tr>
+<td width="50%">
 
-## 快速入门
+### 监控与运维
+
+- **实时监控** — CPU / 内存 / 磁盘 / 网络流量实时采集，历史趋势分析，可配置数据保留策略
+- **Web 终端** — 浏览器内 SSH 终端，支持多会话管理
+- **文件管理** — 在线浏览、编辑、上传、下载，支持拖拽操作
+- **进程管理** — 实时进程列表、资源占用监控
+
+</td>
+<td width="50%">
+
+### 服务与管理
+
+- **Docker 管理** — 容器 / 镜像 / Compose 编排，容器日志查看与文件管理
+- **Nginx 管理** — 配置在线编辑与验证、虚拟主机管理、网站创建
+- **SSL 证书** — Let's Encrypt 自动申请与续期
+- **自动升级** — Dashboard 下发指令，Agent 自动从 GitHub Releases 拉取新版本
+
+</td>
+</tr>
+<tr>
+<td>
+
+### Agent 模式
+
+- **full** — 完整功能版：监控 + 远程管理
+- **monitor** — 只读监控版：仅采集数据
+
+</td>
+<td>
+
+### 扩展能力
+
+- **LifeProbe 集成** — 心率、步数、睡眠、专注状态监控
+- **多平台支持** — Linux / macOS / Windows / Android
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 快速入门
 
 > 前置条件：Linux 系统，已安装 Docker
 
-一键安装 Dashboard：
+**一键安装 Dashboard：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-dashboard.sh | sudo bash
@@ -51,9 +85,10 @@ curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-
 
 安装完成后访问 `http://your-server-ip:3333`，默认账号 `admin` / `admin123`。
 
-> 首次登录后请立即修改默认密码。
+> ⚠️ 首次登录后请立即修改默认密码。
 
-脚本还支持以下操作：
+<details>
+<summary><b>📦 安装脚本支持的操作</b></summary>
 
 ```bash
 sudo ./install-dashboard.sh install    # 安装
@@ -64,9 +99,13 @@ sudo ./install-dashboard.sh status     # 查看状态
 sudo ./install-dashboard.sh migrate    # 数据迁移
 ```
 
-## 部署方式
+</details>
 
-### Docker Compose
+---
+
+## 📦 部署方式
+
+### Docker Compose（推荐）
 
 ```bash
 mkdir -p /opt/better-monitor && cd /opt/better-monitor
@@ -100,13 +139,16 @@ EOF
 docker-compose up -d
 ```
 
-从源码构建：
+<details>
+<summary><b>从源码构建</b></summary>
 
 ```bash
 git clone https://github.com/EnderKC/BetterMonitor.git
 cd BetterMonitor
 docker-compose -f docker-compose.all-in-one.yml up -d --build
 ```
+
+</details>
 
 ### Docker Run
 
@@ -126,9 +168,8 @@ docker run -d \
   enderhkc/better-monitor:latest
 ```
 
-### 手动部署
-
-适合需要自定义部署或不使用 Docker 的场景。
+<details>
+<summary><b>🔧 手动部署（不使用 Docker）</b></summary>
 
 **1. 构建后端**
 
@@ -156,16 +197,19 @@ go build -o better-monitor-agent cmd/agent/main.go
 
 **4. 运行**
 
-将前端构建产物部署到 Nginx 等静态文件服务器，配置反向代理指向后端。后端启动前配置 `.env` 文件（参考[环境变量](#环境变量)）：
+将前端构建产物部署到 Nginx 等静态文件服务器，配置反向代理指向后端。后端启动前配置 `.env` 文件（参考[环境变量](#-环境变量)）：
 
 ```bash
-# 启动后端
 ./better-monitor-backend
 ```
 
 也可从 [Releases](https://github.com/EnderKC/BetterMonitor/releases) 直接下载预编译二进制文件。
 
-## Agent 安装
+</details>
+
+---
+
+## 🖥️ Agent 安装
 
 登录 Dashboard，在"服务器管理"中添加服务器并获取 `server_id` 和 `secret_key`。
 
@@ -217,7 +261,8 @@ irm https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-agent.p
 
 ### Android
 
-**Termux（无需 root）：**
+<details>
+<summary><b>Termux（无需 root）</b></summary>
 
 ```bash
 pkg update && pkg install -y curl python
@@ -228,7 +273,10 @@ curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-
 
 可选安装 `termux-services` 实现后台常驻，配合 Termux:Boot 实现开机自启。
 
-**Root（Magisk）：**
+</details>
+
+<details>
+<summary><b>Root（Magisk）</b></summary>
 
 ```bash
 pkg install -y curl python tsu
@@ -237,15 +285,43 @@ curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-
   | bash -s -- --android-mode root --server-id <ID> --secret-key "<KEY>" --server "https://your-dashboard-url"
 ```
 
-## 环境变量
+</details>
+
+---
+
+## ⚙️ 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `JWT_SECRET` | JWT 签名密钥，生产环境务必修改 | - |
+| `JWT_SECRET` | JWT 签名密钥，生产环境务必修改 | — |
 | `DB_PATH` | SQLite 数据库路径 | `./data/data.db` |
 | `PORT` | 后端监听端口 | `8085` |
 | `TZ` | 时区 | `Asia/Shanghai` |
 
-## 许可证
+---
 
-[MIT License](LICENSE)
+## Star History
+
+<a href="https://star-history.com/#EnderKC/BetterMonitor&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=EnderKC/BetterMonitor&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=EnderKC/BetterMonitor&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=EnderKC/BetterMonitor&type=Date" width="600" />
+  </picture>
+</a>
+
+## Contributors
+
+<a href="https://github.com/EnderKC/BetterMonitor/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=EnderKC/BetterMonitor" alt="Contributors" />
+</a>
+
+---
+
+<div align="center">
+
+**[MIT License](LICENSE)**
+
+如果觉得项目不错，欢迎 Star 支持一下 :)
+
+</div>
