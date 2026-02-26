@@ -178,6 +178,9 @@ var ActiveAgentConnections sync.Map
 // 存储活跃的用户终端WebSocket连接 - 按会话ID索引
 var ActiveTerminalConnections sync.Map
 
+// 存储活跃的日志流连接 - key: streamID, value: *SafeConn (用户连接)
+var ActiveLogStreamConnections sync.Map
+
 // 存储公开探针监控连接
 var ActivePublicMonitorConnections sync.Map
 
@@ -1152,6 +1155,9 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 		case TypeDockerCommand:
 			// Docker命令的处理
 			handleDockerCommand(conn, server, msg.Payload)
+		case "docker_logs_stream":
+			// Docker日志流的处理（start / stop）
+			handleDockerLogsStream(conn, server, msg.Payload)
 		case TypeMonitor:
 			// Agent 上报监控数据
 			if !isAgent {
@@ -1492,6 +1498,42 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				log.Printf("已清理Docker请求ID=%s的映射和通道", dockerResponse.RequestID)
 			} else {
 				log.Printf("警告: 收到的Docker响应消息没有请求ID")
+			}
+
+		case "docker_logs_stream_data", "docker_logs_stream_end":
+			// 处理Agent发回的日志流数据/结束消息，转发给对应的用户连接
+			var streamMsg struct {
+				Type     string                 `json:"type"`
+				StreamID string                 `json:"stream_id"`
+				Data     map[string]interface{} `json:"data"`
+			}
+			if err := json.Unmarshal(message, &streamMsg); err != nil {
+				log.Printf("解析日志流消息失败: %v", err)
+				continue
+			}
+
+			if streamMsg.StreamID == "" {
+				log.Printf("警告: 收到的日志流消息没有 stream_id")
+				continue
+			}
+
+			// 查找对应的用户连接
+			userConnVal, ok := ActiveLogStreamConnections.Load(streamMsg.StreamID)
+			if !ok {
+				log.Printf("未找到日志流 %s 的用户连接", streamMsg.StreamID)
+				continue
+			}
+
+			if userConn, ok := userConnVal.(*SafeConn); ok {
+				if err := userConn.WriteJSON(streamMsg); err != nil {
+					log.Printf("转发日志流消息到用户失败: stream_id=%s, error=%v", streamMsg.StreamID, err)
+				}
+			}
+
+			// 如果是流结束消息，清理映射
+			if msg.Type == "docker_logs_stream_end" {
+				ActiveLogStreamConnections.Delete(streamMsg.StreamID)
+				log.Printf("日志流 %s 已结束，已清理连接映射", streamMsg.StreamID)
 			}
 
 		case "nginx_success", "nginx_error":
@@ -1937,6 +1979,71 @@ func handleDockerCommand(conn *SafeConn, server *models.Server, payload json.Raw
 	}
 
 	log.Printf("Docker命令请求已发送到Agent，请求ID: %s", requestID)
+}
+
+// handleDockerLogsStream 处理Docker日志流请求（用户 → Agent 转发）
+func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.RawMessage) {
+	var reqData struct {
+		Action   string `json:"action"`
+		StreamID string `json:"stream_id"`
+	}
+	if err := json.Unmarshal(payload, &reqData); err != nil {
+		log.Printf("解析日志流请求参数失败: %v", err)
+		sendErrorMessage(conn, "日志流请求格式错误")
+		return
+	}
+
+	log.Printf("收到日志流请求: action=%s, stream_id=%s, 服务器ID=%d", reqData.Action, reqData.StreamID, server.ID)
+
+	if reqData.StreamID == "" {
+		sendErrorMessage(conn, "日志流请求缺少 stream_id")
+		return
+	}
+
+	// 获取Agent连接
+	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	if !ok {
+		log.Printf("服务器 %d 的Agent未连接", server.ID)
+		sendErrorMessage(conn, "服务器Agent未连接")
+		return
+	}
+
+	agentConn, ok := agentConnVal.(*SafeConn)
+	if !ok {
+		log.Printf("服务器 %d 的连接类型错误", server.ID)
+		sendErrorMessage(conn, "服务器连接错误")
+		return
+	}
+
+	// start: 注册用户连接映射，以便后续转发日志流数据
+	if reqData.Action == "start" {
+		ActiveLogStreamConnections.Store(reqData.StreamID, conn)
+		log.Printf("已注册日志流 %s 的用户连接", reqData.StreamID)
+	}
+
+	// 构建转发给Agent的消息（保持原始 payload）
+	agentMsg := map[string]interface{}{
+		"type":    "docker_logs_stream",
+		"payload": json.RawMessage(payload),
+	}
+
+	if err := agentConn.WriteJSON(agentMsg); err != nil {
+		log.Printf("发送日志流请求到Agent失败: %v", err)
+		sendErrorMessage(conn, "发送日志流请求到Agent失败")
+		// 发送失败时清理映射
+		if reqData.Action == "start" {
+			ActiveLogStreamConnections.Delete(reqData.StreamID)
+		}
+		return
+	}
+
+	// stop: 清理用户连接映射
+	if reqData.Action == "stop" {
+		ActiveLogStreamConnections.Delete(reqData.StreamID)
+		log.Printf("已清理日志流 %s 的用户连接映射", reqData.StreamID)
+	}
+
+	log.Printf("日志流请求已转发到Agent: action=%s, stream_id=%s", reqData.Action, reqData.StreamID)
 }
 
 // 发送错误消息

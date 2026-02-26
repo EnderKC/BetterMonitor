@@ -3,6 +3,8 @@
 package server
 
 import (
+	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -85,6 +87,9 @@ func (c *Client) handleOperationMessage(msgType string, message []byte, msgCopy 
 
 	case "docker_command":
 		go c.handleDockerCommand(msgCopy)
+
+	case "docker_logs_stream":
+		go c.handleDockerLogsStream(msgCopy)
 
 	case "nginx_command":
 		go c.handleNginxCommand(msgCopy)
@@ -1596,5 +1601,236 @@ func (c *Client) sendRawResponse(requestID, responseType, jsonData string) {
 		}
 	} else {
 		c.log.Error("WebSocket连接未建立，无法发送响应")
+	}
+}
+
+// ==================== Docker 日志流 ====================
+
+// handleDockerLogsStream 处理容器日志流请求（start / stop）
+func (c *Client) handleDockerLogsStream(message []byte) {
+	var msg struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Action      string `json:"action"`
+			StreamID    string `json:"stream_id"`
+			ContainerID string `json:"container_id"`
+			Tail        int    `json:"tail"`
+		} `json:"payload"`
+	}
+
+	if err := json.Unmarshal(message, &msg); err != nil {
+		c.log.Error("解析日志流请求失败: %v", err)
+		return
+	}
+
+	switch msg.Payload.Action {
+	case "start":
+		c.startLogStream(msg.Payload.StreamID, msg.Payload.ContainerID, msg.Payload.Tail)
+	case "stop":
+		c.closeLogStream(msg.Payload.StreamID)
+	default:
+		c.log.Warn("未知的日志流操作: %s", msg.Payload.Action)
+	}
+}
+
+// startLogStream 启动一个容器日志流
+func (c *Client) startLogStream(streamID, containerID string, tail int) {
+	if streamID == "" || containerID == "" {
+		c.log.Error("日志流参数不完整: streamID=%s, containerID=%s", streamID, containerID)
+		return
+	}
+
+	// 检查是否已存在同 ID 的流
+	c.logStreamsLock.Lock()
+	if _, exists := c.logStreams[streamID]; exists {
+		c.logStreamsLock.Unlock()
+		c.log.Warn("日志流 %s 已存在，忽略重复 start 请求", streamID)
+		return
+	}
+	c.logStreamsLock.Unlock()
+
+	// 创建独立的 DockerManager（流式连接生命周期独立）
+	dockerManager, err := monitor.NewDockerManager(c.log)
+	if err != nil {
+		c.log.Error("创建Docker管理器失败: %v", err)
+		c.sendStreamMessage(streamID, "docker_logs_stream_end", map[string]interface{}{
+			"reason": fmt.Sprintf("创建Docker管理器失败: %v", err),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	reader, err := dockerManager.StreamContainerLogs(ctx, containerID, tail)
+	if err != nil {
+		c.log.Error("启动容器日志流失败: %v", err)
+		cancel()
+		dockerManager.Close()
+		c.sendStreamMessage(streamID, "docker_logs_stream_end", map[string]interface{}{
+			"reason": fmt.Sprintf("启动日志流失败: %v", err),
+		})
+		return
+	}
+
+	sess := &logStreamSession{
+		reader:      reader,
+		cancel:      cancel,
+		stopCh:      make(chan struct{}),
+		containerID: containerID,
+		manager:     dockerManager,
+	}
+
+	c.logStreamsLock.Lock()
+	c.logStreams[streamID] = sess
+	c.logStreamsLock.Unlock()
+
+	c.log.Info("日志流 %s 已启动，容器: %s", streamID, containerID)
+
+	go c.streamDockerLogs(streamID, sess)
+}
+
+// streamDockerLogs 在 goroutine 中按行读取日志并发送给后端
+func (c *Client) streamDockerLogs(streamID string, sess *logStreamSession) {
+	defer c.closeLogStream(streamID)
+
+	scanner := bufio.NewScanner(sess.reader)
+	// 设置较大的行缓冲，应对单行很长的日志（如 JSON 日志）
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+
+	// 将阻塞的 Scan 放在独立 goroutine 中，通过 channel 传递行数据
+	// 这样主循环的 select 可以及时响应 stopCh 和 ticker
+	lineCh := make(chan string, 100)
+	scanDone := make(chan error, 1)
+	go func() {
+		defer close(lineCh)
+		for scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+		scanDone <- scanner.Err()
+	}()
+
+	// 批量发送缓冲：每 100ms 或累积 50 行时发送一次，减少消息频率
+	var batch []string
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	flushBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+		logs := strings.Join(batch, "\n") + "\n"
+		c.sendStreamMessage(streamID, "docker_logs_stream_data", map[string]interface{}{
+			"logs": logs,
+		})
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case <-sess.stopCh:
+			flushBatch()
+			return
+
+		case line, ok := <-lineCh:
+			if !ok {
+				// channel 关闭，说明 Scan 结束
+				flushBatch()
+				err := <-scanDone
+				if err != nil {
+					c.log.Error("读取容器日志流失败 [%s]: %v", streamID, err)
+					c.sendStreamMessage(streamID, "docker_logs_stream_end", map[string]interface{}{
+						"reason": fmt.Sprintf("读取日志流错误: %v", err),
+					})
+				} else {
+					c.log.Info("容器日志流 %s 已结束（容器可能已停止）", streamID)
+					c.sendStreamMessage(streamID, "docker_logs_stream_end", map[string]interface{}{
+						"reason": "container_stopped",
+					})
+				}
+				return
+			}
+			batch = append(batch, line)
+			if len(batch) >= 50 {
+				flushBatch()
+			}
+
+		case <-ticker.C:
+			flushBatch()
+		}
+	}
+}
+
+// closeLogStream 关闭指定的日志流并释放所有资源
+func (c *Client) closeLogStream(streamID string) {
+	c.logStreamsLock.Lock()
+	sess, ok := c.logStreams[streamID]
+	if ok {
+		delete(c.logStreams, streamID)
+	}
+	c.logStreamsLock.Unlock()
+
+	if !ok || sess == nil {
+		return
+	}
+
+	// 通知读取 goroutine 退出
+	select {
+	case <-sess.stopCh:
+		// 已关闭
+	default:
+		close(sess.stopCh)
+	}
+
+	// 取消 context 以中断 Docker SDK 的 Follow 阻塞
+	sess.cancel()
+
+	// 关闭 reader
+	if sess.reader != nil {
+		_ = sess.reader.Close()
+	}
+
+	// 释放 DockerManager
+	if sess.manager != nil {
+		_ = sess.manager.Close()
+	}
+
+	c.log.Info("日志流 %s 已关闭", streamID)
+}
+
+// closeAllLogStreams 关闭所有日志流（Agent 断连时调用）
+func (c *Client) closeAllLogStreams() {
+	c.logStreamsLock.Lock()
+	streamIDs := make([]string, 0, len(c.logStreams))
+	for id := range c.logStreams {
+		streamIDs = append(streamIDs, id)
+	}
+	c.logStreamsLock.Unlock()
+
+	for _, id := range streamIDs {
+		c.closeLogStream(id)
+	}
+}
+
+// sendStreamMessage 发送日志流消息（使用 stream_id 而非 request_id）
+func (c *Client) sendStreamMessage(streamID, msgType string, data map[string]interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Error("发送日志流消息时 panic: %v", r)
+		}
+	}()
+
+	msg := map[string]interface{}{
+		"type":      msgType,
+		"stream_id": streamID,
+		"data":      data,
+	}
+
+	c.wsWriteMutex.Lock()
+	defer c.wsWriteMutex.Unlock()
+
+	if c.wsConn != nil {
+		if err := c.wsConn.WriteJSON(msg); err != nil {
+			c.log.Error("发送日志流消息失败: streamID=%s, type=%s, error=%v", streamID, msgType, err)
+		}
 	}
 }

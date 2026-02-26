@@ -404,6 +404,54 @@ func (dm *DockerManager) GetContainerLogs(containerID string, tail int) (string,
 	return string(logBytes), nil
 }
 
+// StreamContainerLogs 流式获取容器日志（支持 Follow 模式）
+// 返回一个纯文本的 io.ReadCloser，调用方负责关闭
+// 自动检测容器 TTY 模式：TTY 模式直接返回原始流，非 TTY 模式使用 stdcopy 去除 8 字节多路复用头
+func (dm *DockerManager) StreamContainerLogs(ctx context.Context, containerID string, tail int) (io.ReadCloser, error) {
+	tailStr := "200"
+	if tail > 0 {
+		tailStr = fmt.Sprintf("%d", tail)
+	}
+
+	// 检查容器是否使用 TTY 模式
+	inspect, err := dm.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("检查容器信息失败: %v", err)
+	}
+	isTTY := inspect.Config != nil && inspect.Config.Tty
+
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       tailStr,
+		Timestamps: true,
+		Follow:     true,
+	}
+
+	rawReader, err := dm.client.ContainerLogs(ctx, containerID, options)
+	if err != nil {
+		return nil, fmt.Errorf("获取容器流式日志失败: %v", err)
+	}
+
+	// TTY 模式：日志流是纯文本，直接返回
+	if isTTY {
+		return rawReader, nil
+	}
+
+	// 非 TTY 模式：日志流包含 8 字节多路复用头，使用 stdcopy 解复用
+	pr, pw := io.Pipe()
+	go func() {
+		defer rawReader.Close()
+		defer pw.Close()
+		_, err := stdcopy.StdCopy(pw, pw, rawReader)
+		if err != nil && err != context.Canceled {
+			_ = pw.CloseWithError(err)
+		}
+	}()
+
+	return pr, nil
+}
+
 // StartContainer 启动容器
 func (dm *DockerManager) StartContainer(containerID string) error {
 	if err := dm.client.ContainerStart(dm.ctx, containerID, container.StartOptions{}); err != nil {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, h } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, h } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
 import {
@@ -27,6 +27,7 @@ import {
   ContainerOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { getToken } from '../../utils/auth';
 import { useServerStore } from '../../stores/serverStore';
 import { useUIStore } from '../../stores/uiStore';
 import Convert from 'ansi-to-html';
@@ -355,94 +356,206 @@ const removeContainer = (id: string, name: string) => {
   }
 };
 
-// 日志相关
-const currentLogContainerId = ref<string>('');
-const currentLogContainerName = ref<string>('');
-const containerLogModal = ref<any>(null);
-const logsTail = ref<number>(100);
+// ==================== WebSocket 连接管理 ====================
+const ws = ref<WebSocket | null>(null);
+const wsConnected = ref(false);
 
+const connectWebSocket = () => {
+  const token = getToken();
+  if (!token) return;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  const url = `${protocol}//${host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
+
+  const socket = new WebSocket(url);
+  socket.onopen = () => { wsConnected.value = true; };
+  socket.onclose = () => { wsConnected.value = false; ws.value = null; };
+  socket.onerror = () => { wsConnected.value = false; };
+  socket.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'docker_logs_stream_data' && msg.stream_id === logStreamId.value) {
+        onLogStreamData(msg.data?.logs || '');
+      } else if (msg.type === 'docker_logs_stream_end' && msg.stream_id === logStreamId.value) {
+        onLogStreamEnd(msg.data?.reason || '');
+      }
+    } catch { /* 忽略非 JSON 消息 */ }
+  };
+  ws.value = socket;
+};
+
+const disconnectWebSocket = () => {
+  if (ws.value) {
+    ws.value.close();
+    ws.value = null;
+  }
+  wsConnected.value = false;
+};
+
+const sendWsMessage = (data: any) => {
+  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+    ws.value.send(JSON.stringify(data));
+  }
+};
+
+// ==================== 实时日志流 ====================
+const logDrawerVisible = ref(false);
+const currentLogContainerId = ref('');
+const currentLogContainerName = ref('');
+const logStreamId = ref('');
+const logLines = ref<string[]>([]);
+const logStreaming = ref(false);
+const logAutoScroll = ref(true);
+const logContainerRef = ref<HTMLElement | null>(null);
+const LOG_MAX_LINES = 5000;
+
+// 日志级别颜色映射
+const LOG_LEVEL_COLORS: Record<string, string> = {
+  'FATAL': '#ff4d4f',
+  'ERROR': '#ff4d4f',
+  'WARN':  '#faad14',
+  'WARNING': '#faad14',
+  'INFO':  '#1890ff',
+  'DEBUG': '#8c8c8c',
+  'TRACE': '#595959',
+};
+
+// 检测日志行的级别
+const detectLogLevel = (line: string): string | null => {
+  // 匹配常见日志格式中的级别关键字（大小写不敏感）
+  const match = line.match(/\b(FATAL|ERROR|WARN(?:ING)?|INFO|DEBUG|TRACE)\b/i);
+  return match ? match[1].toUpperCase().replace('WARNING', 'WARN') : null;
+};
+
+// 将单行日志转为带高亮的 HTML
+const renderLogLine = (line: string): string => {
+  const escaped = ansiConverter.toHtml(line);
+  const level = detectLogLevel(line);
+  if (!level || !LOG_LEVEL_COLORS[level]) return escaped;
+  const color = LOG_LEVEL_COLORS[level];
+  return `<span style="display:inline-block;width:4px;height:1em;background:${color};border-radius:2px;margin-right:8px;vertical-align:middle;"></span>${escaped}`;
+};
+
+// 批量渲染缓冲
+let pendingLines: string[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+const flushPendingLines = () => {
+  if (pendingLines.length === 0) return;
+  const newLines = pendingLines.splice(0);
+  const current = logLines.value;
+  const combined = current.concat(newLines);
+  // 环形缓冲：超过上限则丢弃旧行
+  logLines.value = combined.length > LOG_MAX_LINES
+    ? combined.slice(combined.length - LOG_MAX_LINES)
+    : combined;
+  if (logAutoScroll.value) {
+    nextTick(scrollToBottom);
+  }
+};
+
+const onLogStreamData = (logs: string) => {
+  if (!logs) return;
+  const lines = logs.split('\n').filter(l => l.length > 0);
+  pendingLines.push(...lines);
+  // 100ms 批量刷新
+  if (!flushTimer) {
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushPendingLines();
+    }, 100);
+  }
+};
+
+const onLogStreamEnd = (reason: string) => {
+  logStreaming.value = false;
+  flushPendingLines();
+  const hint = reason === 'container_stopped' ? '容器已停止' : reason;
+  logLines.value.push(`\n--- 日志流已结束: ${hint} ---`);
+  if (logAutoScroll.value) nextTick(scrollToBottom);
+};
+
+const scrollToBottom = () => {
+  if (logContainerRef.value) {
+    logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight;
+  }
+};
+
+// 滚动事件：检测用户是否手动滚动（非底部则暂停自动滚动）
+const onLogScroll = () => {
+  if (!logContainerRef.value) return;
+  const el = logContainerRef.value;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+  logAutoScroll.value = atBottom;
+};
+
+// 打开日志 Drawer
 const viewContainerLogs = async (id: string, name: string) => {
   if (!isServerOnline.value) return message.warning('服务器离线');
-  try {
-    await fetchContainerLogs(id, name, 100);
-  } catch (error) {
-    message.error('获取容器日志失败');
+
+  currentLogContainerId.value = id;
+  currentLogContainerName.value = name;
+  logLines.value = [];
+  logStreaming.value = true;
+  logAutoScroll.value = true;
+  logDrawerVisible.value = true;
+
+  // 确保 WebSocket 已连接
+  if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
+    connectWebSocket();
+    // 等待连接就绪
+    await new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 100);
+      // 超时 5 秒
+      setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+    });
   }
+
+  // 发送 start 消息
+  const streamId = crypto.randomUUID();
+  logStreamId.value = streamId;
+  sendWsMessage({
+    type: 'docker_logs_stream',
+    payload: {
+      action: 'start',
+      stream_id: streamId,
+      container_id: id,
+      tail: 200,
+      timestamps: true,
+    },
+  });
 };
 
-const fetchContainerLogs = async (id: string, name: string, tail: number = 100) => {
-  try {
-    const response: any = await request.get(`/servers/${serverId.value}/docker/containers/${id}/logs?tail=${tail}`);
-    let logs = '';
-    if (typeof response === 'string') logs = response;
-    else if (response && typeof response.data === 'string') logs = response.data;
-    else if (response && response.logs && typeof response.logs === 'string') logs = response.logs;
-    else logs = '无日志数据或格式不正确';
-
-    const htmlLogs = ansiConverter.toHtml(logs);
-    currentLogContainerId.value = id;
-    currentLogContainerName.value = name;
-
-    const logContent = h('div', {
-      style: {
-        maxHeight: '500px',
-        overflow: 'auto',
-        background: '#1e1e1e',
-        padding: '16px',
-        borderRadius: '8px',
-        fontFamily: '"SF Mono", Menlo, monospace',
-        color: '#d4d4d4',
-        fontSize: '13px',
-        lineHeight: '1.5'
+// 关闭日志 Drawer
+const closeLogDrawer = () => {
+  // 发送 stop 消息
+  if (logStreamId.value && logStreaming.value) {
+    sendWsMessage({
+      type: 'docker_logs_stream',
+      payload: {
+        action: 'stop',
+        stream_id: logStreamId.value,
       },
-      innerHTML: htmlLogs
     });
-
-    const modalTitle = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } }, [
-      h('span', `容器日志 - ${name}`),
-      h('div', { style: { display: 'flex', gap: '8px' } }, [
-        h('a-input-number', {
-          style: { width: '100px' },
-          value: logsTail.value,
-          min: 10,
-          max: 10000,
-          step: 100,
-          addonAfter: '行',
-          onChange: (value: number) => { logsTail.value = value; }
-        }),
-        h('a-button', {
-          type: 'primary',
-          size: 'small',
-          onClick: () => refreshContainerLogs()
-        }, [h(SyncOutlined), ' 刷新'])
-      ])
-    ]);
-
-    if (containerLogModal.value) containerLogModal.value.destroy();
-
-    containerLogModal.value = Modal.info({
-      title: modalTitle,
-      width: 800,
-      content: logContent,
-      okText: '关闭',
-      class: 'glass-modal',
-      afterClose: () => { containerLogModal.value = null; }
-    });
-  } catch (error) {
-    message.error('获取容器日志失败');
   }
+  logStreaming.value = false;
+  logStreamId.value = '';
+  logDrawerVisible.value = false;
+  pendingLines = [];
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
 };
 
-const refreshContainerLogs = async () => {
-  if (!currentLogContainerId.value || !containerLogModal.value) return;
-  try {
-    await fetchContainerLogs(currentLogContainerId.value, currentLogContainerName.value, logsTail.value);
-  } catch (error) {
-    message.error('刷新容器日志失败');
-  }
+// 清空日志
+const clearLogs = () => {
+  logLines.value = [];
 };
 
-// 镜像操作
+// ==================== 镜像操作 ====================
 const removeImage = (id: string, name: string) => {
   if (!isServerOnline.value) return message.warning('服务器离线');
   Modal.confirm({
@@ -689,8 +802,14 @@ onMounted(() => {
       fetchContainers();
       fetchImages();
       fetchComposes();
+      connectWebSocket();
     }
   });
+});
+
+onUnmounted(() => {
+  closeLogDrawer();
+  disconnectWebSocket();
 });
 </script>
 
@@ -848,14 +967,12 @@ onMounted(() => {
                   </a-table-column>
                   <a-table-column title="操作">
                     <template #default="{ record }">
-                      <a-popconfirm title="确定要删除此镜像吗？" ok-text="删除" cancel-text="取消"
-                        @confirm="removeImage(record.id, `${record.repository}:${record.tag}`)">
-                        <a-button type="text" danger size="small">
-                          <template #icon>
-                            <DeleteOutlined />
-                          </template> 删除
-                        </a-button>
-                      </a-popconfirm>
+                      <a-button type="text" danger size="small"
+                        @click="removeImage(record.id, `${record.repository}:${record.tag}`)">
+                        <template #icon>
+                          <DeleteOutlined />
+                        </template> 删除
+                      </a-button>
                     </template>
                   </a-table-column>
                 </a-table>
@@ -1044,6 +1161,50 @@ onMounted(() => {
         </a-row>
       </a-form>
     </a-modal>
+
+    <!-- 实时日志 Drawer -->
+    <a-drawer
+      v-model:open="logDrawerVisible"
+      :title="`容器日志 - ${currentLogContainerName}`"
+      placement="right"
+      :width="720"
+      :destroyOnClose="true"
+      class="log-drawer"
+      @close="closeLogDrawer"
+    >
+      <template #extra>
+        <a-space>
+          <a-tag :color="logStreaming ? 'green' : 'default'">
+            {{ logStreaming ? '实时' : '已停止' }}
+          </a-tag>
+          <a-tooltip :title="logAutoScroll ? '自动滚动已开启' : '自动滚动已暂停（滚动到底部恢复）'">
+            <a-button size="small" :type="logAutoScroll ? 'primary' : 'default'" @click="logAutoScroll = !logAutoScroll; if(logAutoScroll) scrollToBottom()">
+              <template #icon><DownOutlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-button size="small" @click="clearLogs">清空</a-button>
+        </a-space>
+      </template>
+
+      <div
+        ref="logContainerRef"
+        class="log-container"
+        @scroll="onLogScroll"
+      >
+        <div
+          v-for="(line, idx) in logLines"
+          :key="idx"
+          class="log-line"
+          v-html="renderLogLine(line)"
+        />
+        <div v-if="logLines.length === 0 && logStreaming" class="log-placeholder">
+          等待日志数据...
+        </div>
+        <div v-if="!logStreaming && logLines.length === 0" class="log-placeholder">
+          暂无日志数据
+        </div>
+      </div>
+    </a-drawer>
   </div>
 </template>
 
@@ -1173,6 +1334,37 @@ onMounted(() => {
 .code-textarea {
   font-family: "SF Mono", Menlo, monospace;
   background: var(--alpha-black-02);
+}
+
+/* 日志 Drawer 样式 */
+.log-container {
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  background: #1e1e1e;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #d4d4d4;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 1px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.log-placeholder {
+  color: #666;
+  text-align: center;
+  padding: 40px 0;
+  font-style: italic;
 }
 </style>
 
@@ -1308,5 +1500,28 @@ onMounted(() => {
 
 .dark .glass-modal .ant-form-item-label>label {
   color: #ccc;
+}
+
+/* 日志 Drawer 全局样式 */
+.log-drawer .ant-drawer-body {
+  padding: 12px;
+  background: #141414;
+}
+
+.dark .log-drawer .ant-drawer-content {
+  background: #1a1a1a;
+}
+
+.dark .log-drawer .ant-drawer-header {
+  background: #1a1a1a;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .log-drawer .ant-drawer-header .ant-drawer-title {
+  color: #e0e0e0;
+}
+
+.dark .log-drawer .ant-drawer-close {
+  color: #aaa;
 }
 </style>
