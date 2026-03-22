@@ -3,6 +3,17 @@ import { message } from 'ant-design-vue';
 import { getToken, clearLoginInfo, isTokenExpired } from './auth';
 import router from '../router';
 
+/**
+ * 判断错误是否由主动取消请求引起
+ * 覆盖 AbortController.abort()、CancelToken.cancel() 等场景
+ */
+export function isCancelledRequest(error: any): boolean {
+  if (axios.isCancel(error)) return true;
+  if (error?.code === 'ERR_CANCELED') return true;
+  if (error?.name === 'AbortError' || error?.name === 'CanceledError') return true;
+  return false;
+}
+
 // 创建axios实例
 const service = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api', // API基础路径
@@ -41,6 +52,11 @@ service.interceptors.response.use(
   },
   (error) => {
     console.error('请求错误:', error.config?.url, error);
+
+    // 请求被主动取消时，静默处理，不弹出错误提示
+    if (isCancelledRequest(error)) {
+      return Promise.reject(error);
+    }
 
     // 处理错误响应
     const response = error.response;

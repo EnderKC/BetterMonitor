@@ -132,6 +132,13 @@ func SetupRoutes(r *gin.Engine) {
 				ops.GET("/servers/:id/files/download", controllers.DownloadFile)
 				ops.POST("/servers/:id/files/delete", controllers.DeleteFiles)
 
+				// 分片上传API
+				ops.POST("/servers/:id/files/upload/chunked/init", controllers.InitUpload)
+				ops.PUT("/servers/:id/files/upload/chunked/:upload_id/chunk/:index", controllers.UploadChunk)
+				ops.GET("/servers/:id/files/upload/chunked/:upload_id/status", controllers.GetUploadStatus)
+				ops.POST("/servers/:id/files/upload/chunked/:upload_id/complete", controllers.CompleteUpload)
+				ops.DELETE("/servers/:id/files/upload/chunked/:upload_id", controllers.CancelUpload)
+
 				// 进程管理API
 				ops.GET("/servers/:id/processes", controllers.GetProcesses)
 				ops.DELETE("/servers/:id/processes/:pid", controllers.KillProcess)

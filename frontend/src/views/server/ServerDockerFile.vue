@@ -9,7 +9,10 @@ import {
   FolderAddOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { isCancelledRequest } from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { useFileUpload } from '../../composables/useFileUpload';
+import UploadProgress from '../../components/UploadProgress.vue';
 import { useServerStore } from '../../stores/serverStore';
 import FileManager from '../../components/server/FileManager.vue';
 import CodeEditor from '../../components/server/CodeEditor.vue';
@@ -39,7 +42,7 @@ const fileList = ref<any[]>([]);
 
 const uploadModalVisible = ref(false);
 const fileToUpload = ref<File | null>(null);
-const uploading = ref(false);
+const { state: uploadState, uploadFile, cancelUpload, reset: resetUpload } = useFileUpload();
 
 const editModalVisible = ref(false);
 const fileContent = ref('');
@@ -144,21 +147,25 @@ const handleUpload = async () => {
     message.warning('请选择文件');
     return;
   }
-  uploading.value = true;
+
   try {
-    const formData = new FormData();
-    formData.append('file', fileToUpload.value);
-    formData.append('path', currentPath.value);
-    await request.post(buildUrl('/files/upload'), formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    await uploadFile({
+      serverId: serverId.value,
+      containerId: containerId.value,
+      targetPath: currentPath.value,
+      file: fileToUpload.value,
+    });
+
     uploadModalVisible.value = false;
     fileToUpload.value = null;
+    resetUpload();
     fetchFileList(currentPath.value);
     message.success('上传成功');
-  } catch (error) {
-    console.error(error);
-    message.error('上传失败');
-  } finally {
-    uploading.value = false;
+  } catch (error: any) {
+    if (!isCancelledRequest(error)) {
+      console.error(error);
+      message.error(uploadState.error || '上传失败');
+    }
   }
 };
 
@@ -263,11 +270,11 @@ onMounted(() => {
     </div>
 
     <!-- 上传文件弹窗 -->
-    <a-modal v-model:open="uploadModalVisible" title="上传文件" @ok="handleUpload" :confirm-loading="uploading"
+    <a-modal v-model:open="uploadModalVisible" title="上传文件" @ok="handleUpload" :confirm-loading="uploadState.uploading"
       class="glass-modal">
       <div class="upload-area">
         <a-upload-dragger :before-upload="() => false" :show-upload-list="false"
-          @change="(info: any) => (fileToUpload = info.file)">
+          @change="(info: any) => (fileToUpload = info.file)" :disabled="uploadState.uploading">
           <p class="ant-upload-drag-icon">
             <CloudUploadOutlined />
           </p>
@@ -276,6 +283,17 @@ onMounted(() => {
             已选择: {{ fileToUpload.name }}
           </p>
         </a-upload-dragger>
+        <UploadProgress
+          :uploading="uploadState.uploading"
+          :progress="uploadState.progress"
+          :file-name="fileToUpload?.name || ''"
+          :uploaded-size="uploadState.uploadedSize"
+          :total-size="uploadState.totalSize"
+          :speed="uploadState.speed"
+          :current-chunk="uploadState.currentChunk"
+          :total-chunks="uploadState.totalChunks"
+          @cancel="cancelUpload"
+        />
       </div>
     </a-modal>
 
@@ -405,5 +423,20 @@ onMounted(() => {
 .dark .subtitle-text,
 .dark .back-btn {
   color: #aaa;
+}
+
+/* Upload dialog dark mode */
+.dark .upload-area .ant-upload-dragger {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark .upload-area .ant-upload-dragger:hover {
+  border-color: #1890ff;
+}
+
+.dark .upload-area .ant-upload-text,
+.dark .upload-area .ant-upload-drag-icon {
+  color: #999;
 }
 </style>

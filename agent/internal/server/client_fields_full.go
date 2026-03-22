@@ -22,6 +22,9 @@ type clientOpsFields struct {
 
 	// 容器文件管理器临时缓存（按请求周期使用）
 	dockerFileManagers sync.Map // key: requestID, value: *ContainerFileManager
+
+	// 分片上传管理器
+	chunkedUploadMgr *ChunkedUploadManager
 }
 
 // containerExecSession 容器 exec 会话
@@ -45,4 +48,6 @@ type logStreamSession struct {
 func (c *Client) initOpsFields() {
 	c.dockerSessions = make(map[string]*containerExecSession)
 	c.logStreams = make(map[string]*logStreamSession)
+	c.chunkedUploadMgr = NewChunkedUploadManager(c.log)
+	c.chunkedUploadMgr.StartCleanup()
 }

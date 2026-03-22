@@ -58,11 +58,30 @@
     <!-- 主要内容区域 -->
     <div class="main-content">
       <!-- 文件管理器侧边栏 -->
-      <div v-if="fileManagerVisible" class="file-manager-sidebar" :style="{ width: fileManagerWidth + 'px' }">
-        <FileManager :files="fileList" :current-path="currentPath" :loading="fileLoading" @navigate="handleNavigate"
-          @refresh="refreshFileList" @edit="editFile" @download="handleDownloadFile" @delete="handleDeleteFile"
-          @create-file="showCreateFileModal" @create-folder="showCreateFolderModal" @upload="triggerUpload" />
-      </div>
+      <template v-if="fileManagerVisible">
+        <div class="file-manager-sidebar" :style="{ width: fileManagerWidth + 'px' }">
+          <FileManager :files="fileList" :current-path="currentPath" :loading="fileLoading"
+            v-model:show-hidden="showHiddenFiles"
+            @navigate="handleNavigate"
+            @refresh="refreshFileList" @edit="editFile" @download="handleDownloadFile" @delete="handleDeleteFile"
+            @create-file="showCreateFileModal" @create-folder="showCreateFolderModal" @upload="triggerUpload"
+            @drop-files="handleDropFiles" />
+          <UploadProgress
+            :uploading="uploadState.uploading"
+            :progress="uploadState.progress"
+            :file-name="uploadState.fileName"
+            :uploaded-size="uploadState.uploadedSize"
+            :total-size="uploadState.totalSize"
+            :speed="uploadState.speed"
+            :current-chunk="uploadState.currentChunk"
+            :total-chunks="uploadState.totalChunks"
+            @cancel="cancelUpload"
+          />
+        </div>
+        <div class="sidebar-resize-handle right" @mousedown.prevent="startSidebarResize($event, 'fileManager')">
+          <div class="resize-line-v"></div>
+        </div>
+      </template>
 
       <!-- 主要工作区域 (编辑器 + 终端) -->
       <div class="workspace-container" :style="workspaceContainerStyle">
@@ -167,7 +186,7 @@
             <div v-else class="terminal-container-wrapper">
               <!-- 终端主体 -->
               <div class="terminal-wrapper">
-              <TerminalView ref="terminalViewRef" :socket-url="terminalSocketUrl" :session="currentSession"
+                <TerminalView ref="terminalViewRef" :socket-url="terminalSocketUrl" :session="currentSession"
                   @connected="onTerminalConnected" @disconnected="onTerminalDisconnected" @error="onTerminalError" />
               </div>
 
@@ -210,97 +229,102 @@
       </div>
 
       <!-- 系统状态侧边栏 -->
-      <div v-if="systemStatusVisible" class="system-status-sidebar" :style="{ width: systemStatusWidth + 'px' }">
-        <div class="system-status-header">
-          <div class="header-title">
-            <MenuOutlined />
-            <span>系统状态</span>
-          </div>
-          <a-tooltip title="刷新">
-            <a-button size="small" type="text" @click="refreshSystemStatus">
-              <template #icon>
-                <ReloadOutlined />
-              </template>
-            </a-button>
-          </a-tooltip>
+      <template v-if="systemStatusVisible">
+        <div class="sidebar-resize-handle left" @mousedown.prevent="startSidebarResize($event, 'systemStatus')">
+          <div class="resize-line-v"></div>
         </div>
-
-        <div class="system-status-content">
-          <!-- CPU 使用率 -->
-          <div class="status-item">
-            <div class="status-header">
-              <span class="status-title">CPU 使用率</span>
-              <span class="status-value">{{ formatPercentage(systemStatusData.cpu_usage) }}</span>
+        <div class="system-status-sidebar" :style="{ width: systemStatusWidth + 'px' }">
+          <div class="system-status-header">
+            <div class="header-title">
+              <MenuOutlined />
+              <span>系统状态</span>
             </div>
-            <a-progress :percent="systemStatusData.cpu_usage"
-              :stroke-color="getProgressColor(systemStatusData.cpu_usage)" :showInfo="false" size="small" />
+            <a-tooltip title="刷新">
+              <a-button size="small" type="text" @click="refreshSystemStatus">
+                <template #icon>
+                  <ReloadOutlined />
+                </template>
+              </a-button>
+            </a-tooltip>
           </div>
 
-          <!-- 内存使用 -->
-          <div class="status-item">
-            <div class="status-header">
-              <span class="status-title">内存使用</span>
-              <span class="status-value">{{ formatPercentage(getMemoryPercentage()) }}</span>
+          <div class="system-status-content">
+            <!-- CPU 使用率 -->
+            <div class="status-item">
+              <div class="status-header">
+                <span class="status-title">CPU 使用率</span>
+                <span class="status-value">{{ formatPercentage(systemStatusData.cpu_usage) }}</span>
+              </div>
+              <a-progress :percent="systemStatusData.cpu_usage"
+                :stroke-color="getProgressColor(systemStatusData.cpu_usage)" :showInfo="false" size="small" />
             </div>
-            <a-progress :percent="getMemoryPercentage()" :stroke-color="getProgressColor(getMemoryPercentage())"
-              :showInfo="false" size="small" />
-            <div class="status-detail">
-              {{ formatBytes(systemStatusData.memory_used) }} / {{ formatBytes(systemStatusData.memory_total) }}
-            </div>
-          </div>
 
-          <!-- 磁盘使用 -->
-          <div class="status-item">
-            <div class="status-header">
-              <span class="status-title">磁盘使用</span>
-              <span class="status-value">{{ formatPercentage(getDiskPercentage()) }}</span>
+            <!-- 内存使用 -->
+            <div class="status-item">
+              <div class="status-header">
+                <span class="status-title">内存使用</span>
+                <span class="status-value">{{ formatPercentage(getMemoryPercentage()) }}</span>
+              </div>
+              <a-progress :percent="getMemoryPercentage()" :stroke-color="getProgressColor(getMemoryPercentage())"
+                :showInfo="false" size="small" />
+              <div class="status-detail">
+                {{ formatBytes(systemStatusData.memory_used) }} / {{ formatBytes(systemStatusData.memory_total) }}
+              </div>
             </div>
-            <a-progress :percent="getDiskPercentage()" :stroke-color="getProgressColor(getDiskPercentage())"
-              :showInfo="false" size="small" />
-            <div class="status-detail">
-              {{ formatBytes(systemStatusData.disk_used) }} / {{ formatBytes(systemStatusData.disk_total) }}
-            </div>
-          </div>
 
-          <!-- 系统负载 -->
-          <div class="status-item">
-            <div class="status-header">
-              <span class="status-title">系统负载</span>
-            </div>
-            <div class="load-metrics">
-              <div class="load-item">
-                <span class="load-label">1分钟</span>
-                <span class="load-value">{{ systemStatusData.load_avg_1.toFixed(2) }}</span>
+            <!-- 磁盘使用 -->
+            <div class="status-item">
+              <div class="status-header">
+                <span class="status-title">磁盘使用</span>
+                <span class="status-value">{{ formatPercentage(getDiskPercentage()) }}</span>
               </div>
-              <div class="load-item">
-                <span class="load-label">5分钟</span>
-                <span class="load-value">{{ systemStatusData.load_avg_5.toFixed(2) }}</span>
-              </div>
-              <div class="load-item">
-                <span class="load-label">15分钟</span>
-                <span class="load-value">{{ systemStatusData.load_avg_15.toFixed(2) }}</span>
+              <a-progress :percent="getDiskPercentage()" :stroke-color="getProgressColor(getDiskPercentage())"
+                :showInfo="false" size="small" />
+              <div class="status-detail">
+                {{ formatBytes(systemStatusData.disk_used) }} / {{ formatBytes(systemStatusData.disk_total) }}
               </div>
             </div>
-          </div>
 
-          <!-- 网络速度 -->
-          <div class="status-item">
-            <div class="status-header">
-              <span class="status-title">网络速度</span>
-            </div>
-            <div class="network-metrics">
-              <div class="network-item">
-                <span class="network-label">↓ 入站</span>
-                <span class="network-value">{{ formatNetworkSpeed(systemStatusData.network_in) }}</span>
+            <!-- 系统负载 -->
+            <div class="status-item">
+              <div class="status-header">
+                <span class="status-title">系统负载</span>
               </div>
-              <div class="network-item">
-                <span class="network-label">↑ 出站</span>
-                <span class="network-value">{{ formatNetworkSpeed(systemStatusData.network_out) }}</span>
+              <div class="load-metrics">
+                <div class="load-item">
+                  <span class="load-label">1分钟</span>
+                  <span class="load-value">{{ systemStatusData.load_avg_1.toFixed(2) }}</span>
+                </div>
+                <div class="load-item">
+                  <span class="load-label">5分钟</span>
+                  <span class="load-value">{{ systemStatusData.load_avg_5.toFixed(2) }}</span>
+                </div>
+                <div class="load-item">
+                  <span class="load-label">15分钟</span>
+                  <span class="load-value">{{ systemStatusData.load_avg_15.toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 网络速度 -->
+            <div class="status-item">
+              <div class="status-header">
+                <span class="status-title">网络速度</span>
+              </div>
+              <div class="network-metrics">
+                <div class="network-item">
+                  <span class="network-label">↓ 入站</span>
+                  <span class="network-value">{{ formatNetworkSpeed(systemStatusData.network_in) }}</span>
+                </div>
+                <div class="network-item">
+                  <span class="network-label">↑ 出站</span>
+                  <span class="network-value">{{ formatNetworkSpeed(systemStatusData.network_out) }}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- 创建会话对话框 -->
@@ -357,12 +381,15 @@ import {
   FolderOutlined
 } from '@ant-design/icons-vue';
 import service from '../../utils/request';
+import { isCancelledRequest } from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { useFileUpload } from '../../composables/useFileUpload';
 import { useUIStore } from '../../stores/uiStore';
 
 // Import reusable components
 import TerminalView from '../../components/server/TerminalView.vue';
 import FileManager from '../../components/server/FileManager.vue';
+import UploadProgress from '../../components/UploadProgress.vue';
 import CodeEditor from '../../components/server/CodeEditor.vue';
 
 // 定义响应类型接口
@@ -424,12 +451,13 @@ const uiStore = useUIStore();
 
 // 文件管理器状态
 const fileManagerVisible = ref(false);
-const fileManagerWidth = ref(280);
+const fileManagerWidth = ref(350);
 const currentPath = ref('/');
 const fileList = ref<FileItem[]>([]);
 const fileLoading = ref(false);
 const showHiddenFiles = ref(false);
 const fileUploadInput = ref<HTMLInputElement | null>(null);
+const { state: uploadState, uploadFile, cancelUpload } = useFileUpload();
 const newFileModalVisible = ref(false);
 const newFolderModalVisible = ref(false);
 const newFileName = ref('');
@@ -444,9 +472,45 @@ const minEditorHeight = 200;
 const maxEditorHeight = ref(800);
 const isFileOperationInProgress = ref(false);
 
+// 侧边栏调整大小状态
+const resizingSidebar = ref<'fileManager' | 'systemStatus' | null>(null);
+const sidebarStartX = ref(0);
+const sidebarStartWidth = ref(0);
+
+const startSidebarResize = (e: MouseEvent, sidebar: 'fileManager' | 'systemStatus') => {
+  resizingSidebar.value = sidebar;
+  sidebarStartX.value = e.clientX;
+  sidebarStartWidth.value = sidebar === 'fileManager' ? fileManagerWidth.value : systemStatusWidth.value;
+
+  document.addEventListener('mousemove', onSidebarResize);
+  document.addEventListener('mouseup', stopSidebarResize);
+  document.body.style.cursor = 'ew-resize';
+  document.body.style.userSelect = 'none';
+};
+
+const onSidebarResize = (e: MouseEvent) => {
+  if (!resizingSidebar.value) return;
+  const deltaX = e.clientX - sidebarStartX.value;
+
+  if (resizingSidebar.value === 'fileManager') {
+    fileManagerWidth.value = Math.max(250, Math.min(800, sidebarStartWidth.value + deltaX));
+  } else if (resizingSidebar.value === 'systemStatus') {
+    systemStatusWidth.value = Math.max(250, Math.min(800, sidebarStartWidth.value - deltaX));
+  }
+};
+
+const stopSidebarResize = () => {
+  resizingSidebar.value = null;
+  document.removeEventListener('mousemove', onSidebarResize);
+  document.removeEventListener('mouseup', stopSidebarResize);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  terminalViewRef.value?.resize();
+};
+
 // 系统状态
 const systemStatusVisible = ref(false);
-const systemStatusWidth = ref(280);
+const systemStatusWidth = ref(350);
 const systemStatusData = ref({
   cpu_usage: 0,
   memory_used: 0,
@@ -563,27 +627,53 @@ const triggerUpload = () => {
   fileUploadInput.value?.click();
 };
 
+const handleDropFiles = async (files: File[]) => {
+  if (files.length === 0) return;
+
+  const hide = message.loading(`正在上传 ${files.length} 个文件...`, 0);
+
+  try {
+    for (const file of files) {
+      await uploadFile({
+        serverId: serverId.value,
+        targetPath: currentPath.value,
+        file,
+      });
+    }
+    message.success('文件上传成功');
+    refreshFileList();
+  } catch (error: any) {
+    if (!isCancelledRequest(error)) {
+      console.error('上传失败:', error);
+      message.error(uploadState.error || '文件上传失败');
+    }
+  } finally {
+    hide();
+  }
+};
+
 const handleFileUpload = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   if (!input.files || input.files.length === 0) return;
 
   const files = Array.from(input.files);
-  const formData = new FormData();
-  files.forEach(file => {
-    formData.append('files', file);
-  });
-  formData.append('path', currentPath.value);
-
   const hide = message.loading('正在上传文件...', 0);
+
   try {
-    await service.post(`/servers/${serverId.value}/files/upload`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    });
+    for (const file of files) {
+      await uploadFile({
+        serverId: serverId.value,
+        targetPath: currentPath.value,
+        file,
+      });
+    }
     message.success('文件上传成功');
     refreshFileList();
-  } catch (error) {
-    console.error('上传失败:', error);
-    message.error('文件上传失败');
+  } catch (error: any) {
+    if (!isCancelledRequest(error)) {
+      console.error('上传失败:', error);
+      message.error(uploadState.error || '文件上传失败');
+    }
   } finally {
     hide();
     input.value = '';
@@ -1069,6 +1159,11 @@ const terminalContainerStyle = computed(() => ({
   height: editorVisible.value ? `calc(100% - ${editorHeight.value}px)` : '100%'
 }));
 
+// 切换显示/隐藏文件时重新加载文件列表
+watch(showHiddenFiles, () => {
+  fetchFileList();
+});
+
 onMounted(async () => {
   updateMaxEditorHeight();
   window.addEventListener('resize', updateMaxEditorHeight);
@@ -1082,6 +1177,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('resize', updateMaxEditorHeight);
   if (statusWs) statusWs.close();
+  stopSidebarResize();
 });
 </script>
 
@@ -1107,7 +1203,7 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   margin-top: 0;
-  gap: 16px;
+  gap: 0;
   height: calc(100vh - 140px);
   overflow: hidden;
   padding: 0 16px 16px 16px;
@@ -1123,6 +1219,52 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   box-shadow: 0 8px 32px var(--alpha-black-05);
+}
+
+.file-manager-sidebar :deep(.file-manager) {
+  flex: 1;
+  min-height: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.file-manager-sidebar :deep(.file-list-container) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-manager-sidebar :deep(.ant-table-body) {
+  max-height: 100% !important;
+}
+
+.file-manager-sidebar :deep(.upload-progress) {
+  margin: 0 14px 14px;
+  flex-shrink: 0;
+}
+
+.sidebar-resize-handle {
+  width: 10px;
+  cursor: ew-resize;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0 4px;
+  transition: background 0.2s;
+  border-radius: 4px;
+}
+
+.sidebar-resize-handle:hover {
+  background: var(--alpha-black-05);
+}
+
+.resize-line-v {
+  width: 3px;
+  height: 40px;
+  background: var(--alpha-black-10);
+  border-radius: 2px;
 }
 
 .workspace-container {

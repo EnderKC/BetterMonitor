@@ -1617,7 +1617,8 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			}
 
 		case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
-			"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload":
+			"docker_file_list", "docker_file_content", "docker_file_tree", "docker_file_upload",
+			"chunked_upload_init_ack", "chunked_upload_chunk_ack", "chunked_upload_complete_ack", "chunked_upload_cancel_ack":
 			// 处理文件 / 容器文件操作响应
 			var fileResponse struct {
 				Type      string                 `json:"type"`

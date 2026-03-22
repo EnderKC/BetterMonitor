@@ -97,6 +97,18 @@ func (c *Client) handleOperationMessage(msgType string, message []byte, msgCopy 
 	case "shell_command":
 		go c.handleShellCommand(msgCopy)
 
+	case "chunked_upload_init":
+		go c.handleChunkedUploadInit(msgCopy)
+
+	case "chunked_upload_chunk":
+		go c.handleChunkedUploadChunk(msgCopy)
+
+	case "chunked_upload_complete":
+		go c.handleChunkedUploadComplete(msgCopy)
+
+	case "chunked_upload_cancel":
+		go c.handleChunkedUploadCancel(msgCopy)
+
 	default:
 		c.log.Warn("收到未知类型的WebSocket消息: %s", msgType)
 	}
@@ -813,6 +825,172 @@ func (c *Client) handleFileUpload(message []byte) {
 	})
 
 	c.log.Info("文件已上传: %s/%s", msg.Payload.Path, msg.Payload.Filename)
+}
+
+// ─── 分片上传处理 ──────────────────────────────────────────────────────────────
+
+// handleChunkedUploadInit 处理分片上传初始化请求
+func (c *Client) handleChunkedUploadInit(message []byte) {
+	var msg struct {
+		RequestID string `json:"request_id"`
+		Payload   struct {
+			UploadID    string `json:"upload_id"`
+			Path        string `json:"path"`
+			Filename    string `json:"filename"`
+			TotalSize   int64  `json:"total_size"`
+			ChunkSize   int64  `json:"chunk_size"`
+			TotalChunks int    `json:"total_chunks"`
+			ContainerID string `json:"container_id"`
+		} `json:"payload"`
+	}
+
+	if err := json.Unmarshal(message, &msg); err != nil {
+		c.log.Error("解析分片上传初始化请求失败: %v", err)
+		return
+	}
+
+	c.log.Info("收到分片上传初始化: upload_id=%s, file=%s, chunks=%d",
+		msg.Payload.UploadID, msg.Payload.Filename, msg.Payload.TotalChunks)
+
+	err := c.chunkedUploadMgr.Init(
+		msg.Payload.UploadID,
+		msg.Payload.Path,
+		msg.Payload.Filename,
+		msg.Payload.TotalSize,
+		msg.Payload.ChunkSize,
+		msg.Payload.TotalChunks,
+		msg.Payload.ContainerID,
+	)
+	if err != nil {
+		c.log.Error("分片上传初始化失败: %v", err)
+		c.sendResponse(msg.RequestID, "chunked_upload_init_ack", map[string]interface{}{
+			"upload_id": msg.Payload.UploadID,
+			"success":   false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	c.sendResponse(msg.RequestID, "chunked_upload_init_ack", map[string]interface{}{
+		"upload_id": msg.Payload.UploadID,
+		"success":   true,
+	})
+}
+
+// handleChunkedUploadChunk 处理单个分片数据
+func (c *Client) handleChunkedUploadChunk(message []byte) {
+	var msg struct {
+		RequestID string `json:"request_id"`
+		Payload   struct {
+			UploadID   string `json:"upload_id"`
+			ChunkIndex int    `json:"chunk_index"`
+			ChunkHash  string `json:"chunk_hash"`
+			Compressed bool   `json:"compressed"`
+			Content    string `json:"content"` // Base64 编码的分片数据
+		} `json:"payload"`
+	}
+
+	if err := json.Unmarshal(message, &msg); err != nil {
+		c.log.Error("解析分片上传数据失败: %v", err)
+		return
+	}
+
+	// 解码 Base64 内容
+	data, err := base64.StdEncoding.DecodeString(msg.Payload.Content)
+	if err != nil {
+		c.log.Error("解码分片 Base64 数据失败: upload_id=%s, index=%d, error=%v",
+			msg.Payload.UploadID, msg.Payload.ChunkIndex, err)
+		c.sendResponse(msg.RequestID, "chunked_upload_chunk_ack", map[string]interface{}{
+			"upload_id":   msg.Payload.UploadID,
+			"chunk_index": msg.Payload.ChunkIndex,
+			"success":     false,
+			"error":       "Base64 解码失败",
+		})
+		return
+	}
+
+	if err := c.chunkedUploadMgr.SaveChunk(msg.Payload.UploadID, msg.Payload.ChunkIndex, data, msg.Payload.ChunkHash, msg.Payload.Compressed); err != nil {
+		c.log.Error("保存分片失败: upload_id=%s, index=%d, error=%v",
+			msg.Payload.UploadID, msg.Payload.ChunkIndex, err)
+		c.sendResponse(msg.RequestID, "chunked_upload_chunk_ack", map[string]interface{}{
+			"upload_id":   msg.Payload.UploadID,
+			"chunk_index": msg.Payload.ChunkIndex,
+			"success":     false,
+			"error":       err.Error(),
+		})
+		return
+	}
+
+	c.sendResponse(msg.RequestID, "chunked_upload_chunk_ack", map[string]interface{}{
+		"upload_id":   msg.Payload.UploadID,
+		"chunk_index": msg.Payload.ChunkIndex,
+		"success":     true,
+	})
+}
+
+// handleChunkedUploadComplete 处理分片上传完成请求，合并所有分片
+func (c *Client) handleChunkedUploadComplete(message []byte) {
+	var msg struct {
+		RequestID string `json:"request_id"`
+		Payload   struct {
+			UploadID string `json:"upload_id"`
+			FileHash string `json:"file_hash"`
+		} `json:"payload"`
+	}
+
+	if err := json.Unmarshal(message, &msg); err != nil {
+		c.log.Error("解析分片上传完成请求失败: %v", err)
+		return
+	}
+
+	c.log.Info("收到分片上传完成请求: upload_id=%s", msg.Payload.UploadID)
+
+	if err := c.chunkedUploadMgr.Complete(msg.Payload.UploadID, msg.Payload.FileHash); err != nil {
+		c.log.Error("分片上传合并失败: upload_id=%s, error=%v", msg.Payload.UploadID, err)
+		c.sendResponse(msg.RequestID, "chunked_upload_complete_ack", map[string]interface{}{
+			"upload_id": msg.Payload.UploadID,
+			"success":   false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	c.sendResponse(msg.RequestID, "chunked_upload_complete_ack", map[string]interface{}{
+		"upload_id": msg.Payload.UploadID,
+		"success":   true,
+	})
+}
+
+// handleChunkedUploadCancel 处理取消分片上传请求
+func (c *Client) handleChunkedUploadCancel(message []byte) {
+	var msg struct {
+		RequestID string `json:"request_id"`
+		Payload   struct {
+			UploadID string `json:"upload_id"`
+		} `json:"payload"`
+	}
+
+	if err := json.Unmarshal(message, &msg); err != nil {
+		c.log.Error("解析取消分片上传请求失败: %v", err)
+		return
+	}
+
+	c.log.Info("收到取消分片上传请求: upload_id=%s", msg.Payload.UploadID)
+
+	if err := c.chunkedUploadMgr.Cancel(msg.Payload.UploadID); err != nil {
+		c.log.Error("取消分片上传失败: upload_id=%s, error=%v", msg.Payload.UploadID, err)
+		c.sendResponse(msg.RequestID, "chunked_upload_cancel_ack", map[string]interface{}{
+			"upload_id": msg.Payload.UploadID,
+			"success":   false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	c.sendResponse(msg.RequestID, "chunked_upload_cancel_ack", map[string]interface{}{
+		"upload_id": msg.Payload.UploadID,
+		"success":   true,
+	})
 }
 
 // ─── 容器文件操作处理 ──────────────────────────────────────────────────────────

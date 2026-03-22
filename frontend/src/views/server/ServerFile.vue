@@ -24,7 +24,10 @@ import {
   CodeOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
+import { isCancelledRequest } from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { useFileUpload } from '../../composables/useFileUpload';
+import UploadProgress from '../../components/UploadProgress.vue';
 // 导入服务器状态store
 import { useServerStore } from '../../stores/serverStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -128,7 +131,7 @@ const expandedKeys = ref<string[]>([]);
 // 文件上传
 const uploadModalVisible = ref(false);
 const fileToUpload = ref<File | null>(null);
-const uploading = ref(false);
+const { state: uploadState, uploadFile, cancelUpload, reset: resetUpload } = useFileUpload();
 
 // 文件编辑
 const editModalVisible = ref(false);
@@ -627,30 +630,25 @@ const handleFileUpload = async () => {
     return;
   }
 
-  uploading.value = true;
-
   try {
-    const formData = new FormData();
-    formData.append('file', fileToUpload.value);
-    formData.append('path', currentPath.value);
-
-    await request.post(`/servers/${serverId.value}/files/upload`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+    await uploadFile({
+      serverId: serverId.value,
+      targetPath: currentPath.value,
+      file: fileToUpload.value,
     });
 
     message.success('文件上传成功');
     uploadModalVisible.value = false;
     fileToUpload.value = null;
+    resetUpload();
 
     // 刷新文件列表
     fetchFileList(currentPath.value);
-  } catch (error) {
-    console.error('上传文件失败:', error);
-    message.error('上传文件失败');
-  } finally {
-    uploading.value = false;
+  } catch (error: any) {
+    if (!isCancelledRequest(error)) {
+      console.error('上传文件失败:', error);
+      message.error(uploadState.error || '上传文件失败');
+    }
   }
 };
 
@@ -1466,18 +1464,29 @@ const customRow = (record: any) => {
     </div>
 
     <!-- 上传文件对话框 -->
-    <a-modal v-model:open="uploadModalVisible" title="上传文件" @ok="handleFileUpload" :confirm-loading="uploading"
+    <a-modal v-model:open="uploadModalVisible" title="上传文件" @ok="handleFileUpload" :confirm-loading="uploadState.uploading"
       :maskClosable="false" :width="520" class="macos-modal">
       <div class="upload-container">
         <p>当前目录: <span class="current-path">{{ currentPath }}</span></p>
         <a-upload-dragger :beforeUpload="() => false" @change="handleFileChange"
           :fileList="fileToUpload ? [{ uid: '1', name: fileToUpload.name }] : []" :multiple="false"
-          class="upload-dragger">
+          class="upload-dragger" :disabled="uploadState.uploading">
           <p class="ant-upload-drag-icon">
             <UploadOutlined />
           </p>
           <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
         </a-upload-dragger>
+        <UploadProgress
+          :uploading="uploadState.uploading"
+          :progress="uploadState.progress"
+          :file-name="fileToUpload?.name || ''"
+          :uploaded-size="uploadState.uploadedSize"
+          :total-size="uploadState.totalSize"
+          :speed="uploadState.speed"
+          :current-chunk="uploadState.currentChunk"
+          :total-chunks="uploadState.totalChunks"
+          @cancel="cancelUpload"
+        />
       </div>
     </a-modal>
 
@@ -1575,7 +1584,7 @@ const customRow = (record: any) => {
   display: flex;
   align-items: center;
   gap: 16px;
-  width: 200px;
+  flex-shrink: 0;
 }
 
 .window-controls {
@@ -1642,12 +1651,13 @@ const customRow = (record: any) => {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 300px;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .search-input {
   width: 160px;
+  min-width: 100px;
   border-radius: var(--radius-xs);
 }
 
@@ -2085,6 +2095,25 @@ const customRow = (record: any) => {
 
 .dark .macos-modal .ant-modal-header {
   border-bottom: 1px solid var(--alpha-white-08);
+}
+
+/* Upload dialog dark mode */
+.dark .upload-container .current-path {
+  color: #61afef;
+}
+
+.dark .upload-container .ant-upload-dragger {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark .upload-container .ant-upload-dragger:hover {
+  border-color: #1890ff;
+}
+
+.dark .upload-container .ant-upload-text,
+.dark .upload-container .ant-upload-drag-icon {
+  color: #999;
 }
 
 .dark .file-lang {

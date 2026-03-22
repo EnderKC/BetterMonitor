@@ -160,6 +160,17 @@ func (cfm *ContainerFileManager) UploadFile(path, filename, content string) erro
 	return cfm.writeFile(targetPath, data, 0644)
 }
 
+// WriteFileFromBytes 直接将字节数据写入容器文件，跳过 Base64 解码步骤。
+// 用于分片上传合并后直接写入容器，避免不必要的编解码开销。
+func (cfm *ContainerFileManager) WriteFileFromBytes(dir, filename string, data []byte) error {
+	safeName, err := sanitizeContainerFilename(filename)
+	if err != nil {
+		return err
+	}
+	targetPath := joinContainerPath(dir, safeName)
+	return cfm.writeFile(targetPath, data, 0644)
+}
+
 // DownloadFile 下载文件
 func (cfm *ContainerFileManager) DownloadFile(path string) ([]byte, error) {
 	return cfm.readFile(path)

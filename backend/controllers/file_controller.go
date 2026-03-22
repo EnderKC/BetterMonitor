@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/models"
+	"github.com/user/server-ops-backend/services"
 	"github.com/user/server-ops-backend/utils"
 )
 
@@ -262,31 +262,27 @@ func CreateDirectory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "目录创建成功"})
 }
 
-// UploadFile 上传文件
+// UploadFile 上传文件（通过统一上传服务处理）
 func UploadFile(c *gin.Context) {
 	serverID := c.Param("id")
 
-	// 获取服务器信息
 	var server models.Server
 	if err := models.DB.First(&server, serverID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
 		return
 	}
 
-	// 检查服务器在线状态
 	if !server.Online {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
 
-	// 获取上传路径
 	path := c.PostForm("path")
 	if !isValidFilePath(path) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
 		return
 	}
 
-	// 获取上传的文件
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "获取上传文件失败"})
@@ -294,26 +290,8 @@ func UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 检查文件大小
-	if header.Size > 50*1024*1024 { // 50MB
-		c.JSON(http.StatusBadRequest, gin.H{"error": "文件太大，最大允许50MB"})
-		return
-	}
-
-	// 读取文件内容
-	fileContent, err := io.ReadAll(file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取上传文件失败"})
-		return
-	}
-
-	// 构造目标文件路径
-	targetPath := filepath.Join(path, header.Filename)
-	targetPath = filepath.Clean(targetPath)
-
-	// 通过WebSocket上传文件
-	err = uploadFileViaWebSocket(server.ID, targetPath, fileContent)
-	if err != nil {
+	uploadSvc := services.GetUploadService()
+	if err := uploadSvc.UploadFromMultipart(services.TargetHost, server.ID, "", path, file, header); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("上传文件失败: %v", err)})
 		return
 	}
@@ -628,7 +606,7 @@ func CreateContainerDirectory(c *gin.Context) {
 // 容器文件上传大小限制（100MB，容器场景可能需要上传较大文件）
 const maxContainerUploadSize int64 = 100 * 1024 * 1024
 
-// UploadContainerFile 上传容器文件
+// UploadContainerFile 上传容器文件（通过统一上传服务处理）
 func UploadContainerFile(c *gin.Context) {
 	serverID := c.Param("id")
 	containerID := c.Param("container_id")
@@ -666,46 +644,13 @@ func UploadContainerFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 【安全修复】检查文件大小
-	if header.Size <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "文件内容为空"})
-		return
-	}
-	if header.Size > maxContainerUploadSize {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("文件太大，最大允许%dMB", maxContainerUploadSize/1024/1024)})
-		return
-	}
-
-	// 使用LimitReader作为额外保护
-	limitedReader := io.LimitReader(file, maxContainerUploadSize+1)
-	fileContent, err := io.ReadAll(limitedReader)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取上传文件失败"})
-		return
-	}
-
-	// 检查实际读取的大小
-	if int64(len(fileContent)) > maxContainerUploadSize {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("文件太大，最大允许%dMB", maxContainerUploadSize/1024/1024)})
-		return
-	}
-
-	filename := strings.TrimSpace(header.Filename)
-	filename = strings.ReplaceAll(filename, "\\", "/")
-	filename = filepath.Base(filename)
-	if filename == "" || filename == "." || filename == "/" || filename == ".." {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件名"})
-		return
-	}
-
-	targetPath := filepath.Join(path, filename)
-	targetPath = filepath.Clean(targetPath)
-	if !isValidFilePath(targetPath) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
-		return
-	}
-
-	if err := uploadContainerFileViaWebSocket(server.ID, containerID, targetPath, fileContent); err != nil {
+	uploadSvc := services.GetUploadService()
+	if err := uploadSvc.UploadFromMultipart(services.TargetContainer, server.ID, containerID, path, file, header); err != nil {
+		// 区分大小限制错误和其他错误
+		if strings.Contains(err.Error(), "文件太大") {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("上传文件失败: %v", err)})
 		return
 	}
