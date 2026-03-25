@@ -10,11 +10,15 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   socketUrl: string;
   session?: string;
+  containerId?: string;
   theme?: 'light' | 'dark';
-}>();
+  autoCreate?: boolean;
+}>(), {
+  autoCreate: true,
+});
 
 const emit = defineEmits<{
   (e: 'connected'): void;
@@ -81,7 +85,7 @@ const connect = () => {
       emit('connected');
 
       // 先发送 create 命令在 Agent 端创建终端会话
-      if (props.session) {
+      if (props.autoCreate && props.session) {
         socket.send(JSON.stringify({
           type: 'shell_command',
           payload: {
@@ -100,18 +104,14 @@ const connect = () => {
       // Handle input
       if (terminal.value) {
         terminal.value.onData((data) => {
-          if (socket.readyState === WebSocket.OPEN) {
-            if (!props.session) {
-              console.warn('Input sent without session');
-            }
-            socket.send(JSON.stringify({
-              type: 'shell_command',
-              payload: {
-                type: 'input',
-                data: data,
-                session: props.session || ''
-              }
-            }));
+          if (socket.readyState === WebSocket.OPEN && props.session) {
+            const payload: Record<string, any> = {
+              type: 'input',
+              data: data,
+              session: props.session,
+            };
+            if (props.containerId) payload.container_id = props.containerId;
+            socket.send(JSON.stringify({ type: 'shell_command', payload }));
           }
         });
         terminal.value.focus();
@@ -166,25 +166,20 @@ const handleResize = () => {
   try {
     fitAddon.value.fit();
 
-    // 只有 session 存在时才发送 resize 命令
-    if (!props.session) {
-      console.warn('Resize skipped: no session provided');
-      return;
-    }
+    if (!props.session) return;
 
     const dims = {
       cols: terminal.value.cols,
       rows: terminal.value.rows
     };
 
-    ws.value.send(JSON.stringify({
-      type: 'shell_command',
-      payload: {
-        type: 'resize',
-        data: JSON.stringify(dims),
-        session: props.session
-      }
-    }));
+    const payload: Record<string, any> = {
+      type: 'resize',
+      data: JSON.stringify(dims),
+      session: props.session,
+    };
+    if (props.containerId) payload.container_id = props.containerId;
+    ws.value.send(JSON.stringify({ type: 'shell_command', payload }));
   } catch (e) {
     console.warn('Resize failed:', e);
   }
