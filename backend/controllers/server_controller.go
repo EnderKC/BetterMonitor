@@ -327,12 +327,14 @@ func SwitchAgentType(c *gin.Context) {
 		return
 	}
 
-	// 获取最新版本号，用于触发升级
+	// 获取最新版本号和发行版信息，用于构建含 download_url/sha256 的升级 payload
 	settings, _ := models.GetSettings()
+	var releaseInfo *services.AgentReleaseInfo
 	targetVersion := ""
 	if settings != nil {
-		if releaseInfo, err := services.FetchLatestAgentRelease(settings); err == nil && releaseInfo != nil {
-			targetVersion = releaseInfo.Version
+		if ri, err := services.FetchLatestAgentRelease(settings); err == nil && ri != nil {
+			releaseInfo = ri
+			targetVersion = ri.Version
 		}
 	}
 	if targetVersion == "" {
@@ -347,16 +349,11 @@ func SwitchAgentType(c *gin.Context) {
 
 	// 向 Agent 下发带 target_agent_type 的升级指令
 	requestID := fmt.Sprintf("switch-type-%d-%d", server.ID, time.Now().UnixNano())
+	payload := services.BuildUpgradePayload(server, targetVersion, upgradeChannel, releaseInfo, targetType)
 	command := map[string]interface{}{
 		"type":       "agent_upgrade",
 		"request_id": requestID,
-		"payload": map[string]interface{}{
-			"action":            "upgrade",
-			"target_version":    targetVersion,
-			"channel":           upgradeChannel,
-			"server_id":         server.ID,
-			"target_agent_type": targetType,
-		},
+		"payload":    payload,
 	}
 
 	if err := agentUpgradeSender(conn, command); err != nil {

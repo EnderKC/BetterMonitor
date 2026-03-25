@@ -408,6 +408,13 @@ jobs:
           echo "Release files:"
           ls -lh release/
 
+      - name: Generate SHA256 checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS
+          echo "SHA256SUMS:"
+          cat SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:

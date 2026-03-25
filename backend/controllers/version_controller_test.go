@@ -186,10 +186,40 @@ func TestForceAgentUpgrade(t *testing.T) {
 		AgentReleaseChannel: "stable",
 	}).Error)
 
+	// Mock GitHub API，使 FetchLatestAgentRelease 能正常返回 releaseInfo
+	services.ClearReleaseCache()
+	defer services.ClearReleaseCache()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{
+				"tag_name": "v2.0.0",
+				"name": "Agent v2.0.0",
+				"body": "",
+				"published_at": "2024-01-01T00:00:00Z",
+				"assets": [{
+					"name": "better-monitor-agent-2.0.0-linux-amd64",
+					"browser_download_url": "https://github.com/demo/repo/releases/download/v2.0.0/better-monitor-agent-2.0.0-linux-amd64",
+					"size": 1234
+				}]
+			}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	services.SetReleaseAPIBaseURL(ts.URL)
+	defer services.ResetReleaseAPIBaseURL()
+	services.SetReleaseHTTPClient(ts.Client())
+	defer services.ResetReleaseHTTPClient()
+
 	serverOnline := models.Server{
-		Name:   "Online",
-		IP:     "10.0.0.1",
-		Online: true,
+		Name:          "Online",
+		IP:            "10.0.0.1",
+		Online:        true,
+		LastHeartbeat: time.Now(),
 	}
 	serverOffline := models.Server{
 		Name:   "Offline",
@@ -197,9 +227,10 @@ func TestForceAgentUpgrade(t *testing.T) {
 		Online: false,
 	}
 	serverSendError := models.Server{
-		Name:   "SendError",
-		IP:     "10.0.0.3",
-		Online: true,
+		Name:          "SendError",
+		IP:            "10.0.0.3",
+		Online:        true,
+		LastHeartbeat: time.Now(),
 	}
 	assert.NoError(t, db.Create(&serverOnline).Error)
 	assert.NoError(t, db.Create(&serverOffline).Error)

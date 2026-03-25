@@ -170,11 +170,15 @@ func ForceAgentUpgrade(c *gin.Context) {
 		upgradeChannel = settings.AgentReleaseChannel
 	}
 
+	// 获取最新发行版信息（同时用于解析 targetVersion 和构建含 download_url/sha256 的 payload）
+	var releaseInfo *services.AgentReleaseInfo
+	if ri, err := services.FetchLatestAgentRelease(settings); err == nil && ri != nil {
+		releaseInfo = ri
+	}
+
 	targetVersion := strings.TrimSpace(req.TargetVersion)
-	if targetVersion == "" {
-		if releaseInfo, err := services.FetchLatestAgentRelease(settings); err == nil && releaseInfo != nil {
-			targetVersion = releaseInfo.Version
-		}
+	if targetVersion == "" && releaseInfo != nil {
+		targetVersion = releaseInfo.Version
 	}
 	if targetVersion == "" {
 		targetVersion = version.GetVersion().Version
@@ -216,15 +220,11 @@ func ForceAgentUpgrade(c *gin.Context) {
 		}
 
 		requestID := fmt.Sprintf("upgrade-%d-%d", server.ID, time.Now().UnixNano())
+		payload := services.BuildUpgradePayload(server, targetVersion, upgradeChannel, releaseInfo, "")
 		command := map[string]interface{}{
 			"type":       "agent_upgrade",
 			"request_id": requestID,
-			"payload": map[string]interface{}{
-				"action":         "upgrade",
-				"target_version": targetVersion,
-				"channel":        upgradeChannel,
-				"server_id":      server.ID,
-			},
+			"payload":    payload,
 		}
 
 		if err := agentUpgradeSender(conn, command); err != nil {
