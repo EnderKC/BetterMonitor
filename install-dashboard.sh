@@ -40,6 +40,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-${INSTALL_DIR}/docker-compose.yml}"
 TZ="${TZ:-Asia/Shanghai}"
 COMPOSE_BIN=()
 JWT_SECRET="${JWT_SECRET:-}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 ENV_LOADED_PATH=""
 LAST_BACKUP_FILE=""
 LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
@@ -230,6 +231,15 @@ create_docker_compose() {
 
     print_info "创建 docker-compose.yml 配置文件..."
 
+    # 构建 environment 段内容
+    local env_lines="      - TZ=${TZ}
+      - JWT_SECRET=${jwt_secret}
+      - VERSION=latest"
+    if [[ -n "${GITHUB_TOKEN}" ]]; then
+        env_lines="${env_lines}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}"
+    fi
+
     cat > "${COMPOSE_FILE}" <<EOF
 version: '3.8'
 
@@ -250,9 +260,7 @@ services:
       - ${LOGS_DIR}:/app/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - TZ=${TZ}
-      - JWT_SECRET=${jwt_secret}
-      - VERSION=latest
+${env_lines}
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -286,6 +294,14 @@ TZ=${TZ}
 # Docker 镜像
 DOCKER_IMAGE=${DOCKER_IMAGE}
 EOF
+
+    if [[ -n "${GITHUB_TOKEN}" ]]; then
+        cat >> "${ENV_FILE}" <<EOF
+
+# GitHub API Token（可选，用于提升 GitHub API 请求限额，避免 403 错误）
+GITHUB_TOKEN=${GITHUB_TOKEN}
+EOF
+    fi
 
     chmod 600 "${ENV_FILE}"
 }
@@ -355,6 +371,21 @@ install_dashboard() {
     local jwt_secret="${JWT_SECRET:-$(generate_jwt_secret)}"
     JWT_SECRET="$jwt_secret"
 
+    # 询问 GITHUB_TOKEN（可选）
+    if [[ -z "${GITHUB_TOKEN}" && "$INPUT_FD" -ge 0 ]]; then
+        echo ""
+        print_info "可选配置：设置 GITHUB_TOKEN 可提升 GitHub API 请求限额（5000次/小时），避免版本检查时出现 403 错误。"
+        print_info "如不需要可直接按回车跳过。"
+        local github_token_input=""
+        if safe_read "请输入 GITHUB_TOKEN: " github_token_input && [[ -n "${github_token_input}" ]]; then
+            GITHUB_TOKEN="${github_token_input}"
+            print_success "GITHUB_TOKEN 已配置"
+        else
+            print_info "已跳过 GITHUB_TOKEN 配置"
+        fi
+        echo ""
+    fi
+
     # 创建配置文件
     create_docker_compose "${jwt_secret}"
     create_env_file "${jwt_secret}"
@@ -370,6 +401,11 @@ install_dashboard() {
         run_compose_cmd up -d
     else
         # 使用 docker run 方式
+        local github_token_args=()
+        if [[ -n "${GITHUB_TOKEN}" ]]; then
+            github_token_args=(-e "GITHUB_TOKEN=${GITHUB_TOKEN}")
+        fi
+
         docker run -d \
             --name "${CONTAINER_NAME}" \
             --restart unless-stopped \
@@ -382,6 +418,7 @@ install_dashboard() {
             -e TZ="${TZ}" \
             -e JWT_SECRET="${jwt_secret}" \
             -e VERSION=latest \
+            "${github_token_args[@]}" \
             --security-opt no-new-privileges:true \
             "${DOCKER_IMAGE}"
     fi
@@ -425,6 +462,23 @@ upgrade_dashboard() {
 
     load_env_file
 
+    # 检查 GITHUB_TOKEN 是否已配置，未配置则提示用户（可选）
+    local github_token_newly_set=false
+    if [[ -z "${GITHUB_TOKEN}" && "$INPUT_FD" -ge 0 ]]; then
+        echo ""
+        print_info "检测到尚未配置 GITHUB_TOKEN。设置后可提升 GitHub API 请求限额（5000次/小时），避免版本检查时出现 403 错误。"
+        print_info "如不需要可直接按回车跳过。"
+        local github_token_input=""
+        if safe_read "请输入 GITHUB_TOKEN: " github_token_input && [[ -n "${github_token_input}" ]]; then
+            GITHUB_TOKEN="${github_token_input}"
+            github_token_newly_set=true
+            print_success "GITHUB_TOKEN 已配置"
+        else
+            print_info "已跳过 GITHUB_TOKEN 配置"
+        fi
+        echo ""
+    fi
+
     check_root
     check_docker
 
@@ -460,6 +514,24 @@ upgrade_dashboard() {
     local jwt_secret="${JWT_SECRET:-$(generate_jwt_secret)}"
     JWT_SECRET="$jwt_secret"
 
+    # 如果用户本次新配置了 GITHUB_TOKEN，定点更新现有配置文件（不重建，避免覆盖用户自定义内容）
+    if [[ "${github_token_newly_set}" == true ]]; then
+        # 追加到 .env
+        if [ -f "${ENV_FILE}" ] && ! grep -q "^GITHUB_TOKEN=" "${ENV_FILE}"; then
+            cat >> "${ENV_FILE}" <<EOF
+
+# GitHub API Token（可选，用于提升 GitHub API 请求限额，避免 403 错误）
+GITHUB_TOKEN=${GITHUB_TOKEN}
+EOF
+            print_info "已将 GITHUB_TOKEN 写入 ${ENV_FILE}"
+        fi
+        # 追加到 docker-compose.yml 的 environment 段
+        if [ -f "${COMPOSE_FILE}" ] && ! grep -q "GITHUB_TOKEN" "${COMPOSE_FILE}"; then
+            sed -i "/- VERSION=latest/a\\      - GITHUB_TOKEN=${GITHUB_TOKEN}" "${COMPOSE_FILE}"
+            print_info "已将 GITHUB_TOKEN 写入 ${COMPOSE_FILE}"
+        fi
+    fi
+
     start_container() {
         local image_override="${1:-}"
         local image="${DOCKER_IMAGE}"
@@ -471,6 +543,11 @@ upgrade_dashboard() {
             # 强制重建容器，确保使用刚拉取的镜像
             run_compose_cmd up -d --force-recreate
             return
+        fi
+
+        local github_token_args=()
+        if [[ -n "${GITHUB_TOKEN}" ]]; then
+            github_token_args=(-e "GITHUB_TOKEN=${GITHUB_TOKEN}")
         fi
 
         docker run -d \
@@ -485,6 +562,7 @@ upgrade_dashboard() {
             -e TZ="${TZ}" \
             -e JWT_SECRET="${jwt_secret}" \
             -e VERSION=latest \
+            "${github_token_args[@]}" \
             --security-opt no-new-privileges:true \
             "${image}"
     }

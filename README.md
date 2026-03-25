@@ -297,6 +297,74 @@ curl -fsSL https://raw.githubusercontent.com/EnderKC/BetterMonitor/main/install-
 | `DB_PATH` | SQLite 数据库路径 | `./data/data.db` |
 | `PORT` | 后端监听端口 | `8085` |
 | `TZ` | 时区 | `Asia/Shanghai` |
+| `GITHUB_TOKEN` | GitHub Personal Access Token，用于提升 API 请求限额（详见下方说明） | — |
+| `AGENT_RELEASE_GITHUB_TOKEN` | 同上，优先级高于 `GITHUB_TOKEN`，适用于需要区分用途的场景 | — |
+
+### GitHub Token 配置说明
+
+Dashboard 会通过 GitHub API 检查 Agent 的最新版本，以支持自动升级功能。GitHub API 对**未认证请求**有严格的频率限制：
+
+| 认证方式 | 限额 | 限制维度 |
+|----------|------|----------|
+| 未认证 | **60 次 / 小时** | 按 IP 地址 |
+| 携带 Token | **5,000 次 / 小时** | 按 Token 所属用户 |
+
+未认证时，同一 IP 下的所有请求共享 60 次额度。如果服务器处于共享 IP 环境（如部分云服务商的 NAT 出口），其他用户的请求也会占用你的额度。当额度耗尽时，API 会返回 `403` 错误，导致版本检查失败。
+
+**建议配置 GitHub Token 以避免此问题。**
+
+#### 生成 Token 步骤
+
+1. 登录你自己的 GitHub 账号（无需仓库所有者的 Token，任意可正常调用 GitHub API 的个人账号均可）
+2. 进入 [Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
+3. 选择 **Tokens (classic)** 或 **Fine-grained tokens** 均可
+4. 点击 **Generate new token**，填写名称（如 `better-monitor`），**不需要勾选任何权限 scope**（发行版信息属于公开数据）
+5. 设置过期时间（建议设置合理的过期时间并定期轮换）
+6. 点击 **Generate token**，复制生成的 Token
+
+#### 配置方式
+
+**脚本安装（install-dashboard.sh）** — 编辑安装目录下的 `docker-compose.yml`（默认路径 `/opt/better-monitor/docker-compose.yml`），在 `environment` 段中添加一行：
+
+```yaml
+    environment:
+      - TZ=Asia/Shanghai
+      - JWT_SECRET=xxx
+      - VERSION=latest
+      - GITHUB_TOKEN=your_github_token_here   # ← 添加此行
+```
+
+保存后重启容器：
+
+```bash
+cd /opt/better-monitor && docker-compose down && docker-compose up -d
+```
+
+**Docker Compose（手动编排）** — 同上，在 `docker-compose.yml` 的 `environment` 中添加：
+
+```yaml
+environment:
+  - GITHUB_TOKEN=your_github_token_here
+```
+
+**Docker Run** — 添加 `-e` 参数：
+
+```bash
+docker run -d \
+  -e GITHUB_TOKEN=your_github_token_here \
+  ...
+```
+
+**手动部署（非 Docker）** — 在 `.env` 文件中添加：
+
+```env
+GITHUB_TOKEN=your_github_token_here
+```
+
+> **注意：**
+> - 如果同时设置了 `AGENT_RELEASE_GITHUB_TOKEN` 和 `GITHUB_TOKEN`，系统会优先使用 `AGENT_RELEASE_GITHUB_TOKEN`。两个变量功能完全相同，提供两个变量名是为了避免与其他使用 `GITHUB_TOKEN` 的工具产生冲突。
+> - 配置 Token 后需要**重启服务或容器**才会生效。
+> - 请勿将真实 Token 提交到公开仓库，建议通过环境变量注入或 CI/CD Secrets 管理。
 
 ---
 
