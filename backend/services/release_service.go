@@ -353,7 +353,7 @@ func parsePlatformFromName(name string) (string, string) {
 	nameLower := strings.ToLower(name)
 	var osName, archName string
 
-	for _, candidate := range []string{"linux", "windows", "darwin", "mac", "freebsd"} {
+	for _, candidate := range []string{"linux", "windows", "darwin", "mac", "freebsd", "android"} {
 		if strings.Contains(nameLower, candidate) {
 			if candidate == "mac" {
 				osName = "darwin"
