@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/services"
+	"gorm.io/gorm"
 )
 
 const agentHelloDeadline = 5 * time.Second
@@ -25,11 +26,23 @@ type agentHandshakeMetadata struct {
 }
 
 type agentHello struct {
-	Type                     string `json:"type"`
-	Version                  string `json:"version"`
-	AgentType                string `json:"agent_type"`
-	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
-	UpgradeRequestID         string `json:"upgrade_request_id"`
+	Type                     string                  `json:"type"`
+	Version                  string                  `json:"version"`
+	AgentType                string                  `json:"agent_type"`
+	HeartbeatIntervalSeconds int                     `json:"heartbeat_interval_seconds"`
+	UpgradeReport            *AgentUpgradeBootReport `json:"upgrade_report,omitempty"`
+}
+
+type AgentUpgradeBootReport struct {
+	RequestID string `json:"request_id"`
+	Outcome   string `json:"outcome"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+type agentUpgradeAck struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Confirmed bool   `json:"confirmed"`
 }
 
 func AgentWebSocketHandler(c *gin.Context) {
@@ -61,7 +74,8 @@ func AgentWebSocketHandler(c *gin.Context) {
 		_ = conn.Close()
 		return
 	}
-	if err := persistAgentHello(server, hello, time.Now()); err != nil {
+	ack, err := persistAgentHello(server, hello, time.Now())
+	if err != nil {
 		_ = conn.WriteControl(
 			websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "agent handshake persistence failed"),
@@ -69,6 +83,12 @@ func AgentWebSocketHandler(c *gin.Context) {
 		)
 		_ = conn.Close()
 		return
+	}
+	if ack != nil {
+		if err := conn.WriteJSON(ack); err != nil {
+			_ = conn.Close()
+			return
+		}
 	}
 
 	heartbeat := time.Duration(hello.HeartbeatIntervalSeconds) * time.Second
@@ -186,25 +206,71 @@ func readAndValidateAgentHello(conn *websocket.Conn, expected agentHandshakeMeta
 	return hello, valid
 }
 
-func persistAgentHello(server *models.Server, hello agentHello, now time.Time) error {
-	updates := map[string]interface{}{
-		"agent_version":           hello.Version,
-		"agent_type":              strings.ToLower(strings.TrimSpace(hello.AgentType)),
-		"agent_heartbeat_seconds": hello.HeartbeatIntervalSeconds,
-		"last_heartbeat":          now,
-		"online":                  true,
-		"status":                  "online",
-	}
-	if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
-		return err
+func persistAgentHello(server *models.Server, hello agentHello, now time.Time) (*agentUpgradeAck, error) {
+	helloType := strings.ToLower(strings.TrimSpace(hello.AgentType))
+	var ack *agentUpgradeAck
+	syncDesired := false
+	err := models.DB.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{
+			"agent_version":           hello.Version,
+			"agent_type":              helloType,
+			"agent_heartbeat_seconds": hello.HeartbeatIntervalSeconds,
+			"last_heartbeat":          now,
+			"online":                  true,
+			"status":                  "online",
+		}
+		if err := tx.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+
+		if hello.UpgradeReport != nil {
+			result, err := services.ReconcileAgentUpgradeBoot(tx, services.AgentUpgradeBootInput{
+				ServerID:  server.ID,
+				RequestID: hello.UpgradeReport.RequestID,
+				Version:   hello.Version,
+				AgentType: helloType,
+				Outcome:   hello.UpgradeReport.Outcome,
+				ErrorCode: hello.UpgradeReport.ErrorCode,
+				At:        now,
+			})
+			if err != nil {
+				return err
+			}
+			ack = &agentUpgradeAck{
+				Type:      "agent_upgrade_ack",
+				RequestID: strings.TrimSpace(hello.UpgradeReport.RequestID),
+				Confirmed: result.Confirmed,
+			}
+		}
+
+		var activeJobs int64
+		if err := tx.Model(&models.AgentUpgradeJob{}).
+			Where("server_id = ? AND active_key IS NOT NULL", server.ID).
+			Count(&activeJobs).Error; err != nil {
+			return err
+		}
+		if activeJobs == 0 {
+			if err := tx.Model(&models.Server{}).Where("id = ?", server.ID).
+				Update("desired_agent_type", helloType).Error; err != nil {
+				return err
+			}
+			syncDesired = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	server.AgentVersion = hello.Version
-	server.AgentType = strings.ToLower(strings.TrimSpace(hello.AgentType))
+	server.AgentType = helloType
+	if syncDesired {
+		server.DesiredAgentType = helloType
+	}
 	server.AgentHeartbeatSeconds = hello.HeartbeatIntervalSeconds
 	server.LastHeartbeat = now
 	server.Online = true
 	server.Status = "online"
-	return nil
+	return ack, nil
 }
 
 func loadWebSocketServer(c *gin.Context) (*models.Server, bool) {

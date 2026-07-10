@@ -85,7 +85,6 @@ func SetupRoutes(r *gin.Engine) {
 			auth.GET("/servers/:id", controllers.GetServer)
 			auth.POST("/servers", controllers.CreateServer)
 			auth.PUT("/servers/:id/update", controllers.UpdateServer)
-			auth.POST("/servers/:id/switch-agent-type", controllers.SwitchAgentType)
 			auth.DELETE("/servers/:id", controllers.DeleteServer)
 			auth.PUT("/servers/reorder", controllers.ReorderServers)
 
@@ -107,7 +106,9 @@ func SetupRoutes(r *gin.Engine) {
 
 			// Agent升级管理
 			auth.GET("/agents/releases/latest", controllers.GetLatestAgentRelease)
-			auth.POST("/servers/upgrade", controllers.ForceAgentUpgrade)
+			auth.POST("/agent-upgrades", controllers.CreateAgentUpgrades)
+			auth.GET("/agent-upgrades", controllers.ListAgentUpgradeJobs)
+			auth.GET("/agent-upgrades/:id", controllers.GetAgentUpgradeJob)
 
 			// ===== 操作类路由（受 MonitorOnlyGuard 保护） =====
 			// 监控模式服务器访问以下路由时返回 403 Forbidden

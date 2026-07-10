@@ -4,7 +4,6 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/models"
-	"github.com/user/server-ops-backend/services"
 	"github.com/user/server-ops-backend/utils"
 )
 
@@ -282,112 +280,6 @@ func UpdateServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "服务器更新成功",
 		"server":  server,
-	})
-}
-
-// SwitchAgentType 切换服务器的 Agent 类型（full ↔ monitor）
-// 更新数据库后，若 Agent 在线则下发带 target_agent_type 的升级指令，触发 Agent 自动下载对应变体二进制
-func SwitchAgentType(c *gin.Context) {
-	id, err := parseUintParam(c, "id")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
-		return
-	}
-
-	var req struct {
-		TargetAgentType string `json:"target_agent_type" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误，需要 target_agent_type 字段"})
-		return
-	}
-
-	targetType := strings.ToLower(strings.TrimSpace(req.TargetAgentType))
-	if targetType != "full" && targetType != "monitor" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_agent_type 仅支持 full 或 monitor"})
-		return
-	}
-
-	server, err := models.GetServerByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
-		return
-	}
-
-	currentType := strings.ToLower(strings.TrimSpace(server.AgentType))
-	if currentType == targetType {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("当前已是 %s 类型，无需切换", targetType)})
-		return
-	}
-
-	// 更新数据库中的 agent_type
-	if err := models.DB.Model(&models.Server{}).Where("id = ?", id).Update("agent_type", targetType).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新 Agent 类型失败"})
-		return
-	}
-
-	// 检查 Agent 是否在线
-	conn, ok := ActiveAgentConnections.Current(server.ID)
-	if !ok || !isServerOnline(server) {
-		c.JSON(http.StatusOK, gin.H{
-			"message":            "Agent 离线，类型已更新，Agent 上线后需手动重装对应变体",
-			"target_agent_type":  targetType,
-			"upgrade_dispatched": false,
-		})
-		return
-	}
-
-	if conn == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"message":            "Agent 连接异常，类型已更新，请稍后手动触发升级",
-			"target_agent_type":  targetType,
-			"upgrade_dispatched": false,
-		})
-		return
-	}
-
-	// 获取最新版本号和发行版信息，用于构建含 download_url/sha256 的升级 payload
-	settings, _ := models.GetSettings()
-	var releaseInfo *services.AgentReleaseInfo
-	targetVersion := ""
-	if settings != nil {
-		if ri, err := services.FetchLatestAgentRelease(settings); err == nil && ri != nil {
-			releaseInfo = ri
-			targetVersion = ri.Version
-		}
-	}
-	if targetVersion == "" {
-		// 无法获取最新版本时，使用 Agent 当前版本号（触发同版本的变体切换）
-		targetVersion = server.AgentVersion
-	}
-
-	upgradeChannel := "stable"
-	if settings != nil && settings.AgentReleaseChannel != "" {
-		upgradeChannel = settings.AgentReleaseChannel
-	}
-
-	// 向 Agent 下发带 target_agent_type 的升级指令
-	requestID := fmt.Sprintf("switch-type-%d-%d", server.ID, time.Now().UnixNano())
-	payload := services.BuildUpgradePayload(server, targetVersion, upgradeChannel, releaseInfo, targetType)
-	command := map[string]interface{}{
-		"type":       "agent_upgrade",
-		"request_id": requestID,
-		"payload":    payload,
-	}
-
-	if err := agentUpgradeSender(conn, command); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"message":            "类型已更新，但升级指令下发失败，请稍后手动触发升级",
-			"target_agent_type":  targetType,
-			"upgrade_dispatched": false,
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":            fmt.Sprintf("Agent 类型切换成功，正在从 %s 切换到 %s", currentType, targetType),
-		"target_agent_type":  targetType,
-		"upgrade_dispatched": true,
 	})
 }
 

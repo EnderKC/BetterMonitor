@@ -21,6 +21,7 @@ jobs:
     outputs:
       dashboard_version: ${{ steps.current.outputs.DASHBOARD_VERSION }}
       agent_version: ${{ steps.current.outputs.AGENT_VERSION }}
+      agent_prerelease: ${{ steps.current.outputs.AGENT_PRERELEASE }}
       dashboard_changed: ${{ steps.changed.outputs.DASHBOARD_CHANGED }}
       agent_changed: ${{ steps.changed.outputs.AGENT_CHANGED }}
     steps:
@@ -56,8 +57,11 @@ jobs:
             exit 1
           fi
 
+          AGENT_PRERELEASE="$(bash .github/scripts/validate-agent-version.sh "${AGENT_VERSION}")"
+
           echo "DASHBOARD_VERSION=${DASHBOARD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "AGENT_VERSION=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "AGENT_PRERELEASE=${AGENT_PRERELEASE}" >> "$GITHUB_OUTPUT"
 
       - name: Detect version changes vs previous commit
         id: changed
@@ -86,15 +90,6 @@ jobs:
 
           PREV_DASHBOARD="$(extract_from_text "${PREV_ENV}" DASHBOARD_VERSION)"
           PREV_AGENT="$(extract_from_text "${PREV_ENV}" AGENT_VERSION)"
-          PREV_LEGACY_VERSION="$(extract_from_text "${PREV_ENV}" VERSION)"
-
-          # 兼容旧版（只有 VERSION=... 的场景）：把旧的 VERSION 视为 Dashboard/Agent 共用版本
-          if [ -z "${PREV_DASHBOARD}" ]; then
-            PREV_DASHBOARD="${PREV_LEGACY_VERSION}"
-          fi
-          if [ -z "${PREV_AGENT}" ]; then
-            PREV_AGENT="${PREV_LEGACY_VERSION}"
-          fi
 
           DASHBOARD_CHANGED="false"
           AGENT_CHANGED="false"
@@ -421,7 +416,7 @@ jobs:
           tag_name: v${{ env.AGENT_VERSION }}
           name: Agent v${{ env.AGENT_VERSION }}
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.detect-versions.outputs.agent_prerelease == 'true' }}
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted, h } from 'vue';
-import { Card, Descriptions, Tag, Button, Space, Table, Spin, message, Modal, Select } from 'ant-design-vue';
-import { InfoCircleOutlined, SyncOutlined, DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
+import { Card, Descriptions, Tag, Button, Space, Table, Spin, message, Modal } from 'ant-design-vue';
+import { SyncOutlined, DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
 import {
   getDashboardVersion,
   getSystemInfo,
   getServersVersions,
   getLatestAgentRelease,
-  forceAgentUpgrade,
+  compareAgentVersions,
   type VersionInfo,
   type SystemInfo,
   type ServerVersion,
-  type AgentReleaseInfo
+  type AgentReleaseInfo,
+  type AgentUpgradeJob,
 } from '../utils/version';
+import { useAgentUpgradeJobs } from '../composables/useAgentUpgradeJobs';
 import moment from 'moment';
 
 // 组件数据
@@ -55,6 +57,15 @@ const columns = [
     title: 'Agent版本',
     dataIndex: 'agentVersion',
     key: 'agentVersion',
+  },
+  {
+    title: '当前类型',
+    dataIndex: 'agentType',
+    key: 'agentType',
+  },
+  {
+    title: '升级任务',
+    key: 'upgradeJob',
   },
   {
     title: '状态',
@@ -103,35 +114,6 @@ const getVersionColor = (version?: string) => {
   return 'blue';
 };
 
-// 比较版本号（改进版本）
-const compareVersions = (v1?: string, v2?: string) => {
-  if (!v1 || !v2) return 0;
-  if (v1 === v2) return 0;
-
-  // 特殊版本处理
-  if (v1 === 'dev' && v2 !== 'dev') return -1; // dev版本总是需要更新
-  if (v1 !== 'dev' && v2 === 'dev') return 1;
-  if (v1 === 'dev' && v2 === 'dev') return 0;
-
-  // 未知版本处理
-  if (v1 === 'unknown' && v2 !== 'unknown') return -1;
-  if (v1 !== 'unknown' && v2 === 'unknown') return 1;
-  if (v1 === 'unknown' && v2 === 'unknown') return 0;
-
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
-
-  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-    const part1 = parts1[i] || 0;
-    const part2 = parts2[i] || 0;
-
-    if (part1 < part2) return -1;
-    if (part1 > part2) return 1;
-  }
-
-  return 0;
-};
-
 // 最新Agent版本信息
 const latestAgentVersion = ref<string>('');
 
@@ -140,10 +122,10 @@ const needsUpdate = (serverVersion?: string) => {
   if (!serverVersion) return false;
 
   // 如果有最新Agent版本，使用它作为目标版本
-  const targetVersion = latestAgentVersion.value || dashboardVersion.value?.version;
+  const targetVersion = latestAgentVersion.value;
   if (!targetVersion) return false;
 
-  return compareVersions(serverVersion, targetVersion) < 0;
+  return compareAgentVersions(serverVersion, targetVersion) < 0;
 };
 
 // 获取所有版本信息
@@ -175,6 +157,34 @@ const fetchVersions = async () => {
   }
 };
 
+const upgradeJobs = useAgentUpgradeJobs({
+  onTerminal: async (job) => {
+    await fetchVersions();
+    if (job.status === 'succeeded') {
+      message.success(`服务器 ${job.server_id} 的 Agent 升级已由重连确认`);
+      return;
+    }
+    message.error(`服务器 ${job.server_id} 升级失败：${job.error_code || job.status}`);
+  },
+});
+
+const getUpgradeJob = (serverId: number) => upgradeJobs.statusForServer(serverId);
+
+const upgradeStatusMeta = (status: AgentUpgradeJob['status']) => {
+  switch (status) {
+    case 'queued': return { color: 'default', text: '排队中' };
+    case 'dispatched': return { color: 'blue', text: '已下发' };
+    case 'received': return { color: 'cyan', text: '已接收' };
+    case 'downloading': return { color: 'processing', text: '下载中' };
+    case 'verifying': return { color: 'processing', text: '校验中' };
+    case 'applying': return { color: 'orange', text: '替换中' };
+    case 'restarting': return { color: 'orange', text: '重启确认中' };
+    case 'succeeded': return { color: 'success', text: '已成功' };
+    case 'failed': return { color: 'error', text: '失败' };
+    case 'timed_out': return { color: 'error', text: '已超时' };
+  }
+};
+
 // 显示OTA更新确认对话框
 const showUpdateModal = (serverId: number) => {
   selectedServerId.value = serverId;
@@ -187,20 +197,20 @@ const performUpgrade = async () => {
 
   updating.value = true;
   try {
-    const result = await forceAgentUpgrade({
-      serverIds: [selectedServerId.value],
-      targetVersion: latestAgentVersion.value || dashboardVersion.value?.version || undefined
+    const result = await upgradeJobs.submit({
+      server_ids: [selectedServerId.value],
+      target_version: latestAgentVersion.value || undefined,
+      channel: releaseInfo.value?.channel || 'stable',
     });
 
-    if (result.success) {
-      message.success(result.message || '升级请求已发送');
+    if (result.jobs.length > 0) {
+      message.success('升级任务已创建，等待 Agent 重连确认');
       updateModalVisible.value = false;
-      // 延迟刷新版本信息，给agent时间更新
-      setTimeout(() => {
-        fetchVersions();
-      }, 3000);
+    } else if (result.noop.length > 0) {
+      message.info('当前版本和类型已经是目标状态');
+      updateModalVisible.value = false;
     } else {
-      message.error(`升级失败: ${result.message}`);
+      message.error(result.rejected[0]?.code || '升级任务创建失败');
     }
   } catch (error) {
     console.error('升级失败:', error);
@@ -236,20 +246,20 @@ const performUpdateAll = async () => {
   updatingAll.value = true;
   try {
     const serverIds = serversToUpdate.value.map(s => s.id);
-    const result = await forceAgentUpgrade({
-      serverIds: serverIds,
-      targetVersion: latestAgentVersion.value || dashboardVersion.value?.version || undefined
+    const result = await upgradeJobs.submit({
+      server_ids: serverIds,
+      target_version: latestAgentVersion.value || undefined,
+      channel: releaseInfo.value?.channel || 'stable',
     });
 
-    if (result.success) {
-      message.success(result.message || `已向 ${result.result.success.length} 台服务器发送升级指令`);
+    if (result.jobs.length > 0) {
+      message.success(`已创建 ${result.jobs.length} 个逐机升级任务`);
       updateAllModalVisible.value = false;
-      // 延迟刷新版本信息
-      setTimeout(() => {
-        fetchVersions();
-      }, 3000);
+    } else if (result.noop.length > 0) {
+      message.info('所选服务器均已处于目标版本和类型');
+      updateAllModalVisible.value = false;
     } else {
-      message.error(`批量升级失败: ${result.message}`);
+      message.error(result.rejected[0]?.code || '批量升级任务创建失败');
     }
   } catch (error) {
     console.error('批量升级失败:', error);
@@ -270,8 +280,9 @@ const getSelectedServer = () => {
 };
 
 // 组件挂载时获取版本信息
-onMounted(() => {
-  fetchVersions();
+onMounted(async () => {
+  await fetchVersions();
+  await upgradeJobs.loadActive(serversVersions.value.map((server) => server.id));
 });
 </script>
 
@@ -351,6 +362,29 @@ onMounted(() => {
                   </Tag>
                 </Space>
               </template>
+              <template v-else-if="column.key === 'agentType'">
+                <Tag>{{ record.agentType || 'full' }}</Tag>
+              </template>
+              <template v-else-if="column.key === 'upgradeJob'">
+                <template v-if="getUpgradeJob(record.id)">
+                  <Space direction="vertical" size="small">
+                    <Tag :color="upgradeStatusMeta(getUpgradeJob(record.id)!.status).color">
+                      {{ upgradeStatusMeta(getUpgradeJob(record.id)!.status).text }}
+                    </Tag>
+                    <span>
+                      目标 {{ getUpgradeJob(record.id)!.target_agent_type }} /
+                      {{ getUpgradeJob(record.id)!.target_version }}
+                    </span>
+                    <span v-if="getUpgradeJob(record.id)!.error_code" class="upgrade-error">
+                      {{ getUpgradeJob(record.id)!.error_code }}
+                      <template v-if="getUpgradeJob(record.id)!.last_message">
+                        · {{ getUpgradeJob(record.id)!.last_message }}
+                      </template>
+                    </span>
+                  </Space>
+                </template>
+                <span v-else>-</span>
+              </template>
               <template v-else-if="column.key === 'status'">
                 <Tag :color="getStatusTag(record.status).color">
                   {{ getStatusTag(record.status).text }}
@@ -413,7 +447,7 @@ onMounted(() => {
       <p>确定要更新服务器 <strong>{{ getSelectedServer()?.name }}</strong> 的Agent吗？</p>
       <p>当前版本：<Tag>{{ getSelectedServer()?.agentVersion || '未知' }}</Tag>
       </p>
-      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
+      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || '由后端解析' }}</Tag>
       </p>
       <p class="warning-text">
         <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
@@ -432,7 +466,7 @@ onMounted(() => {
           </Space>
         </div>
       </div>
-      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || dashboardVersion?.version || '最新' }}</Tag>
+      <p>目标版本：<Tag color="blue">{{ latestAgentVersion || '由后端解析' }}</Tag>
       </p>
       <p class="warning-text">
         <ExclamationCircleOutlined /> 更新过程中Agent服务会短暂中断，请确保服务器状态正常。
@@ -483,6 +517,10 @@ code {
   background: var(--alpha-black-03);
   padding: 10px;
   border-radius: var(--radius-xs);
+}
+
+.upgrade-error {
+  color: var(--error-color);
 }
 </style>
 

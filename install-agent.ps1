@@ -1,365 +1,323 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)][string]$ServerUrl,
-  [Parameter(Mandatory = $true)][int]$ServerId,
-  [Parameter(Mandatory = $true)][string]$SecretKey,
-
+  [string]$ServerUrl = "",
+  [int]$ServerId = 0,
+  [string]$SecretKey = "",
   [string]$Repo = "EnderKC/BetterMonitor",
-  [string]$Version = "latest",
-  [string]$Channel = "stable",
-  [string]$LogLevel = "info",
-
-  [string]$ServiceName = "BetterMonitorAgent",
-  [string]$AssetName = "",
-  [string]$DownloadUrl = "",
-  [string]$Sha256 = "",
-  [switch]$SkipVerify,
-
+  [string]$Version = "",
+  [ValidateSet("stable", "prerelease", "nightly")][string]$Channel = "stable",
+  [ValidateSet("full", "monitor")][string]$AgentType = "full",
+  [ValidateSet("debug", "info", "warn", "error")][string]$LogLevel = "info",
   [string]$InstallDir = "",
-  [switch]$UseScheduledTask,
-  [string]$GitHubToken = ""
+  [string]$GitHubToken = "",
+  [string]$ContractTestFixture = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ServiceName = "BetterMonitorAgent"
 
 function Write-Info([string]$Message) { Write-Host "[install] $Message" }
-function Write-Warn([string]$Message) { Write-Warning $Message }
 function Fail([string]$Message) { throw $Message }
 
-function Is-Admin {
-  $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
-  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Get-Arch {
-  $arch = $env:PROCESSOR_ARCHITECTURE
-  switch ($arch) {
-    "AMD64" { return "amd64" }
-    "ARM64" { return "arm64" }
-    "x86"   { return "386" }
-    default { return "amd64" }
+function ConvertTo-StrictSemVer([string]$Raw) {
+  $match = [regex]::Match(
+    $Raw.Trim(),
+    '^(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+  )
+  if (-not $match.Success) { return $null }
+  $pre = @()
+  if ($match.Groups[4].Success) { $pre = @($match.Groups[4].Value -split '\.') }
+  foreach ($identifier in $pre) {
+    if ($identifier -match '^[0-9]+$' -and $identifier.Length -gt 1 -and $identifier.StartsWith('0')) {
+      return $null
+    }
+  }
+  return [pscustomobject]@{
+    Major = [uint64]$match.Groups[1].Value
+    Minor = [uint64]$match.Groups[2].Value
+    Patch = [uint64]$match.Groups[3].Value
+    Pre = $pre
+    Text = $Raw.Trim().TrimStart('v')
   }
 }
 
-function Normalize-Tag([string]$v) {
-  $v = $v.Trim()
-  if ($v -eq "" -or $v -eq "latest") { return "latest" }
-  if ($v.StartsWith("v")) { return $v }
-  return "v$($v)"
+function Compare-StrictSemVer([object]$Left, [object]$Right) {
+  foreach ($field in @('Major', 'Minor', 'Patch')) {
+    if ($Left.$field -gt $Right.$field) { return 1 }
+    if ($Left.$field -lt $Right.$field) { return -1 }
+  }
+  if ($Left.Pre.Count -eq 0 -and $Right.Pre.Count -eq 0) { return 0 }
+  if ($Left.Pre.Count -eq 0) { return 1 }
+  if ($Right.Pre.Count -eq 0) { return -1 }
+  $limit = [Math]::Min($Left.Pre.Count, $Right.Pre.Count)
+  for ($index = 0; $index -lt $limit; $index++) {
+    $leftId = $Left.Pre[$index]
+    $rightId = $Right.Pre[$index]
+    if ($leftId -eq $rightId) { continue }
+    $leftNumeric = $leftId -match '^[0-9]+$'
+    $rightNumeric = $rightId -match '^[0-9]+$'
+    if ($leftNumeric -and $rightNumeric) {
+      if ([uint64]$leftId -gt [uint64]$rightId) { return 1 }
+      return -1
+    }
+    if ($leftNumeric -ne $rightNumeric) {
+      if ($leftNumeric) { return -1 }
+      return 1
+    }
+    $comparison = [string]::CompareOrdinal($leftId, $rightId)
+    if ($comparison -gt 0) { return 1 }
+    return -1
+  }
+  if ($Left.Pre.Count -gt $Right.Pre.Count) { return 1 }
+  if ($Left.Pre.Count -lt $Right.Pre.Count) { return -1 }
+  return 0
+}
+
+function Get-StrictReleaseChannel([object]$Release, [object]$ParsedVersion) {
+  $nightly = $false
+  foreach ($identifier in $ParsedVersion.Pre) {
+    if ($identifier.ToLowerInvariant().Contains('nightly')) { $nightly = $true }
+  }
+  if ($ParsedVersion.Pre.Count -eq 0 -and -not [bool]$Release.prerelease) { return 'stable' }
+  if ($ParsedVersion.Pre.Count -gt 0 -and [bool]$Release.prerelease -and $nightly) { return 'nightly' }
+  if ($ParsedVersion.Pre.Count -gt 0 -and [bool]$Release.prerelease -and -not $nightly) { return 'prerelease' }
+  return 'invalid'
+}
+
+function Get-NormalizedArch([string]$Arch) {
+  switch ($Arch.ToLowerInvariant()) {
+    { $_ -in @('amd64', 'x86_64') } { return 'amd64' }
+    { $_ -in @('arm64', 'aarch64') } { return 'arm64' }
+    { $_ -in @('386', 'i386', 'i686', 'x86') } { return '386' }
+    default { return $Arch.ToLowerInvariant() }
+  }
+}
+
+function Get-CanonicalAgentAssetName([string]$VersionText, [string]$OS, [string]$Arch, [string]$Type) {
+  $base = 'better-monitor-agent'
+  if ($Type -eq 'monitor') { $base = 'better-monitor-agent-monitor' }
+  $name = "$base-$VersionText-$OS-$Arch"
+  if ($OS -eq 'windows') { $name += '.exe' }
+  return $name
+}
+
+function Find-ExactAsset([object]$Release, [string]$Name) {
+  foreach ($asset in @($Release.assets)) {
+    if ($asset.name -eq $Name) { return $asset }
+  }
+  return $null
+}
+
+function Resolve-AgentReleaseContract(
+  [object[]]$Releases,
+  [string]$RequestedChannel,
+  [string]$TargetVersion,
+  [string]$OS,
+  [string]$Arch,
+  [string]$Type
+) {
+  $entries = @()
+  foreach ($release in $Releases) {
+    if ([bool]$release.draft) { continue }
+    $parsed = ConvertTo-StrictSemVer $release.tag_name.ToString()
+    if ($null -eq $parsed) { continue }
+    $entries += [pscustomobject]@{
+      Release = $release
+      Version = $parsed
+      Channel = Get-StrictReleaseChannel -Release $release -ParsedVersion $parsed
+    }
+  }
+
+  $selected = $null
+  if ($TargetVersion.Trim() -ne '') {
+    $target = ConvertTo-StrictSemVer $TargetVersion
+    if ($null -eq $target) { Fail 'release_version_invalid' }
+    foreach ($entry in $entries) {
+      if ($entry.Version.Text -eq $target.Text) { $selected = $entry; break }
+    }
+    if ($null -eq $selected) { Fail 'release_not_found' }
+    if ($selected.Channel -ne $RequestedChannel) { Fail 'release_channel_mismatch' }
+  } else {
+    foreach ($entry in $entries) {
+      if ($entry.Channel -ne $RequestedChannel) { continue }
+      if ($null -eq $selected -or (Compare-StrictSemVer $entry.Version $selected.Version) -gt 0) {
+        $selected = $entry
+      }
+    }
+    if ($null -eq $selected) { Fail 'release_not_found' }
+  }
+
+  $normalizedArch = Get-NormalizedArch $Arch
+  $assetName = Get-CanonicalAgentAssetName $selected.Version.Text $OS $normalizedArch $Type
+  $asset = Find-ExactAsset $selected.Release $assetName
+  if ($null -eq $asset) { Fail 'release_asset_missing' }
+  $checksum = Find-ExactAsset $selected.Release 'SHA256SUMS'
+  if ($null -eq $checksum) { Fail 'release_checksum_missing' }
+  foreach ($item in @($asset, $checksum)) {
+    $uri = $null
+    if (-not [Uri]::TryCreate($item.browser_download_url.ToString(), [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') {
+      Fail 'release_asset_invalid'
+    }
+    if ([int64]$item.size -le 0) { Fail 'release_asset_invalid' }
+  }
+  return [pscustomobject]@{
+    Release = $selected.Release
+    Tag = $selected.Release.tag_name.ToString()
+    Version = $selected.Version.Text
+    AssetName = $assetName
+    Asset = $asset
+    ChecksumAsset = $checksum
+  }
+}
+
+function Invoke-ContractTest([string]$FixturePath) {
+  $fixture = Get-Content -Raw -Path $FixturePath | ConvertFrom-Json
+  foreach ($case in @($fixture.cases)) {
+    $errorProperty = $case.PSObject.Properties['expected_error']
+    $expectedError = if ($null -eq $errorProperty) { '' } else { $errorProperty.Value.ToString() }
+    try {
+      $resolved = Resolve-AgentReleaseContract `
+        -Releases @($fixture.releases) `
+        -RequestedChannel $case.channel.ToString() `
+        -TargetVersion $case.target_version.ToString() `
+        -OS $case.os.ToString() `
+        -Arch $case.arch.ToString() `
+        -Type $case.agent_type.ToString()
+      if ($expectedError -ne '') { Fail "contract case $($case.name) expected $expectedError" }
+      if ($resolved.Tag -ne $case.expected_tag.ToString()) { Fail "contract case $($case.name) tag mismatch" }
+      if ($resolved.AssetName -ne $case.expected_asset.ToString()) { Fail "contract case $($case.name) asset mismatch" }
+      $checksumProperty = $resolved.Release.checksums.PSObject.Properties[$resolved.AssetName]
+      $actualChecksum = if ($null -eq $checksumProperty) { '' } else { $checksumProperty.Value.ToString() }
+      if ($actualChecksum -ne $case.expected_sha256.ToString()) { Fail "contract case $($case.name) checksum mismatch" }
+    } catch {
+      if ($expectedError -eq '' -or $_.Exception.Message -ne $expectedError) { throw }
+    }
+  }
+  Write-Info 'Agent release contract fixture passed'
 }
 
 function Invoke-GitHubApi([string]$Uri) {
-  $headers = @{
-    "Accept" = "application/vnd.github+json"
-    "User-Agent" = "better-monitor-agent-installer"
-  }
-  if ($GitHubToken -ne "") {
-    $headers["Authorization"] = "Bearer $GitHubToken"
-  }
+  $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'better-monitor-agent-installer' }
+  if ($GitHubToken -ne '') { $headers.Authorization = "Bearer $GitHubToken" }
   return Invoke-RestMethod -Uri $Uri -Headers $headers -Method Get
 }
 
-function Resolve-Release([string]$repo, [string]$tag) {
-  if ($tag -eq "latest") {
-    return Invoke-GitHubApi -Uri "https://api.github.com/repos/$repo/releases/latest"
-  }
-  return Invoke-GitHubApi -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
+function Download-File([string]$Uri, [string]$Path) {
+  $headers = @{ 'User-Agent' = 'better-monitor-agent-installer' }
+  if ($GitHubToken -ne '') { $headers.Authorization = "Bearer $GitHubToken" }
+  Invoke-WebRequest -Uri $Uri -OutFile $Path -Headers $headers -UseBasicParsing
 }
 
-function Resolve-ReleaseByChannel([string]$repo, [string]$tag, [string]$channel) {
-  if ($null -eq $channel) { $channel = "" }
-  $channel = $channel.Trim().ToLowerInvariant()
-  if ($channel -eq "") { $channel = "stable" }
-
-  if ($tag -ne "latest") {
-    return Resolve-Release -repo $repo -tag $tag
-  }
-
-  if ($channel -eq "stable") {
-    return Resolve-Release -repo $repo -tag "latest"
-  }
-
-  $list = Invoke-GitHubApi -Uri "https://api.github.com/repos/$repo/releases?per_page=20"
-  foreach ($r in $list) {
-    if ($r.draft) { continue }
-    switch ($channel) {
-      "prerelease" {
-        if ($r.prerelease) { return $r }
-      }
-      "nightly" {
-        $tagName = ""
-        if ($null -ne $r.tag_name) { $tagName = $r.tag_name.ToString() }
-        $relName = ""
-        if ($null -ne $r.name) { $relName = $r.name.ToString() }
-        $hay = ($tagName + " " + $relName).ToLowerInvariant()
-        if ($hay.Contains("nightly")) { return $r }
-      }
-      default {
-        return $r
-      }
+function Get-ExpectedChecksum([string]$ChecksumPath, [string]$AssetName) {
+  foreach ($line in Get-Content -Path $ChecksumPath) {
+    if ($line -match '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<file>.+)$') {
+      $file = $Matches.file.Trim()
+      if ($file.StartsWith('./')) { $file = $file.Substring(2) }
+      if ($file -eq $AssetName) { return $Matches.hash.ToLowerInvariant() }
     }
   }
-
-  if ($list.Count -gt 0) { return $list[0] }
-  Fail "No releases found in repo: $repo"
+  Fail "SHA256SUMS missing entry for $AssetName"
 }
 
-function Resolve-DownloadUrl([object]$release, [string]$assetName) {
-  foreach ($a in $release.assets) {
-    if ($a.name -eq $assetName) { return $a.browser_download_url }
-  }
-  return ""
+function Test-IsAdmin {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Find-Asset([object]$release, [string]$assetName) {
-  foreach ($a in $release.assets) {
-    if ($a.name -eq $assetName) { return $a }
-  }
-  return $null
-}
-
-function Get-ReleaseVersion([object]$release) {
-  $tagName = ""
-  if ($null -ne $release.tag_name) { $tagName = $release.tag_name.ToString() }
-  if ($tagName.StartsWith("v")) { return $tagName.Substring(1) }
-  return $tagName
-}
-
-function Resolve-AgentAsset([object]$release, [string]$arch, [string]$assetName) {
-  if ($assetName -ne "") {
-    $a = Find-Asset -release $release -assetName $assetName
-    if ($null -eq $a) { Fail "Asset not found in release: $assetName" }
-    return $a
-  }
-
-  $ver = Get-ReleaseVersion -release $release
-  $candidates = New-Object System.Collections.Generic.List[string]
-  if ($ver -ne "") {
-    $candidates.Add("better-monitor-agent-$ver-windows-$arch.exe") | Out-Null
-    $candidates.Add("better-monitor-agent-$ver-windows-$arch.zip") | Out-Null
-  }
-  $candidates.Add("better-monitor-agent-windows-$arch.exe") | Out-Null
-  $candidates.Add("better-monitor-agent-windows-$arch.zip") | Out-Null
-
-  foreach ($n in $candidates) {
-    $a = Find-Asset -release $release -assetName $n
-    if ($null -ne $a) { return $a }
-  }
-
-  foreach ($a in $release.assets) {
-    $n = ""
-    if ($null -ne $a.name) { $n = $a.name.ToString() }
-    $n = $n.ToLowerInvariant()
-    if ($n.Contains("better-monitor-agent") -and $n.Contains("windows-$arch")) {
-      if ($n.EndsWith(".exe") -or $n.EndsWith(".zip")) { return $a }
+function Start-AgentScheduledTask([string]$TaskName) {
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
+    if ($task.State -eq 'Running') { return }
+    if ($taskInfo.LastTaskResult -ne 0 -and $taskInfo.LastTaskResult -ne 267009) {
+      Fail "Scheduled Task exited with result $($taskInfo.LastTaskResult)"
     }
+    Start-Sleep -Seconds 1
   }
-
-  Fail "No suitable Windows asset found in release (arch=$arch)."
+  Fail 'Scheduled Task did not enter Running state'
 }
 
-function Resolve-ChecksumAsset([object]$release, [string]$assetName) {
-  $candidates = @(
-    "$assetName.sha256",
-    "$assetName.sha256sum",
-    "$assetName.sha256.txt",
-    "$assetName.sha256sums",
-    "SHA256SUMS",
-    "sha256sums.txt",
-    "checksums.txt",
-    "sha256.txt"
-  )
-  foreach ($n in $candidates) {
-    $a = Find-Asset -release $release -assetName $n
-    if ($null -ne $a) { return $a }
-  }
-  return $null
+if ($ContractTestFixture -ne '') {
+  Invoke-ContractTest $ContractTestFixture
+  exit 0
 }
 
-function Parse-Sha256FromText([string]$text, [string]$assetName) {
-  foreach ($line in ($text -split "`r?`n")) {
-    $l = $line.Trim()
-    if ($l -eq "" -or $l.StartsWith("#")) { continue }
-
-    # formats:
-    #   <hash>  <file>
-    #   <hash> *<file>
-    #   <hash>
-    if ($l -match "^(?<hash>[0-9a-fA-F]{64})\\s+\\*?(?<file>.+)$") {
-      $file = $Matches["file"].Trim()
-      if ($file.StartsWith("./")) { $file = $file.Substring(2) }
-      if ($file -eq $assetName) { return $Matches["hash"] }
-    }
-    if ($l -match "^(?<hash>[0-9a-fA-F]{64})$") { return $Matches["hash"] }
-  }
-  return ""
+if ($ServerUrl.Trim() -eq '' -or $ServerId -le 0 -or $SecretKey.Trim() -eq '') {
+  Fail 'ServerUrl, ServerId and SecretKey are required'
+}
+if ($null -eq (ConvertTo-StrictSemVer $(if ($Version -eq '') { '0.0.0' } else { $Version }))) {
+  Fail 'Version must be strict SemVer when specified'
 }
 
-function Download-File([string]$Url, [string]$OutFile) {
-  Write-Info "Downloading: $Url"
-  $headers = @{ "User-Agent" = "better-monitor-agent-installer" }
-  if ($GitHubToken -ne "") {
-    $headers["Authorization"] = "Bearer $GitHubToken"
-  }
-  Invoke-WebRequest -Uri $Url -OutFile $OutFile -Headers $headers -UseBasicParsing
-}
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+$architecture = Get-NormalizedArch $env:PROCESSOR_ARCHITECTURE
+$releases = @(Invoke-GitHubApi "https://api.github.com/repos/$Repo/releases?per_page=100")
+$resolved = Resolve-AgentReleaseContract `
+  -Releases $releases `
+  -RequestedChannel $Channel `
+  -TargetVersion $Version `
+  -OS 'windows' `
+  -Arch $architecture `
+  -Type $AgentType
 
-function Ensure-Directory([string]$Path) {
-  if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null }
+if ($InstallDir -eq '') {
+  if (Test-IsAdmin) { $InstallDir = Join-Path $env:ProgramFiles 'BetterMonitor\Agent' }
+  else { $InstallDir = Join-Path $env:LOCALAPPDATA 'BetterMonitor\Agent' }
 }
+[System.IO.Directory]::CreateDirectory($InstallDir) | Out-Null
+$agentExe = Join-Path $InstallDir 'better-monitor-agent.exe'
+$backupExe = "$agentExe.old"
+$configPath = Join-Path $InstallDir 'agent.yaml'
+$downloadPath = Join-Path ([System.IO.Path]::GetTempPath()) ("bm-agent-" + [Guid]::NewGuid().ToString('n') + '.exe')
+$checksumPath = "$downloadPath-SHA256SUMS"
 
-function Write-EnvFile([string]$EnvPath) {
-  @"
-# Generated by install-agent.ps1
-SERVER_URL="$ServerUrl"
-PANEL_URL="$ServerUrl"
-SERVER_ID="$ServerId"
-SECRET_KEY="$SecretKey"
-CHANNEL="$Channel"
-"@ | Set-Content -Path $EnvPath -Encoding UTF8
-}
+Download-File $resolved.Asset.browser_download_url.ToString() $downloadPath
+Download-File $resolved.ChecksumAsset.browser_download_url.ToString() $checksumPath
+$expected = Get-ExpectedChecksum $checksumPath $resolved.AssetName
+$actual = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { Fail 'SHA256 verification failed' }
 
-function Write-AgentConfig([string]$ConfigPath, [string]$LogPath) {
-  $repo = $Repo
-  $channel = $Channel
-  $lvl = $LogLevel
-  @"
+$existingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction Ignore
+$hadExisting = Test-Path $agentExe
+if ($null -ne $existingTask) { Stop-ScheduledTask -TaskName $ServiceName -ErrorAction Stop }
+if ($hadExisting) { Copy-Item -Force $agentExe $backupExe -ErrorAction Stop }
+
+try {
+  Move-Item -Force $downloadPath $agentExe -ErrorAction Stop
+  $yaml = @"
 server_url: '$ServerUrl'
 server_id: $ServerId
 secret_key: '$SecretKey'
-register_token: ''
 heartbeat_interval: '10s'
 monitor_interval: '30s'
-log_level: '$lvl'
-log_file: '$LogPath'
-enable_cpu_monitor: true
-enable_mem_monitor: true
-enable_disk_monitor: true
-enable_network_monitor: true
-update_repo: '$repo'
-update_channel: '$channel'
-update_mirror: ''
-"@ | Set-Content -Path $ConfigPath -Encoding UTF8
-}
-
-function Install-ScheduledTask([string]$AgentExe, [string]$WorkDir) {
-  Write-Info "Installing scheduled task: $ServiceName"
-
-  $configPath = Join-Path $WorkDir "agent.yaml"
-  $args = "--config `"$configPath`""
-  $action = New-ScheduledTaskAction -Execute $AgentExe -Argument $args -WorkingDirectory $WorkDir
-
-  if (Is-Admin) {
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Start-ScheduledTask -TaskName $ServiceName
-    return
-  }
-
-  $trigger = New-ScheduledTaskTrigger -AtLogOn
+log_level: '$LogLevel'
+log_file: '$(Join-Path $InstallDir 'agent.log')'
+agent_type: '$AgentType'
+"@
+  [System.IO.File]::WriteAllText($configPath, $yaml, [System.Text.UTF8Encoding]::new($false))
+  $arguments = "--config `"$configPath`""
+  $action = New-ScheduledTaskAction -Execute $agentExe -Argument $arguments -WorkingDirectory $InstallDir
+  $trigger = if (Test-IsAdmin) { New-ScheduledTaskTrigger -AtStartup } else { New-ScheduledTaskTrigger -AtLogOn }
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
-  Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-  Start-ScheduledTask -TaskName $ServiceName
-}
-
-# TLS hardening for older Windows/PowerShell
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-
-$arch = Get-Arch
-$tag = Normalize-Tag $Version
-
-if ($InstallDir -eq "") {
-  if (Is-Admin) {
-    $InstallDir = Join-Path $env:ProgramFiles "BetterMonitor\Agent"
+  if (Test-IsAdmin) {
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
   } else {
-    $InstallDir = Join-Path $env:LOCALAPPDATA "BetterMonitor\Agent"
+    Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
   }
-}
-
-$workDir = $InstallDir
-$agentExe = Join-Path $InstallDir "better-monitor-agent.exe"
-$envFile = Join-Path $InstallDir "agent.env"
-$configFile = Join-Path $InstallDir "agent.yaml"
-$logFilePath = Join-Path $InstallDir "agent.log"
-
-Ensure-Directory $InstallDir
-
-$downloadUrl = $DownloadUrl
-$release = $null
-
-if ($downloadUrl -eq "") {
-  $release = Resolve-ReleaseByChannel -repo $Repo -tag $tag -channel $Channel
-  $asset = Resolve-AgentAsset -release $release -arch $arch -assetName $AssetName
-  $AssetName = $asset.name
-  $downloadUrl = $asset.browser_download_url
-}
-
-$tmpPath = Join-Path ([System.IO.Path]::GetTempPath()) ("bm-agent-" + [Guid]::NewGuid().ToString("n"))
-$tmpDownload = $tmpPath + "-" + $AssetName
-Download-File -Url $downloadUrl -OutFile $tmpDownload
-
-# Extract if zip
-$tmpExe = $tmpDownload
-if ($tmpDownload.ToLowerInvariant().EndsWith(".zip")) {
-  $extractDir = $tmpPath + "-extract"
-  Ensure-Directory $extractDir
-  Expand-Archive -Path $tmpDownload -DestinationPath $extractDir -Force
-  $exe = Get-ChildItem -Path $extractDir -Recurse -File | Where-Object { $_.Name.ToLowerInvariant().EndsWith(".exe") } | Select-Object -First 1
-  if ($null -eq $exe) { Fail "No .exe found in archive: $AssetName" }
-  $tmpExe = $exe.FullName
-}
-
-if (-not $SkipVerify) {
-  $expected = $Sha256.Trim()
-  if ($expected -eq "") {
-    if ($null -ne $release -and $AssetName -ne "") {
-      $checksumAsset = Resolve-ChecksumAsset -release $release -assetName $AssetName
-      if ($null -ne $checksumAsset) {
-        $tmpChecksum = $tmpPath + "-" + $checksumAsset.name
-        Download-File -Url $checksumAsset.browser_download_url -OutFile $tmpChecksum
-        $text = Get-Content -Raw -Path $tmpChecksum
-        $expected = Parse-Sha256FromText -text $text -assetName $AssetName
-      }
-    }
+  Start-AgentScheduledTask -TaskName $ServiceName
+} catch {
+  if ($hadExisting -and (Test-Path $backupExe)) {
+    Copy-Item -Force $backupExe $agentExe -ErrorAction Stop
+    if ($null -ne $existingTask) { Start-AgentScheduledTask -TaskName $ServiceName }
   }
-
-  if ($expected -ne "") {
-    $actual = (Get-FileHash -Path $tmpExe -Algorithm SHA256).Hash
-    if ($actual.ToLowerInvariant() -ne $expected.Trim().ToLowerInvariant()) {
-      Fail "SHA256 mismatch: expected=$expected actual=$actual"
-    }
-    Write-Info "SHA256 verified"
-  } else {
-    Write-Warn "No SHA256 provided/found; skipping verification (use -Sha256 <hash> or ensure release has SHA256SUMS)"
-  }
+  throw
+} finally {
+  Remove-Item -Force $checksumPath -ErrorAction Ignore
+  Remove-Item -Force $downloadPath -ErrorAction Ignore
 }
 
-Move-Item -Force $tmpExe $agentExe
-
-Write-EnvFile -EnvPath $envFile
-Write-AgentConfig -ConfigPath $configFile -LogPath $logFilePath
-
-Write-Info "Installed: $agentExe"
-Write-Info "Config: $envFile"
-Write-Info "Agent config: $configFile"
-
-if ($UseScheduledTask) {
-  Install-ScheduledTask -AgentExe $agentExe -WorkDir $workDir
-  Write-Info "Done (scheduled task)"
-  exit 0
-}
-
-if (-not (Is-Admin)) {
-  Write-Warn "Not running as Administrator; falling back to scheduled task."
-  Install-ScheduledTask -AgentExe $agentExe -WorkDir $workDir
-  Write-Info "Done (scheduled task)"
-  exit 0
-}
-
-Write-Warn "NSSM service installation not implemented. Using scheduled task."
-Install-ScheduledTask -AgentExe $agentExe -WorkDir $workDir
-Write-Info "Done (scheduled task)"
+Write-Info "Installed $($resolved.AssetName)"

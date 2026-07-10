@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +21,43 @@ import (
 	"github.com/user/server-ops-agent/pkg/version"
 )
 
+type selfTestResult struct {
+	Version   string `json:"version"`
+	AgentType string `json:"agent_type"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+func buildSelfTestResult() selfTestResult {
+	return selfTestResult{
+		Version:   strings.TrimSpace(version.Version),
+		AgentType: strings.ToLower(strings.TrimSpace(version.AgentType)),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	}
+}
+
+func maybeRunSelfTest(args []string, output io.Writer) (bool, error) {
+	for _, arg := range args {
+		if arg != "--self-test" {
+			continue
+		}
+		if output == nil {
+			return true, fmt.Errorf("self-test output is required")
+		}
+		return true, json.NewEncoder(output).Encode(buildSelfTestResult())
+	}
+	return false, nil
+}
+
 func main() {
+	if handled, err := maybeRunSelfTest(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		return
+	}
+
 	// 定义命令行参数
 	var (
 		showVersion bool

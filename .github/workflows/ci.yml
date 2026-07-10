@@ -78,4 +78,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check shell syntax
-        run: bash -n install-agent.sh uninstall-agent.sh install-dashboard.sh
+        run: bash -n install-agent.sh uninstall-agent.sh install-dashboard.sh tests/install-agent-contract.sh tests/release-version-contract.sh .github/scripts/validate-agent-version.sh
+      - name: Verify installer release contract
+        run: bash tests/install-agent-contract.sh
+      - name: Verify release workflow version contract
+        run: bash tests/release-version-contract.sh
+
+  windows-scripts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+      - name: Verify PowerShell installer contract
+        shell: pwsh
+        run: ./tests/install-agent-contract.ps1
+      - name: Test Windows updater contract
+        shell: pwsh
+        working-directory: agent
+        run: go test ./internal/upgrader -run 'TestWindowsUpdaterScript' -count=1
+      - name: Compile Windows Agent packages
+        shell: pwsh
+        working-directory: agent
+        run: go test ./...

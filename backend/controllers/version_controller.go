@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,13 +23,6 @@ func HealthCheck(c *gin.Context) {
 
 // 启动时间
 var startTime = time.Now()
-
-var agentUpgradeSender = func(conn *SafeConn, payload map[string]interface{}) error {
-	if conn == nil || conn.Conn == nil {
-		return fmt.Errorf("连接不存在")
-	}
-	return conn.WriteJSON(payload)
-}
 
 // GetDashboardVersion 获取Dashboard版本信息
 func GetDashboardVersion(c *gin.Context) {
@@ -101,6 +93,7 @@ func GetServerVersions(c *gin.Context) {
 			"name":          server.Name,
 			"host":          server.IP,
 			"agentVersion":  server.AgentVersion,
+			"agentType":     server.AgentType,
 			"status":        status,
 			"lastHeartbeat": server.LastHeartbeat,
 		})
@@ -128,6 +121,21 @@ func GetLatestAgentRelease(c *gin.Context) {
 		})
 		return
 	}
+	type safeReleaseAsset struct {
+		Name string `json:"name"`
+		OS   string `json:"os,omitempty"`
+		Arch string `json:"arch,omitempty"`
+		Size int64  `json:"size"`
+	}
+	assets := make([]safeReleaseAsset, 0, len(info.Assets))
+	for _, asset := range info.Assets {
+		assets = append(assets, safeReleaseAsset{
+			Name: asset.Name,
+			OS:   asset.OS,
+			Arch: asset.Arch,
+			Size: asset.Size,
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":      true,
@@ -135,104 +143,8 @@ func GetLatestAgentRelease(c *gin.Context) {
 		"name":         info.Name,
 		"notes":        info.Notes,
 		"publishedAt":  info.PublishedAt,
-		"assets":       info.Assets,
+		"assets":       assets,
 		"release_repo": settings.AgentReleaseRepo,
-	})
-}
-
-// ForceAgentUpgrade 强制升级多个Agent
-func ForceAgentUpgrade(c *gin.Context) {
-	var req struct {
-		ServerIDs     []uint64 `json:"serverIds" binding:"required"`
-		TargetVersion string   `json:"targetVersion"`
-		Channel       string   `json:"channel"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil || len(req.ServerIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "请求参数错误",
-		})
-		return
-	}
-
-	settings, err := models.GetSettings()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("获取系统设置失败: %v", err),
-		})
-		return
-	}
-
-	upgradeChannel := strings.TrimSpace(req.Channel)
-	if upgradeChannel == "" {
-		upgradeChannel = settings.AgentReleaseChannel
-	}
-
-	// 获取最新发行版信息（同时用于解析 targetVersion 和构建含 download_url/sha256 的 payload）
-	var releaseInfo *services.AgentReleaseInfo
-	if ri, err := services.FetchLatestAgentRelease(settings); err == nil && ri != nil {
-		releaseInfo = ri
-	}
-
-	targetVersion := strings.TrimSpace(req.TargetVersion)
-	if targetVersion == "" && releaseInfo != nil {
-		targetVersion = releaseInfo.Version
-	}
-	if targetVersion == "" {
-		targetVersion = version.GetVersion().Version
-	}
-
-	result := struct {
-		Success []uint64 `json:"success"`
-		Failure []uint64 `json:"failure"`
-		Offline []uint64 `json:"offline"`
-		Missing []uint64 `json:"missing"`
-	}{
-		Success: []uint64{},
-		Failure: []uint64{},
-		Offline: []uint64{},
-		Missing: []uint64{},
-	}
-
-	for _, id := range req.ServerIDs {
-		server, err := models.GetServerByID(uint(id))
-		if err != nil {
-			result.Missing = append(result.Missing, id)
-			continue
-		}
-		if !services.IsServerOnline(*server, time.Now()) {
-			result.Offline = append(result.Offline, id)
-			continue
-		}
-
-		conn, ok := ActiveAgentConnections.Current(server.ID)
-		if !ok {
-			result.Offline = append(result.Offline, id)
-			continue
-		}
-
-		requestID := fmt.Sprintf("upgrade-%d-%d", server.ID, time.Now().UnixNano())
-		payload := services.BuildUpgradePayload(server, targetVersion, upgradeChannel, releaseInfo, "")
-		command := map[string]interface{}{
-			"type":       "agent_upgrade",
-			"request_id": requestID,
-			"payload":    payload,
-		}
-
-		if err := agentUpgradeSender(conn, command); err != nil {
-			result.Failure = append(result.Failure, id)
-		} else {
-			result.Success = append(result.Success, id)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"message":       fmt.Sprintf("升级指令已触发，目标版本: %s", targetVersion),
-		"targetVersion": targetVersion,
-		"channel":       upgradeChannel,
-		"result":        result,
+		"channel":      info.Channel,
 	})
 }

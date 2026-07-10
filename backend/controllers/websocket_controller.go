@@ -104,6 +104,15 @@ const (
 	TypeSystemInfo      = "system_info"
 )
 
+type AgentUpgradeStatusMessage struct {
+	Type            string                    `json:"type"`
+	RequestID       string                    `json:"request_id"`
+	Status          models.AgentUpgradeStatus `json:"status"`
+	BytesDownloaded int64                     `json:"bytes_downloaded,omitempty"`
+	ErrorCode       string                    `json:"error_code,omitempty"`
+	Message         string                    `json:"message,omitempty"`
+}
+
 // WebSocket 请求超时常量
 const (
 	TimeoutSimpleQuery   = 30 * time.Second  // 简单查询操作（容器列表、进程列表等）
@@ -1158,28 +1167,6 @@ func handleWebSocket(
 				server.CPUModel = cpuModel
 			}
 
-			if agentVersion, ok := systemInfoData["agent_version"].(string); ok {
-				agentVersion = strings.TrimSpace(agentVersion)
-				if agentVersion != "" {
-					server.AgentVersion = agentVersion
-				}
-			}
-
-			if agentType, ok := systemInfoData["agent_type"].(string); ok {
-				agentType = strings.TrimSpace(agentType)
-				if agentType == "full" || agentType == "monitor" {
-					// 仅在数据库中 agent_type 为空时初始化，避免覆盖 SwitchAgentType 的设置。
-					// Agent 上报的是编译时类型，在类型切换期间（旧二进制尚未替换），
-					// 无条件覆盖会将用户刚切换的类型回写为旧值，产生竞态。
-					if server.AgentType == "" {
-						server.AgentType = agentType
-					} else if server.AgentType != agentType {
-						log.Printf("server=%d agent_type 不一致: db=%s, reported=%s (以数据库为准，跳过覆盖)",
-							server.ID, server.AgentType, agentType)
-					}
-				}
-			}
-
 			if memoryTotal, ok := systemInfoData["memory_total"].(float64); ok && memoryTotal > 0 {
 				server.MemoryTotal = int64(memoryTotal)
 			}
@@ -1201,15 +1188,12 @@ func handleWebSocket(
 				"arch":           server.Arch,
 				"cpu_cores":      server.CPUCores,
 				"cpu_model":      server.CPUModel,
-				"agent_version":  server.AgentVersion,
 				"memory_total":   server.MemoryTotal,
 				"disk_total":     server.DiskTotal,
 				"last_heartbeat": server.LastHeartbeat,
 				"online":         server.Online,
 				"status":         server.Status,
 			}
-			// agent_type 不在 system_info 路径中更新，完全由 SwitchAgentType 和创建时管理
-
 			if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
 				log.Printf("更新服务器信息失败: %v", err)
 			} else {
@@ -1528,53 +1512,38 @@ func handleWebSocket(
 					"data": fileResponse.Data,
 				})
 			}
-		case "agent_upgrade_response", "agent_upgrade_status":
-			// Agent 升级进度/结果回传，兼容两种消息格式：
-			//   旧路径 (client.go)  → type="agent_upgrade_response", 数据在 "data" 字段
-			//   新路径 (handler包)  → type="agent_upgrade_status",   数据在 "payload" 字段
+		case "agent_upgrade_status":
 			if !isAgent {
 				continue
 			}
 
-			var upgradeResp struct {
-				Type      string                 `json:"type"`
-				RequestID string                 `json:"request_id"`
-				Data      map[string]interface{} `json:"data"`
-				Payload   map[string]interface{} `json:"payload"`
-			}
-			if err := json.Unmarshal(message, &upgradeResp); err != nil {
-				log.Printf("解析Agent升级响应失败: %v", err)
+			var statusMessage AgentUpgradeStatusMessage
+			if err := json.Unmarshal(message, &statusMessage); err != nil {
+				log.Printf("解析 Agent 升级状态失败: server=%d", server.ID)
 				continue
 			}
-
-			// 统一取数据：优先从 data 取（旧路径），若为空则从 payload 取（新路径）
-			upgradeData := upgradeResp.Data
-			if len(upgradeData) == 0 {
-				upgradeData = upgradeResp.Payload
-			}
-			if len(upgradeData) == 0 {
-				log.Printf("收到空的Agent升级消息: server=%d request_id=%s type=%s", server.ID, upgradeResp.RequestID, upgradeResp.Type)
+			if err := services.RecordAgentUpgradeStatus(models.DB, services.AgentUpgradeStatusInput{
+				ServerID:        server.ID,
+				RequestID:       statusMessage.RequestID,
+				Status:          statusMessage.Status,
+				BytesDownloaded: statusMessage.BytesDownloaded,
+				ErrorCode:       statusMessage.ErrorCode,
+				At:              time.Now().UTC(),
+			}); err != nil {
+				log.Printf(
+					"拒绝 Agent 升级状态: server=%d request_id=%s status=%s",
+					server.ID,
+					statusMessage.RequestID,
+					statusMessage.Status,
+				)
 				continue
 			}
-
-			status, _ := upgradeData["status"].(string)
-			msgText, _ := upgradeData["message"].(string)
-			if status != "" || msgText != "" {
-				log.Printf("收到Agent升级状态: server=%d request_id=%s status=%s message=%s", server.ID, upgradeResp.RequestID, status, msgText)
-			} else {
-				log.Printf("收到Agent升级响应: server=%d request_id=%s", server.ID, upgradeResp.RequestID)
-			}
-
-			// 推送升级状态到前端监控订阅者
-			broadcastPublicMonitor(server.ID, map[string]interface{}{
-				"type":       "agent_upgrade_status",
-				"server_id":  server.ID,
-				"request_id": upgradeResp.RequestID,
-				"status":     status,
-				"message":    msgText,
-				"data":       upgradeData,
-				"timestamp":  time.Now().Unix(),
-			})
+			log.Printf(
+				"已持久化 Agent 升级状态: server=%d request_id=%s status=%s",
+				server.ID,
+				statusMessage.RequestID,
+				statusMessage.Status,
+			)
 		default:
 			log.Printf("未知的消息类型: %s", msg.Type)
 			sendErrorMessage(conn, "未知的消息类型")

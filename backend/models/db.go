@@ -54,6 +54,7 @@ func InitDB() error {
 	// 自动迁移数据库结构
 	if err := DB.AutoMigrate(
 		&Server{},
+		&AgentUpgradeJob{},
 		&ServerMonitor{},
 		&SystemSettings{},
 		&AlertSetting{},
@@ -73,6 +74,11 @@ func InitDB() error {
 	if err := DB.Model(&Server{}).
 		Where("agent_heartbeat_seconds IS NULL OR agent_heartbeat_seconds <= ?", 0).
 		Update("agent_heartbeat_seconds", 10).Error; err != nil {
+		return err
+	}
+	if err := DB.Model(&Server{}).
+		Where("desired_agent_type IS NULL OR TRIM(desired_agent_type) = ''").
+		Update("desired_agent_type", gorm.Expr("agent_type")).Error; err != nil {
 		return err
 	}
 

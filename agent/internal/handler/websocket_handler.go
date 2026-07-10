@@ -11,27 +11,6 @@ import (
 
 // HandleCommand 处理来自面板端的命令
 func HandleCommand(c *websocket.Conn, serverID uint, secretKey string, message []byte) {
-	// 兼容面板端新消息格式：
-	// {
-	//   "type": "agent_upgrade",
-	//   "request_id": "...",
-	//   "payload": { ... }
-	// }
-	var typedReq struct {
-		Type      string          `json:"type"`
-		RequestID string          `json:"request_id"`
-		Payload   json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(message, &typedReq); err == nil && strings.TrimSpace(typedReq.Type) != "" {
-		switch typedReq.Type {
-		case "agent_upgrade":
-			HandleAgentUpgradeMessage(c, serverID, secretKey, typedReq.RequestID, typedReq.Payload)
-		default:
-			SendErrorResponse(c, fmt.Sprintf("未知的消息类型: %s", typedReq.Type))
-		}
-		return
-	}
-
 	// 解析命令
 	var req struct {
 		Action string                 `json:"action"`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -13,6 +14,39 @@ import (
 	"github.com/user/server-ops-backend/routes"
 	"github.com/user/server-ops-backend/services"
 )
+
+const agentUpgradeReconcileInterval = 30 * time.Second
+
+func runAgentUpgradeTimeoutReconciler(
+	ctx context.Context,
+	ticks <-chan time.Time,
+	reconcile func(time.Time) error,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now, ok := <-ticks:
+			if !ok {
+				return
+			}
+			if err := reconcile(now); err != nil {
+				log.Printf("检查 Agent 升级超时失败: %v", err)
+			}
+		}
+	}
+}
+
+func startAgentUpgradeTimeoutReconciler(ctx context.Context) {
+	ticker := time.NewTicker(agentUpgradeReconcileInterval)
+	go func() {
+		defer ticker.Stop()
+		runAgentUpgradeTimeoutReconciler(ctx, ticker.C, func(now time.Time) error {
+			_, err := services.ReconcileTimedOutUpgrades(models.DB, now)
+			return err
+		})
+	}()
+}
 
 // 定期检查服务器状态
 func startServerStatusChecker() {
@@ -131,6 +165,9 @@ func cleanupOldData() {
 }
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// 初始化配置
 	cfg := config.LoadConfig()
 
@@ -141,6 +178,9 @@ func main() {
 
 	// 启动服务器状态检查器
 	startServerStatusChecker()
+
+	// 启动 Agent 升级任务超时检查器
+	startAgentUpgradeTimeoutReconciler(ctx)
 
 	// 启动预警服务
 	alertService := startAlertService()

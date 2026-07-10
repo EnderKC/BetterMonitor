@@ -49,7 +49,12 @@ func setupWebSocketAuthFixture(t *testing.T) *websocketAuthFixture {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&models.AdminAccount{}, &models.Server{}, &models.ServerMonitor{}))
+	require.NoError(t, db.AutoMigrate(
+		&models.AdminAccount{},
+		&models.Server{},
+		&models.ServerMonitor{},
+		&models.AgentUpgradeJob{},
+	))
 	models.DB = db
 
 	admin := &models.AdminAccount{
@@ -178,7 +183,6 @@ func TestAgentWebSocketAuthRegistersOnlyAfterMatchingHello(t *testing.T) {
 		"version":                    "1.2.3",
 		"agent_type":                 "full",
 		"heartbeat_interval_seconds": 10,
-		"upgrade_request_id":         "",
 	}))
 
 	require.Eventually(t, func() bool {
@@ -199,7 +203,6 @@ func TestAgentHelloAndHeartbeatPersistUnifiedLivenessMetadata(t *testing.T) {
 		"version":                    "1.2.3",
 		"agent_type":                 "full",
 		"heartbeat_interval_seconds": 10,
-		"upgrade_request_id":         "",
 	}))
 
 	var afterHello models.Server

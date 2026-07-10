@@ -1,76 +1,100 @@
 package upgrader
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/user/server-ops-agent/pkg/version"
 )
+
+const maxSelfTestOutputBytes = 64 << 10
+
+type SelfTestResult struct {
+	Version   string `json:"version"`
+	AgentType string `json:"agent_type"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+type BinaryInspector interface {
+	Inspect(ctx context.Context, path string) (SelfTestResult, error)
+}
 
 type UpgradeRequest struct {
 	RequestID string
 
-	TargetVersion string
-	Channel       string
-
-	// 推荐：由面板端直接提供 URL 与 SHA256，Agent 只负责执行升级动作
-	DownloadURL string
-	SHA256      string
-
-	// 可选：由面板端指定目标 Agent 类型，用于跨变体切换（full ↔ monitor）
-	// 为空时沿用当前 Agent 编译时的类型（version.AgentType）
-	TargetAgentType string
-
-	// 可选：若下载地址是面板端的受保护接口，可用于鉴权 header
-	ServerID  uint
-	SecretKey string
+	TargetVersion     string
+	TargetAgentType   string
+	AssetName         string
+	AssetSize         int64
+	MaxDownloadBytes  int64
+	MarkerPath        string
+	ScheduledTaskName string
+	DownloadURL       string
+	SHA256            string
 
 	Args []string
 	Env  []string
 
-	HTTPClient *http.Client
+	ExecutablePath string
+	HTTPClient     *http.Client
+	Inspector      BinaryInspector
+	ApplyOps       ApplyOps
 }
 
 type Progress struct {
-	RequestID string
-	Status    string
-	Message   string
-
+	RequestID       string
+	Status          string
+	Message         string
 	TargetVersion   string
-	DownloadURL     string
-	SHA256          string
 	BytesDownloaded int64
+	ErrorCode       string
 	Time            time.Time
 }
 
 type ProgressFunc func(Progress)
 
 func Upgrade(ctx context.Context, req UpgradeRequest, report ProgressFunc) error {
+	if ctx == nil {
+		return newUpgradeError("upgrade_context_missing")
+	}
 	if report == nil {
 		report = func(Progress) {}
 	}
-
-	req.TargetVersion = strings.TrimSpace(req.TargetVersion)
-	req.Channel = strings.TrimSpace(req.Channel)
-	req.DownloadURL = strings.TrimSpace(req.DownloadURL)
-	req.SHA256 = strings.TrimSpace(req.SHA256)
-
-	if req.TargetVersion == "" {
-		return errors.New("missing target_version")
+	if req.MaxDownloadBytes <= 0 {
+		req.MaxDownloadBytes = DefaultMaxDownloadBytes
 	}
-	if req.Channel == "" {
-		req.Channel = "stable"
+	instruction := UpgradeInstruction{
+		RequestID:       strings.TrimSpace(req.RequestID),
+		TargetVersion:   strings.TrimSpace(req.TargetVersion),
+		TargetAgentType: strings.ToLower(strings.TrimSpace(req.TargetAgentType)),
+		AssetName:       strings.TrimSpace(req.AssetName),
+		AssetSize:       req.AssetSize,
+		DownloadURL:     strings.TrimSpace(req.DownloadURL),
+		SHA256:          strings.ToLower(strings.TrimSpace(req.SHA256)),
 	}
+	if err := ValidateUpgradeInstruction(instruction); err != nil {
+		return newUpgradeError("upgrade_instruction_invalid")
+	}
+	if instruction.AssetSize > req.MaxDownloadBytes {
+		return newUpgradeError("download_too_large")
+	}
+	req.RequestID = instruction.RequestID
+	req.TargetVersion = instruction.TargetVersion
+	req.TargetAgentType = instruction.TargetAgentType
+	req.AssetName = instruction.AssetName
+	req.DownloadURL = instruction.DownloadURL
+	req.SHA256 = instruction.SHA256
 	if len(req.Args) == 0 {
 		req.Args = os.Args
 	}
@@ -82,239 +106,251 @@ func Upgrade(ctx context.Context, req UpgradeRequest, report ProgressFunc) error
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Minute}
 	}
-
-	report(Progress{
-		RequestID:     req.RequestID,
-		Status:        "resolving",
-		Message:       "解析下载地址",
-		TargetVersion: req.TargetVersion,
-		Time:          time.Now().UTC(),
-	})
-
-	downloadURL, err := resolveDownloadURL(req)
-	if err != nil {
-		return err
-	}
-	req.DownloadURL = downloadURL
-
 	report(Progress{
 		RequestID:     req.RequestID,
 		Status:        "downloading",
-		Message:       "下载新版本二进制",
+		Message:       "downloading upgrade asset",
 		TargetVersion: req.TargetVersion,
-		DownloadURL:   req.DownloadURL,
 		Time:          time.Now().UTC(),
 	})
 
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve current executable path: %w", err)
+	exePath := strings.TrimSpace(req.ExecutablePath)
+	if exePath == "" {
+		var err error
+		exePath, err = os.Executable()
+		if err != nil {
+			return newUpgradeError("executable_path_unavailable")
+		}
+		if resolved, err := filepath.EvalSymlinks(exePath); err == nil && resolved != "" {
+			exePath = resolved
+		}
 	}
-	if resolved, err := filepath.EvalSymlinks(exePath); err == nil && resolved != "" {
-		exePath = resolved
+	tempFile, err := os.CreateTemp(filepath.Dir(exePath), filepath.Base(exePath)+".download-*")
+	if err != nil {
+		return newUpgradeError("download_temp_create_failed")
+	}
+	tempPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return newUpgradeError("download_temp_close_failed")
 	}
 
-	downloadDir := filepath.Dir(exePath)
-	tmpFile, err := os.CreateTemp(downloadDir, filepath.Base(exePath)+".download-*")
+	_, bytesDownloaded, err := downloadFileSHA256(ctx, client, req, tempPath, report)
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	// 注意：Windows 下升级需要让外部 updater 使用 tmpPath 完成替换与重启，不能在这里 defer remove
-	_ = tmpFile.Close()
-
-	actualSHA, bytesDownloaded, err := downloadFileSHA256(ctx, client, req, tmpPath, report)
-	if err != nil {
-		_ = os.Remove(tmpPath)
 		return err
 	}
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	report(Progress{
 		RequestID:       req.RequestID,
 		Status:          "verifying",
-		Message:         "校验 SHA256",
+		Message:         "verifying upgrade asset",
 		TargetVersion:   req.TargetVersion,
-		DownloadURL:     req.DownloadURL,
-		SHA256:          req.SHA256,
 		BytesDownloaded: bytesDownloaded,
 		Time:            time.Now().UTC(),
 	})
-
-	expected := normalizeSHA256(req.SHA256)
-	if expected == "" {
-		_ = os.Remove(tmpPath)
-		return errors.New("missing or invalid sha256")
-	}
-	if !strings.EqualFold(expected, actualSHA) {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("sha256 mismatch: expected=%s actual=%s", expected, actualSHA)
+	if current, statErr := os.Stat(exePath); statErr == nil {
+		if err := os.Chmod(tempPath, current.Mode()); err != nil {
+			return newUpgradeError("download_permission_failed")
+		}
+	} else if err := os.Chmod(tempPath, 0o755); err != nil {
+		return newUpgradeError("download_permission_failed")
 	}
 
-	// 继承原二进制的权限（Unix）
-	if st, err := os.Stat(exePath); err == nil {
-		_ = os.Chmod(tmpPath, st.Mode())
-	} else {
-		_ = os.Chmod(tmpPath, 0755)
+	inspector := req.Inspector
+	if inspector == nil {
+		inspector = commandBinaryInspector{}
 	}
-
+	identity, err := inspector.Inspect(ctx, tempPath)
+	if err != nil {
+		return newUpgradeError("self_test_failed")
+	}
+	if strings.TrimSpace(identity.Version) != req.TargetVersion ||
+		!strings.EqualFold(strings.TrimSpace(identity.AgentType), req.TargetAgentType) ||
+		strings.TrimSpace(identity.OS) != runtime.GOOS ||
+		strings.TrimSpace(identity.Arch) != runtime.GOARCH {
+		return newUpgradeError("self_test_identity_mismatch")
+	}
+	if err := persistUpgradeOutcome(req, "applied", ""); err != nil {
+		return err
+	}
 	report(Progress{
 		RequestID:     req.RequestID,
 		Status:        "applying",
-		Message:       "原子替换并重启",
+		Message:       "applying upgrade asset",
 		TargetVersion: req.TargetVersion,
-		DownloadURL:   req.DownloadURL,
 		Time:          time.Now().UTC(),
 	})
 
-	return applyAndRestart(ctx, req, exePath, tmpPath, report)
+	cleanupTemp = runtime.GOOS != "windows"
+	return applyAndRestart(ctx, req, exePath, tempPath, report)
 }
 
-func resolveDownloadURL(req UpgradeRequest) (string, error) {
-	if req.DownloadURL != "" {
-		return req.DownloadURL, nil
+func downloadFileSHA256(
+	ctx context.Context,
+	client *http.Client,
+	req UpgradeRequest,
+	dstPath string,
+	report ProgressFunc,
+) (shaHex string, bytesDownloaded int64, err error) {
+	maxBytes := req.MaxDownloadBytes
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxDownloadBytes
 	}
-
-	// 1) 显式模板：BETTER_MONITOR_AGENT_UPGRADE_URL_TEMPLATE
-	//    例：https://github.com/user/server-ops-backend/releases/download/v{version}/better-monitor-agent-{version}-{os}-{arch}
-	if tpl := strings.TrimSpace(os.Getenv("BETTER_MONITOR_AGENT_UPGRADE_URL_TEMPLATE")); tpl != "" {
-		return applyURLTemplate(tpl, req.TargetVersion, req.Channel, runtime.GOOS, runtime.GOARCH), nil
+	if req.AssetSize <= 0 {
+		return "", 0, newUpgradeError("download_size_invalid")
 	}
-
-	// 2) GitHub Repo：BETTER_MONITOR_AGENT_GITHUB_REPO=user/server-ops-backend
-	//    默认按 GitHub Releases 约定拼 URL
-	//    支持跨变体切换：若 TargetAgentType 非空则使用指定类型，否则沿用当前编译类型
-	if repo := strings.TrimSpace(os.Getenv("BETTER_MONITOR_AGENT_GITHUB_REPO")); repo != "" {
-		versionTag := req.TargetVersion
-		if !strings.HasPrefix(versionTag, "v") {
-			versionTag = "v" + versionTag
-		}
-
-		agentType := strings.TrimSpace(req.TargetAgentType)
-		if agentType == "" {
-			agentType = version.AgentType
-		}
-
-		var name string
-		if agentType == "monitor" {
-			name = fmt.Sprintf("better-monitor-agent-monitor-%s-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
-		} else {
-			name = fmt.Sprintf("better-monitor-agent-%s-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
-		}
-		if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
-			name += ".exe"
-		}
-		return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", strings.TrimSuffix(repo, "/"), versionTag, name), nil
+	if req.AssetSize > maxBytes {
+		return "", 0, newUpgradeError("download_too_large")
 	}
-
-	return "", errors.New("missing download_url; set BETTER_MONITOR_AGENT_UPGRADE_URL_TEMPLATE or BETTER_MONITOR_AGENT_GITHUB_REPO, or have panel include payload.download_url")
-}
-
-func applyURLTemplate(tpl, version, channel, goos, arch string) string {
-	out := tpl
-	out = strings.ReplaceAll(out, "{version}", version)
-	out = strings.ReplaceAll(out, "{channel}", channel)
-	out = strings.ReplaceAll(out, "{os}", goos)
-	out = strings.ReplaceAll(out, "{arch}", arch)
-	return out
-}
-
-func downloadFileSHA256(ctx context.Context, client *http.Client, req UpgradeRequest, dstPath string, report ProgressFunc) (shaHex string, bytesDownloaded int64, err error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.DownloadURL, nil)
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, req.DownloadURL, nil)
 	if err != nil {
-		return "", 0, fmt.Errorf("create download request: %w", err)
+		return "", 0, newUpgradeError("download_request_invalid")
 	}
-	httpReq.Header.Set("User-Agent", "better-monitor-agent-upgrader")
-	if req.SecretKey != "" {
-		// 可选鉴权 header（后端是否使用由实现决定）
-		httpReq.Header.Set("X-Secret-Key", req.SecretKey)
-	}
-	if req.ServerID != 0 {
-		httpReq.Header.Set("X-Server-ID", fmt.Sprintf("%d", req.ServerID))
-	}
-
-	resp, err := client.Do(httpReq)
+	httpRequest.Header.Set("User-Agent", "better-monitor-agent-upgrader")
+	response, err := client.Do(httpRequest)
 	if err != nil {
-		return "", 0, fmt.Errorf("download failed: %w", err)
+		return "", 0, newUpgradeError("download_request_failed")
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		return "", 0, fmt.Errorf("download failed: status=%s body=%s", resp.Status, strings.TrimSpace(string(body)))
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", 0, newUpgradeError("download_http_status")
+	}
+	if response.ContentLength >= 0 {
+		if response.ContentLength > maxBytes {
+			return "", 0, newUpgradeError("download_too_large")
+		}
+		if response.ContentLength != req.AssetSize {
+			return "", 0, newUpgradeError("download_size_mismatch")
+		}
 	}
 
-	f, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	file, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
-		return "", 0, fmt.Errorf("open temp file: %w", err)
+		return "", 0, newUpgradeError("download_file_open_failed")
 	}
-	defer f.Close()
+	success := false
+	defer func() {
+		_ = file.Close()
+		if !success {
+			_ = os.Remove(dstPath)
+		}
+	}()
 
-	h := sha256.New()
-	w := io.MultiWriter(f, h)
-
-	// 定期上报下载进度
+	hash := sha256.New()
+	limited := &io.LimitedReader{R: response.Body, N: maxBytes + 1}
 	reader := &progressReader{
-		reader: resp.Body,
-		onProgress: func(n int64) {
+		reader: limited,
+		onProgress: func(total int64) {
 			if report != nil {
 				report(Progress{
 					RequestID:       req.RequestID,
 					Status:          "downloading",
-					Message:         fmt.Sprintf("已下载 %d 字节", n),
+					Message:         "downloading upgrade asset",
 					TargetVersion:   req.TargetVersion,
-					DownloadURL:     req.DownloadURL,
-					BytesDownloaded: n,
+					BytesDownloaded: total,
 					Time:            time.Now().UTC(),
 				})
 			}
 		},
 		interval: 2 * time.Second,
 	}
-
-	n, err := io.Copy(w, reader)
-	if err != nil {
-		return "", n, fmt.Errorf("write temp file: %w", err)
+	written, copyErr := io.Copy(io.MultiWriter(file, hash), reader)
+	if copyErr != nil {
+		return "", written, newUpgradeError("download_stream_failed")
 	}
-	_ = f.Sync()
-
-	return hex.EncodeToString(h.Sum(nil)), n, nil
+	if written > maxBytes {
+		return "", written, newUpgradeError("download_too_large")
+	}
+	if written != req.AssetSize {
+		return "", written, newUpgradeError("download_size_mismatch")
+	}
+	actualSHA := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actualSHA, normalizeSHA256(req.SHA256)) {
+		return "", written, newUpgradeError("download_sha_mismatch")
+	}
+	if err := file.Sync(); err != nil {
+		return "", written, newUpgradeError("download_file_sync_failed")
+	}
+	if err := file.Close(); err != nil {
+		return "", written, newUpgradeError("download_file_close_failed")
+	}
+	success = true
+	return actualSHA, written, nil
 }
 
-// progressReader 包装 io.Reader 以定期报告进度
+type commandBinaryInspector struct{}
+
+func (commandBinaryInspector) Inspect(ctx context.Context, path string) (SelfTestResult, error) {
+	inspectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(inspectCtx, path, "--self-test")
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return SelfTestResult{}, err
+	}
+	command.Stderr = io.Discard
+	if err := command.Start(); err != nil {
+		return SelfTestResult{}, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(stdout, maxSelfTestOutputBytes+1))
+	waitErr := command.Wait()
+	if readErr != nil {
+		return SelfTestResult{}, readErr
+	}
+	if waitErr != nil {
+		return SelfTestResult{}, waitErr
+	}
+	if len(raw) > maxSelfTestOutputBytes {
+		return SelfTestResult{}, errors.New("self-test output too large")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var result SelfTestResult
+	if err := decoder.Decode(&result); err != nil {
+		return SelfTestResult{}, err
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return SelfTestResult{}, err
+	}
+	return result, nil
+}
+
 type progressReader struct {
 	reader     io.Reader
 	onProgress func(int64)
 	interval   time.Duration
-
 	total      int64
 	lastReport time.Time
 }
 
-func (pr *progressReader) Read(p []byte) (n int, err error) {
-	n, err = pr.reader.Read(p)
-	pr.total += int64(n)
-
-	if pr.onProgress != nil && time.Since(pr.lastReport) >= pr.interval {
-		pr.onProgress(pr.total)
-		pr.lastReport = time.Now()
+func (reader *progressReader) Read(buffer []byte) (int, error) {
+	count, err := reader.reader.Read(buffer)
+	reader.total += int64(count)
+	if reader.onProgress != nil && time.Since(reader.lastReport) >= reader.interval {
+		reader.onProgress(reader.total)
+		reader.lastReport = time.Now()
 	}
-
-	return n, err
+	return count, err
 }
 
-func normalizeSHA256(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(strings.ToLower(s), "sha256:")
-	s = strings.TrimSpace(s)
-	if len(s) != 64 {
+func normalizeSHA256(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(strings.ToLower(raw), "sha256:")
+	raw = strings.TrimSpace(raw)
+	if len(raw) != 64 {
 		return ""
 	}
-	for _, c := range s {
-		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+	for _, char := range raw {
+		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') {
 			continue
 		}
 		return ""
 	}
-	return s
+	return raw
 }

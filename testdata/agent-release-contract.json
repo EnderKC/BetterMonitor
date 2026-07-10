@@ -1,0 +1,191 @@
+{
+  "repository": "demo/better-monitor",
+  "releases": [
+    {
+      "tag_name": "v1.6.0-nightly.20260710",
+      "name": "Agent nightly",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-07-10T01:00:00Z",
+      "assets": [
+        {
+          "name": "better-monitor-agent-1.6.0-nightly.20260710-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-1.6.0-nightly.20260710-linux-amd64",
+          "size": 1600
+        },
+        {
+          "name": "better-monitor-agent-monitor-1.6.0-nightly.20260710-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-monitor-1.6.0-nightly.20260710-linux-amd64",
+          "size": 1200
+        },
+        {
+          "name": "SHA256SUMS",
+          "browser_download_url": "https://downloads.example.test/v1.6.0-nightly.20260710/SHA256SUMS",
+          "size": 256
+        }
+      ],
+      "checksums": {
+        "better-monitor-agent-1.6.0-nightly.20260710-linux-amd64": "6666666666666666666666666666666666666666666666666666666666666666",
+        "better-monitor-agent-monitor-1.6.0-nightly.20260710-linux-amd64": "7777777777777777777777777777777777777777777777777777777777777777"
+      }
+    },
+    {
+      "tag_name": "v1.5.0-rc.2",
+      "name": "Agent release candidate",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-07-09T01:00:00Z",
+      "assets": [
+        {
+          "name": "better-monitor-agent-1.5.0-rc.2-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-1.5.0-rc.2-linux-amd64",
+          "size": 1500
+        },
+        {
+          "name": "better-monitor-agent-monitor-1.5.0-rc.2-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-monitor-1.5.0-rc.2-linux-amd64",
+          "size": 1100
+        },
+        {
+          "name": "SHA256SUMS",
+          "browser_download_url": "https://downloads.example.test/v1.5.0-rc.2/SHA256SUMS",
+          "size": 256
+        }
+      ],
+      "checksums": {
+        "better-monitor-agent-1.5.0-rc.2-linux-amd64": "4444444444444444444444444444444444444444444444444444444444444444",
+        "better-monitor-agent-monitor-1.5.0-rc.2-linux-amd64": "5555555555555555555555555555555555555555555555555555555555555555"
+      }
+    },
+    {
+      "tag_name": "v1.4.0",
+      "name": "Agent stable",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-07-08T01:00:00Z",
+      "assets": [
+        {
+          "name": "better-monitor-agent-1.4.0-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-1.4.0-linux-amd64",
+          "size": 1400
+        },
+        {
+          "name": "better-monitor-agent-monitor-1.4.0-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-monitor-1.4.0-linux-amd64",
+          "size": 1000
+        },
+        {
+          "name": "better-monitor-agent-1.4.0-windows-amd64.exe",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-1.4.0-windows-amd64.exe",
+          "size": 1450
+        },
+        {
+          "name": "SHA256SUMS",
+          "browser_download_url": "https://downloads.example.test/v1.4.0/SHA256SUMS",
+          "size": 256
+        }
+      ],
+      "checksums": {
+        "better-monitor-agent-1.4.0-linux-amd64": "1111111111111111111111111111111111111111111111111111111111111111",
+        "better-monitor-agent-monitor-1.4.0-linux-amd64": "2222222222222222222222222222222222222222222222222222222222222222",
+        "better-monitor-agent-1.4.0-windows-amd64.exe": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "tag_name": "v9.9.9",
+      "name": "Draft must never win",
+      "draft": true,
+      "prerelease": false,
+      "published_at": "2026-07-11T01:00:00Z",
+      "assets": []
+    },
+    {
+      "tag_name": "v1.3.0",
+      "name": "Missing checksum release",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-07-07T01:00:00Z",
+      "assets": [
+        {
+          "name": "better-monitor-agent-1.3.0-linux-amd64",
+          "browser_download_url": "https://downloads.example.test/better-monitor-agent-1.3.0-linux-amd64",
+          "size": 1300
+        }
+      ],
+      "checksums": {}
+    }
+  ],
+  "cases": [
+    {
+      "name": "stable-full-linux-amd64",
+      "channel": "stable",
+      "target_version": "",
+      "os": "linux",
+      "arch": "amd64",
+      "agent_type": "full",
+      "expected_tag": "v1.4.0",
+      "expected_asset": "better-monitor-agent-1.4.0-linux-amd64",
+      "expected_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "stable-monitor-linux-amd64",
+      "channel": "stable",
+      "target_version": "1.4.0",
+      "os": "linux",
+      "arch": "x86_64",
+      "agent_type": "monitor",
+      "expected_tag": "v1.4.0",
+      "expected_asset": "better-monitor-agent-monitor-1.4.0-linux-amd64",
+      "expected_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "name": "prerelease-full-linux-amd64",
+      "channel": "prerelease",
+      "target_version": "",
+      "os": "linux",
+      "arch": "amd64",
+      "agent_type": "full",
+      "expected_tag": "v1.5.0-rc.2",
+      "expected_asset": "better-monitor-agent-1.5.0-rc.2-linux-amd64",
+      "expected_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "name": "nightly-monitor-linux-amd64",
+      "channel": "nightly",
+      "target_version": "",
+      "os": "linux",
+      "arch": "amd64",
+      "agent_type": "monitor",
+      "expected_tag": "v1.6.0-nightly.20260710",
+      "expected_asset": "better-monitor-agent-monitor-1.6.0-nightly.20260710-linux-amd64",
+      "expected_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "name": "wrong-channel-target",
+      "channel": "stable",
+      "target_version": "1.5.0-rc.2",
+      "os": "linux",
+      "arch": "amd64",
+      "agent_type": "full",
+      "expected_error": "release_channel_mismatch"
+    },
+    {
+      "name": "missing-sha",
+      "channel": "stable",
+      "target_version": "1.3.0",
+      "os": "linux",
+      "arch": "amd64",
+      "agent_type": "full",
+      "expected_error": "release_checksum_missing"
+    },
+    {
+      "name": "missing-platform-asset",
+      "channel": "stable",
+      "target_version": "1.4.0",
+      "os": "darwin",
+      "arch": "amd64",
+      "agent_type": "full",
+      "expected_error": "release_asset_missing"
+    }
+  ]
+}

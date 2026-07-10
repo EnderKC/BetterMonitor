@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,7 +25,11 @@ func init() {
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	dsn := fmt.Sprintf(
+		"file:%s?mode=memory&cache=shared",
+		strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()),
+	)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("创建测试数据库失败: %v", err)
 	}
@@ -98,6 +101,7 @@ func TestGetServerVersions(t *testing.T) {
 		IP:            "192.168.1.1",
 		Online:        true,
 		AgentVersion:  "1.0.0",
+		AgentType:     "full",
 		LastHeartbeat: now,
 	}
 	server2 := models.Server{
@@ -105,6 +109,7 @@ func TestGetServerVersions(t *testing.T) {
 		IP:            "192.168.1.2",
 		Online:        false,
 		AgentVersion:  "1.0.1",
+		AgentType:     "monitor",
 		LastHeartbeat: now.Add(-5 * time.Minute),
 	}
 	assert.NoError(t, db.Create(&server1).Error)
@@ -123,6 +128,8 @@ func TestGetServerVersions(t *testing.T) {
 	assert.Len(t, resp, 2)
 	assert.Equal(t, "Server 1", resp[0]["name"])
 	assert.Equal(t, float64(1), resp[0]["status"])
+	assert.Equal(t, "full", resp[0]["agentType"])
+	assert.Equal(t, "monitor", resp[1]["agentType"])
 }
 
 func TestGetLatestAgentRelease(t *testing.T) {
@@ -136,19 +143,20 @@ func TestGetLatestAgentRelease(t *testing.T) {
 	defer services.ClearReleaseCache()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+		if strings.Contains(r.URL.Path, "/releases") {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{
+			fmt.Fprint(w, `[{
 				"tag_name": "v1.2.3",
 				"name": "Agent v1.2.3",
 				"body": "notes",
+				"prerelease": false,
 				"published_at": "2024-01-01T00:00:00Z",
 				"assets": [{
 					"name": "agent-linux-amd64.tar.gz",
 					"browser_download_url": "https://github.com/demo/repo/releases/download/v1.2.3/agent-linux-amd64.tar.gz",
 					"size": 1234
 				}]
-			}`)
+			}]`)
 			return
 		}
 		http.NotFound(w, r)
@@ -174,33 +182,47 @@ func TestGetLatestAgentRelease(t *testing.T) {
 	assert.Equal(t, "1.2.3", resp["version"])
 	assets := resp["assets"].([]interface{})
 	assert.Len(t, assets, 1)
+	assert.Equal(t, "stable", resp["channel"])
+	assert.NotContains(t, w.Body.String(), "download_url")
+	assert.NotContains(t, w.Body.String(), "browser_download_url")
 }
 
-func TestForceAgentUpgrade(t *testing.T) {
+func TestGetLatestAgentReleaseSelectsLatestReleaseWithinConfiguredChannel(t *testing.T) {
 	db := setupTestDB(t)
 	assert.NoError(t, db.Create(&models.SystemSettings{
 		AgentReleaseRepo:    "demo/repo",
-		AgentReleaseChannel: "stable",
+		AgentReleaseChannel: "prerelease",
 	}).Error)
 
-	// Mock GitHub API，使 FetchLatestAgentRelease 能正常返回 releaseInfo
 	services.ClearReleaseCache()
 	defer services.ClearReleaseCache()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+		if strings.Contains(r.URL.Path, "/releases") {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{
-				"tag_name": "v2.0.0",
-				"name": "Agent v2.0.0",
-				"body": "",
-				"published_at": "2024-01-01T00:00:00Z",
-				"assets": [{
-					"name": "better-monitor-agent-2.0.0-linux-amd64",
-					"browser_download_url": "https://github.com/demo/repo/releases/download/v2.0.0/better-monitor-agent-2.0.0-linux-amd64",
-					"size": 1234
-				}]
-			}`)
+			fmt.Fprint(w, `[
+				{
+					"tag_name": "v2.0.0-nightly.9",
+					"name": "Nightly",
+					"prerelease": true,
+					"published_at": "2026-07-10T00:00:00Z",
+					"assets": []
+				},
+				{
+					"tag_name": "v1.9.0-beta.2",
+					"name": "Beta",
+					"prerelease": true,
+					"published_at": "2026-07-09T00:00:00Z",
+					"assets": []
+				},
+				{
+					"tag_name": "v1.8.0",
+					"name": "Stable",
+					"prerelease": false,
+					"published_at": "2026-07-08T00:00:00Z",
+					"assets": []
+				}
+			]`)
 			return
 		}
 		http.NotFound(w, r)
@@ -212,79 +234,16 @@ func TestForceAgentUpgrade(t *testing.T) {
 	services.SetReleaseHTTPClient(ts.Client())
 	defer services.ResetReleaseHTTPClient()
 
-	serverOnline := models.Server{
-		Name:          "Online",
-		IP:            "10.0.0.1",
-		Online:        true,
-		LastHeartbeat: time.Now(),
-	}
-	serverOffline := models.Server{
-		Name:   "Offline",
-		IP:     "10.0.0.2",
-		Online: false,
-	}
-	serverSendError := models.Server{
-		Name:          "SendError",
-		IP:            "10.0.0.3",
-		Online:        true,
-		LastHeartbeat: time.Now(),
-	}
-	assert.NoError(t, db.Create(&serverOnline).Error)
-	assert.NoError(t, db.Create(&serverOffline).Error)
-	assert.NoError(t, db.Create(&serverSendError).Error)
-
-	clearActiveConnections()
-	defer clearActiveConnections()
-
-	ActiveAgentConnections.Replace(serverOnline.ID, &SafeConn{})
-	ActiveAgentConnections.Replace(serverSendError.ID, &SafeConn{})
-
-	sentCommands := make([]map[string]interface{}, 0)
-	origSender := agentUpgradeSender
-	defer func() { agentUpgradeSender = origSender }()
-	agentUpgradeSender = func(conn *SafeConn, payload map[string]interface{}) error {
-		sentCommands = append(sentCommands, payload)
-		if inner, ok := payload["payload"].(map[string]interface{}); ok {
-			switch id := inner["server_id"].(type) {
-			case uint:
-				if id == serverSendError.ID {
-					return fmt.Errorf("send error")
-				}
-			case uint64:
-				if uint(id) == serverSendError.ID {
-					return fmt.Errorf("send error")
-				}
-			case float64:
-				if uint(id) == serverSendError.ID {
-					return fmt.Errorf("send error")
-				}
-			}
-		}
-		return nil
-	}
-
-	body := map[string]interface{}{
-		"serverIds":     []uint64{uint64(serverOnline.ID), uint64(serverOffline.ID), uint64(serverSendError.ID), 9999},
-		"targetVersion": "2.0.0",
-	}
-	payload, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/servers/upgrade", bytes.NewBuffer(payload))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodGet, "/agents/releases/latest", nil)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 
-	ForceAgentUpgrade(c)
+	GetLatestAgentRelease(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp map[string]interface{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, true, resp["success"])
-
-	result := resp["result"].(map[string]interface{})
-	assert.Contains(t, result["success"], float64(serverOnline.ID))
-	assert.Contains(t, result["offline"], float64(serverOffline.ID))
-	assert.Contains(t, result["failure"], float64(serverSendError.ID))
-	assert.Contains(t, result["missing"], float64(9999))
-	assert.Len(t, sentCommands, 2)
+	assert.Equal(t, "1.9.0-beta.2", resp["version"])
+	assert.Equal(t, "prerelease", resp["channel"])
 }

@@ -572,14 +572,22 @@ select_release_asset() {
     local arch="$2"
     # 注意：不要把完整 Release JSON 放进环境变量里（可能触发 "Argument list too long"）。
     # 直接从 stdin 读取更稳妥。
-    BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_OS="$os" BM_ARCH="$arch" BM_AGENT_TYPE="${AGENT_TYPE}" \
+    BM_RELEASE_CHANNEL="${RELEASE_CHANNEL}" BM_TARGET_VERSION="${TARGET_VERSION:-}" \
+        BM_OS="$os" BM_ARCH="$arch" BM_AGENT_TYPE="${AGENT_TYPE}" \
         "$PYTHON_CMD" -c '
-import json, os, sys
+import functools, json, os, re, sys
 
 channel=os.environ.get("BM_RELEASE_CHANNEL","stable").lower()
+target_version=os.environ.get("BM_TARGET_VERSION","").strip()
 os_name=os.environ["BM_OS"]
 arch=os.environ["BM_ARCH"]
 agent_type=os.environ.get("BM_AGENT_TYPE","full").lower()
+arch={
+    "x86_64": "amd64", "amd64": "amd64",
+    "aarch64": "arm64", "arm64": "arm64",
+    "i386": "386", "i686": "386", "386": "386",
+    "armv6l": "arm", "armv7l": "arm", "armv8l": "arm", "armhf": "arm", "arm": "arm",
+}.get(arch.lower(), arch.lower())
 
 try:
     data=json.load(sys.stdin)
@@ -589,88 +597,90 @@ except Exception as e:
 if isinstance(data, dict):
     data=[data]
 
-def match_release(rel):
-    if rel.get("draft"):
-        return False
-    if channel == "stable":
-        return not rel.get("prerelease")
-    if channel == "prerelease":
-        return bool(rel.get("prerelease"))
-    if channel == "nightly":
-        name=(rel.get("tag_name") or "") + " " + (rel.get("name") or "")
-        return "nightly" in name.lower()
-    return False
+if channel not in {"stable", "prerelease", "nightly"}:
+    raise SystemExit("release_channel_invalid")
+if agent_type not in {"full", "monitor"}:
+    raise SystemExit("release_agent_type_invalid")
 
-release=next((r for r in data if match_release(r)), None)
-if release is None and channel in {"prerelease","nightly"}:
-    release=next((r for r in data if not r.get("draft")), None)
-if release is None:
-    release=data[0] if data else None
-if release is None:
-    raise SystemExit("没有找到可用的 Release")
+semver_re=re.compile(r"^(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+
+def parse_version(raw):
+    match=semver_re.fullmatch((raw or "").strip())
+    if not match:
+        return None
+    prerelease=[] if match.group(4) is None else match.group(4).split(".")
+    for identifier in prerelease:
+        if identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0"):
+            return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)), prerelease)
+
+def compare_versions(left, right):
+    for index in range(3):
+        if left[index] != right[index]:
+            return 1 if left[index] > right[index] else -1
+    left_pre, right_pre = left[3], right[3]
+    if not left_pre and not right_pre:
+        return 0
+    if not left_pre:
+        return 1
+    if not right_pre:
+        return -1
+    for left_id, right_id in zip(left_pre, right_pre):
+        if left_id == right_id:
+            continue
+        left_numeric, right_numeric = left_id.isdigit(), right_id.isdigit()
+        if left_numeric and right_numeric:
+            return 1 if int(left_id) > int(right_id) else -1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return 1 if left_id > right_id else -1
+    return (len(left_pre) > len(right_pre)) - (len(left_pre) < len(right_pre))
+
+def release_channel(rel, parsed):
+    prerelease=parsed[3]
+    nightly=any("nightly" in identifier.lower() for identifier in prerelease)
+    if not prerelease and not rel.get("prerelease"):
+        return "stable"
+    if prerelease and rel.get("prerelease") and nightly:
+        return "nightly"
+    if prerelease and rel.get("prerelease") and not nightly:
+        return "prerelease"
+    return "invalid"
+
+candidates=[]
+for rel in data:
+    if rel.get("draft"):
+        continue
+    parsed=parse_version(rel.get("tag_name") or "")
+    if parsed is None:
+        continue
+    candidates.append((rel, parsed, release_channel(rel, parsed)))
+
+if target_version:
+    parsed_target=parse_version(target_version)
+    if parsed_target is None:
+        raise SystemExit("release_version_invalid")
+    release_entry=next((entry for entry in candidates if entry[1] == parsed_target), None)
+    if release_entry is None:
+        raise SystemExit("release_not_found")
+    if release_entry[2] != channel:
+        raise SystemExit("release_channel_mismatch")
+else:
+    matching=[entry for entry in candidates if entry[2] == channel]
+    if not matching:
+        raise SystemExit("release_not_found")
+    matching.sort(key=functools.cmp_to_key(lambda a,b: compare_versions(a[1], b[1])), reverse=True)
+    release_entry=matching[0]
+
+release=release_entry[0]
 
 assets=release.get("assets") or []
 tag=release.get("tag_name") or ""
-version=tag.lstrip("vV")
-expected_suffix=f"{os_name}-{arch}"
-preferred_patterns=[]
-extensions=["", ".exe", ".tar.gz", ".tgz", ".zip"]
-
-# monitor variant uses "better-monitor-agent-monitor-..." naming
-base_name = "better-monitor-agent-monitor" if agent_type == "monitor" else "better-monitor-agent"
-
-if version:
-    preferred_patterns.append(f"{base_name}-{version}-{expected_suffix}")
-    preferred_patterns.append(f"{base_name}-{version}-{os_name}-{arch}")
-    preferred_patterns.append(f"{base_name}-{version}-{os_name}")
-
-preferred_patterns.append(f"{base_name}-{expected_suffix}")
-preferred_patterns.append(f"{base_name}-{os_name}-{arch}")
-preferred_patterns.append(f"{base_name}-{os_name}")
-
-def find_by_pattern():
-    for pattern in preferred_patterns:
-        for ext in extensions:
-            target=pattern+ext
-            for asset in assets:
-                name=asset.get("name") or ""
-                if name == target:
-                    return asset
-    return None
-
-selected=find_by_pattern()
-if selected is None:
-    for asset in assets:
-        name=asset.get("name") or ""
-        # For full variant, exclude monitor binaries to avoid false matches
-        if agent_type == "full":
-            if "better-monitor-agent-monitor" in name:
-                continue
-            if "better-monitor-agent" in name and expected_suffix in name:
-                selected=asset
-                break
-        else:
-            if base_name in name and expected_suffix in name:
-                selected=asset
-                break
-if selected is None:
-    raise SystemExit("未找到匹配的 Release 资产")
-
-# best-effort: find checksum asset (common naming conventions)
-selected_name = selected.get("name") or ""
-checksum = None
-checksum_candidates = [
-    selected_name + ".sha256",
-    selected_name + ".sha256sum",
-    selected_name + ".sha256.txt",
-    selected_name + ".sha256sums",
-]
-generic_candidates = [
-    "SHA256SUMS",
-    "sha256sums.txt",
-    "checksums.txt",
-    "sha256.txt",
-]
+version=tag[1:] if tag.startswith("v") else tag
+base_name="better-monitor-agent-monitor" if agent_type == "monitor" else "better-monitor-agent"
+selected_name=f"{base_name}-{version}-{os_name}-{arch}"
+if os_name == "windows":
+    selected_name += ".exe"
 
 def find_asset_by_name(n):
     for a in assets:
@@ -678,15 +688,16 @@ def find_asset_by_name(n):
             return a
     return None
 
-for n in checksum_candidates:
-    checksum = find_asset_by_name(n)
-    if checksum is not None:
-        break
+selected=find_asset_by_name(selected_name)
+if selected is None:
+    raise SystemExit("release_asset_missing")
+checksum=find_asset_by_name("SHA256SUMS")
 if checksum is None:
-    for n in generic_candidates:
-        checksum = find_asset_by_name(n)
-        if checksum is not None:
-            break
+    raise SystemExit("release_checksum_missing")
+for asset, code in ((selected, "release_asset_invalid"), (checksum, "release_checksum_invalid")):
+    url=asset.get("browser_download_url") or ""
+    if not url.startswith("https://") or int(asset.get("size") or 0) <= 0:
+        raise SystemExit(code)
 
 print("|".join([
     tag or "",
@@ -696,6 +707,63 @@ print("|".join([
     (checksum.get("browser_download_url") or "") if checksum else "",
 ]))
 '
+}
+
+run_contract_test() {
+    local fixture="$1"
+    [[ -f "$fixture" ]] || error "contract fixture not found: $fixture"
+    require_python
+    local releases_json
+    releases_json="$($PYTHON_CMD - "$fixture" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.dumps(json.load(handle)["releases"], separators=(",", ":")))
+PY
+)"
+
+    while IFS='|' read -r name channel target os_name arch agent_type expected_tag expected_asset expected_sha expected_error; do
+        RELEASE_CHANNEL="$channel"
+        TARGET_VERSION="$target"
+        AGENT_TYPE="$agent_type"
+        local result=""
+        if result="$(select_release_asset "$os_name" "$arch" <<<"$releases_json" 2>&1)"; then
+            if [[ -n "$expected_error" ]]; then
+                error "contract case $name expected error $expected_error"
+            fi
+            local tag asset url checksum_name checksum_url
+            IFS='|' read -r tag asset url checksum_name checksum_url <<<"$result"
+            [[ "$tag" == "$expected_tag" ]] || error "contract case $name tag mismatch"
+            [[ "$asset" == "$expected_asset" ]] || error "contract case $name asset mismatch"
+            [[ "$checksum_name" == "SHA256SUMS" ]] || error "contract case $name checksum asset mismatch"
+            local actual_sha
+            actual_sha="$($PYTHON_CMD - "$fixture" "$tag" "$asset" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    fixture=json.load(handle)
+release=next(item for item in fixture["releases"] if item["tag_name"] == sys.argv[2])
+print((release.get("checksums") or {}).get(sys.argv[3], ""))
+PY
+)"
+            [[ "$actual_sha" == "$expected_sha" ]] || error "contract case $name sha mismatch"
+        else
+            [[ -n "$expected_error" ]] || error "contract case $name failed: $result"
+            [[ "$result" == *"$expected_error"* ]] || error "contract case $name wrong error: $result"
+        fi
+    done < <($PYTHON_CMD - "$fixture" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    fixture=json.load(handle)
+for case in fixture["cases"]:
+    fields=[
+        case.get("name", ""), case.get("channel", ""), case.get("target_version", ""),
+        case.get("os", ""), case.get("arch", ""), case.get("agent_type", ""),
+        case.get("expected_tag", ""), case.get("expected_asset", ""),
+        case.get("expected_sha256", ""), case.get("expected_error", ""),
+    ]
+    print("|".join(fields))
+PY
+)
+    info "Agent release contract fixture passed"
 }
 
 sha256sum_file() {
@@ -717,8 +785,7 @@ verify_download_checksum() {
     local downloaded_file="$3"
 
     if ! command -v awk >/dev/null 2>&1; then
-        warn "缺少 awk，跳过校验"
-        return 0
+        error "缺少 awk，无法验证 SHA256"
     fi
 
     local expected=""
@@ -731,25 +798,21 @@ verify_download_checksum() {
           gsub(/^[.][\\/]/,"",f)
           if (f==n) { print $1; found=1; exit }
         }
-        NF>=1 && found==0 && $1 ~ /^[0-9a-fA-F]{64}$/ { print $1; found=1; exit }
     ' "$checksum_file" 2>/dev/null || true)"
 
     expected="$(echo -n "$expected" | tr -d ' \t\r\n')"
     if [[ -z "$expected" ]]; then
-        warn "未能从校验文件中解析 SHA256（将跳过校验）"
-        return 0
+        error "SHA256SUMS 中缺少资产 ${asset_name} 的校验值"
     fi
 
     local actual=""
     if ! actual="$(sha256sum_file "$downloaded_file" 2>/dev/null)"; then
-        warn "缺少 sha256sum/shasum，跳过校验"
-        return 0
+        error "缺少 sha256sum/shasum，无法验证下载文件"
     fi
 
     actual="$(echo -n "$actual" | tr -d ' \t\r\n')"
     if [[ -z "$actual" ]]; then
-        warn "计算 SHA256 失败（将跳过校验）"
-        return 0
+        error "计算 SHA256 失败"
     fi
 
     if [[ "${expected,,}" != "${actual,,}" ]]; then
@@ -837,46 +900,23 @@ download_agent() {
     curl -fL --retry 3 --retry-delay 2 ${download_header[@]:+"${download_header[@]}"} -o "$downloaded" "$download_url" \
         || error "下载失败，请稍后再试"
 
-    if [[ -n "${checksum_url:-}" ]]; then
-        local checksum_download_url="$checksum_url"
-        if [[ -n "$DOWNLOAD_MIRROR" && "$checksum_url" == https://github.com/* ]]; then
-            checksum_download_url="${DOWNLOAD_MIRROR%/}${checksum_url#https://github.com}"
-        fi
-        local checksum_file="${TMP_DIR}/${checksum_name}"
-        info "下载校验文件: ${checksum_name}"
-        local checksum_header=()
-        if [[ "${#auth_header[@]}" -ne 0 && "$checksum_download_url" == https://github.com/* ]]; then
-            checksum_header=("${auth_header[@]}")
-        fi
-        curl -fL --retry 3 --retry-delay 2 ${checksum_header[@]:+"${checksum_header[@]}"} -o "$checksum_file" "$checksum_download_url" \
-            || warn "下载校验文件失败（将跳过校验）"
-        if [[ -f "$checksum_file" ]]; then
-            verify_download_checksum "$checksum_file" "$asset_name" "$downloaded"
-        fi
-    else
-        warn "未找到 SHA256 校验文件（将跳过校验）"
+    [[ "$checksum_name" == "SHA256SUMS" && -n "$checksum_url" ]] \
+        || error "Release 缺少必需的 SHA256SUMS"
+    local checksum_download_url="$checksum_url"
+    if [[ -n "$DOWNLOAD_MIRROR" && "$checksum_url" == https://github.com/* ]]; then
+        checksum_download_url="${DOWNLOAD_MIRROR%/}${checksum_url#https://github.com}"
     fi
+    local checksum_file="${TMP_DIR}/${checksum_name}"
+    info "下载校验文件: ${checksum_name}"
+    local checksum_header=()
+    if [[ "${#auth_header[@]}" -ne 0 && "$checksum_download_url" == https://github.com/* ]]; then
+        checksum_header=("${auth_header[@]}")
+    fi
+    curl -fL --retry 3 --retry-delay 2 ${checksum_header[@]:+"${checksum_header[@]}"} -o "$checksum_file" "$checksum_download_url" \
+        || error "下载 SHA256SUMS 失败"
+    verify_download_checksum "$checksum_file" "$asset_name" "$downloaded"
 
     local tmp_bin="$downloaded"
-    case "$asset_name" in
-        *.tar.gz|*.tgz)
-            require_cmd tar
-            mkdir -p "${TMP_DIR}/extract"
-            tar -xzf "$downloaded" -C "${TMP_DIR}/extract" || error "解压失败: ${asset_name}"
-            tmp_bin="$(find "${TMP_DIR}/extract" -type f \( -name "${BINARY_NAME}" -o -name "${BINARY_NAME}.exe" -o -name "${BINARY_NAME}-*" \) -print | head -n 1 || true)"
-            [[ -n "$tmp_bin" && -f "$tmp_bin" ]] || error "未在压缩包中找到可执行文件: ${asset_name}"
-            ;;
-        *.zip)
-            require_cmd unzip
-            mkdir -p "${TMP_DIR}/extract"
-            unzip -q "$downloaded" -d "${TMP_DIR}/extract" || error "解压失败: ${asset_name}"
-            tmp_bin="$(find "${TMP_DIR}/extract" -type f \( -name "${BINARY_NAME}" -o -name "${BINARY_NAME}.exe" -o -name "${BINARY_NAME}-*" \) -print | head -n 1 || true)"
-            [[ -n "$tmp_bin" && -f "$tmp_bin" ]] || error "未在压缩包中找到可执行文件: ${asset_name}"
-            ;;
-        *)
-            ;;
-    esac
-
     chmod +x "$tmp_bin" || true
 
     # 若是升级场景，先停止服务再写入目标路径，避免出现 "text file busy"。
@@ -888,12 +928,13 @@ download_agent() {
     local backup=""
     if [[ -f "$dst" ]]; then
         backup="${dst}.bak"
-        $SUDO_CMD cp "$dst" "$backup" >/dev/null 2>&1 || warn "备份旧二进制失败: ${backup}"
+        $SUDO_CMD cp "$dst" "$backup" >/dev/null 2>&1 || error "备份旧二进制失败: ${backup}"
     fi
 
     if ! install_binary_atomic "$tmp_bin" "$dst"; then
         if [[ -n "$backup" && -f "$backup" ]]; then
-            $SUDO_CMD cp "$backup" "$dst" >/dev/null 2>&1 || true
+            $SUDO_CMD cp "$backup" "$dst" >/dev/null 2>&1 || error "安装失败且恢复旧二进制失败"
+            start_service || error "已恢复旧二进制，但重启旧服务失败"
         fi
         error "安装 Agent 失败"
     fi
@@ -1358,6 +1399,11 @@ prepare_env() {
 
 main() {
     info "Better Monitor Agent 安装程序"
+    if [[ "${1:-}" == "--contract-test" ]]; then
+        [[ $# -eq 2 ]] || error "--contract-test requires a fixture path"
+        run_contract_test "$2"
+        return
+    fi
     parse_args "$@"
     prepare_env
     normalize_server_url

@@ -26,6 +26,7 @@ import ServerStatusBadge from '../../components/ServerStatusBadge.vue';
 import DeployAgentModal from '../../components/DeployAgentModal.vue';
 import { useServerStore } from '../../stores/serverStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useAgentUpgradeJobs } from '../../composables/useAgentUpgradeJobs';
 
 import { ReloadOutlined } from '@ant-design/icons-vue';
 
@@ -33,6 +34,21 @@ const router = useRouter();
 // 获取服务器状态store
 const serverStore = useServerStore();
 const uiStore = useUIStore();
+const agentTypeUpgrades = useAgentUpgradeJobs({
+  onTerminal: async (job) => {
+    await serverStore.fetchServers(true);
+    if (job.status === 'succeeded') {
+      message.success(`服务器 ${job.server_id} 的 Agent 类型切换已确认`);
+      return;
+    }
+    message.error(`服务器 ${job.server_id} 类型切换失败：${job.error_code || job.status}`);
+  },
+});
+const activeAgentTypeJob = (serverId: number) => {
+  const job = agentTypeUpgrades.statusForServer(serverId);
+  if (!job || ['succeeded', 'failed', 'timed_out'].includes(job.status)) return undefined;
+  return job;
+};
 
 // 数据状态
 const loading = ref(false);
@@ -102,7 +118,12 @@ const columns = [
     width: 90,
     customRender: ({ record }: { record: any }) => {
       const isMonitor = record.agent_type === 'monitor';
-      return h(Tag, { color: isMonitor ? 'orange' : 'green' }, () => isMonitor ? '监控' : '全功能');
+      const job = activeAgentTypeJob(record.id);
+      const tags = [h(Tag, { color: isMonitor ? 'orange' : 'green' }, () => isMonitor ? '监控' : '全功能')];
+      if (job) {
+        tags.push(h(Tag, { color: 'blue' }, () => `目标 ${job.target_agent_type} / ${job.target_version}`));
+      }
+      return h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, tags);
     }
   },
   {
@@ -235,11 +256,16 @@ const handleSubmit = () => {
         const originalServer = servers.value.find((s: any) => s.id === formState.id);
         if (originalServer && originalServer.agent_type !== formState.agent_type) {
           try {
-            const switchRes = await request.post(`/servers/${formState.id}/switch-agent-type`, {
-              target_agent_type: formState.agent_type
+            const result = await agentTypeUpgrades.submit({
+              server_ids: [Number(formState.id)],
+              target_agent_type: formState.agent_type,
             });
-            if (switchRes && switchRes.message) {
-              message.success(switchRes.message);
+            if (result.jobs.length > 0) {
+              message.success('基本信息已更新，Agent 类型切换任务已创建');
+            } else if (result.noop.length > 0) {
+              message.success('服务器更新成功，Agent 类型无需切换');
+            } else {
+              message.error(result.rejected[0]?.code || '基本信息已更新，但切换 Agent 类型失败');
             }
           } catch (switchErr) {
             console.error('切换 Agent 类型失败:', switchErr);
@@ -397,13 +423,15 @@ const displayServers = computed(() => {
 });
 
 // 页面加载时获取数据
-onMounted(() => {
-  fetchServers();
+onMounted(async () => {
+  await fetchServers();
+  await agentTypeUpgrades.loadActive(servers.value.map((server) => Number(server.id)));
 });
 
 // 页面激活时静默刷新
-onActivated(() => {
-  fetchServers(false, false);
+onActivated(async () => {
+  await fetchServers(false, false);
+  await agentTypeUpgrades.loadActive(servers.value.map((server) => Number(server.id)));
 });
 
 onDeactivated(() => {

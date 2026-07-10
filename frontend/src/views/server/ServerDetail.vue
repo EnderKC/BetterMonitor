@@ -19,6 +19,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined, DownOutlined } from '@ant-design/icons-vue';
 import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
+import { useAgentUpgradeJobs } from '@/composables/useAgentUpgradeJobs';
 
 // 注册必要的ECharts组件
 use([
@@ -115,6 +116,38 @@ const isMonitorOnly = computed(() => {
   return serverInfo.value?.agent_type === 'monitor';
 });
 
+const refreshAgentIdentity = async () => {
+  const response = await request.get<{
+    server?: { agent_type?: 'full' | 'monitor'; agent_version?: string };
+  }>(`/servers/${serverId.value}`);
+  if (response.server) {
+    const server = response.server;
+    serverInfo.value.agent_type = server.agent_type || 'full';
+    serverInfo.value.agent_version = server.agent_version || '';
+    serverStore.updateServerMonitorData(serverId.value, {
+      agent_type: serverInfo.value.agent_type,
+      agent_version: serverInfo.value.agent_version,
+    });
+  }
+};
+
+const agentTypeUpgrades = useAgentUpgradeJobs({
+  onTerminal: async (job) => {
+    if (job.server_id !== serverId.value) return;
+    if (job.status === 'succeeded') {
+      await refreshAgentIdentity();
+      message.success('Agent 类型切换已由重连确认');
+      return;
+    }
+    message.error(`Agent 类型切换失败：${job.error_code || job.status}`);
+  },
+});
+const activeAgentTypeJob = computed(() => {
+  const job = agentTypeUpgrades.statusForServer(serverId.value);
+  if (!job || ['succeeded', 'failed', 'timed_out'].includes(job.status)) return undefined;
+  return job;
+});
+
 // 切换 Agent 类型（full ↔ monitor）
 const switchingAgentType = ref(false);
 const switchAgentType = () => {
@@ -131,16 +164,16 @@ const switchAgentType = () => {
     onOk: async () => {
       switchingAgentType.value = true;
       try {
-        const res = await request.post(`/servers/${serverId.value}/switch-agent-type`, {
+        const result = await agentTypeUpgrades.submit({
+          server_ids: [serverId.value],
           target_agent_type: targetType,
         });
-        // 更新本地状态
-        serverInfo.value.agent_type = targetType;
-        serverStore.updateServerMonitorData(serverId.value, { agent_type: targetType });
-        if (res?.upgrade_dispatched) {
-          message.success(`Agent 类型切换指令已下发，正在切换为${targetLabel}`);
+        if (result.jobs.length > 0) {
+          message.success(`Agent 类型切换任务已创建，目标为${targetLabel}`);
+        } else if (result.noop.length > 0) {
+          message.info(`Agent 已经是${targetLabel}`);
         } else {
-          message.warning(res?.message || '类型已更新，但 Agent 离线，需手动重装');
+          message.error(result.rejected[0]?.code || '切换 Agent 类型失败');
         }
       } catch (error: any) {
         message.error(error?.response?.data?.error || '切换 Agent 类型失败');
@@ -401,6 +434,7 @@ onMounted(async () => {
 
   // 获取服务器信息
   await fetchServerInfo();
+  await agentTypeUpgrades.loadActive([serverId.value]);
 
   // 获取历史监控数据
   await fetchHistoricalData();
@@ -838,7 +872,7 @@ const connectWebSocket = async () => {
                 ws.close();
               }
               // 短暂延迟后重新连接
-              setTimeout(connectWebSocket, 3000);
+              setTimeout(connectWebSocket, reconnectDelay);
             }
           }
         } else {
@@ -1305,11 +1339,15 @@ const updateMonitorData = (data: any) => {
                 class="status-badge"
                 style="background: rgba(52, 199, 89, 0.12); color: #34c759;"
               >全功能</span>
+              <span v-if="activeAgentTypeJob" class="status-badge">
+                目标 {{ activeAgentTypeJob.target_agent_type }} /
+                {{ activeAgentTypeJob.target_version }}
+              </span>
               <span
                 class="switch-agent-type-btn"
-                :class="{ disabled: switchingAgentType }"
-                @click="!switchingAgentType && switchAgentType()"
-              >{{ switchingAgentType ? '切换中...' : '切换' }}</span>
+                :class="{ disabled: switchingAgentType || activeAgentTypeJob }"
+                @click="!switchingAgentType && !activeAgentTypeJob && switchAgentType()"
+              >{{ switchingAgentType || activeAgentTypeJob ? '切换中...' : '切换' }}</span>
             </div>
           </div>
         </div>

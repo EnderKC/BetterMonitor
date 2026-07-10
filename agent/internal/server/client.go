@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,7 +40,8 @@ type Client struct {
 	wsWriteMutex sync.Mutex // WebSocket写入锁
 
 	// 升级并发保护：同一时间只允许一个升级任务
-	upgrading int32
+	upgrading         int32
+	upgradeMarkerPath string
 
 	// 操作类功能字段（通过 build tag 控制）
 	clientOpsFields
@@ -60,12 +60,8 @@ func New(config *config.Config, log *logger.Logger) *Client {
 		},
 		secretKey: config.SecretKey,
 	}
+	c.upgradeMarkerPath, _ = upgrader.DefaultMarkerPath()
 	c.initOpsFields()
-
-	// 将升级相关配置同步到环境变量，供 upgrader 包使用
-	if c.cfg.UpdateRepo != "" {
-		os.Setenv("BETTER_MONITOR_AGENT_GITHUB_REPO", c.cfg.UpdateRepo)
-	}
 
 	return c
 }
@@ -285,6 +281,8 @@ func (c *Client) handleWebSocketMessages(conn *websocket.Conn, cancel context.Ca
 		case "agent_upgrade":
 			// 处理Agent升级请求 - 委托给 upgrader 包的统一升级流程
 			go c.handleAgentUpgrade(msgCopy)
+		case "agent_upgrade_ack":
+			c.handleAgentUpgradeAck(msgCopy)
 
 		case "error":
 			// Dashboard/Server 可能会返回 error 消息（例如服务端不识别某些响应类型）。
@@ -322,12 +320,38 @@ func (c *Client) agentHello() AgentHello {
 	if agentType != "full" && agentType != "monitor" {
 		agentType = "full"
 	}
-	return AgentHello{
+	hello := AgentHello{
 		Type:                     "agent_hello",
 		Version:                  version.Version,
 		AgentType:                agentType,
 		HeartbeatIntervalSeconds: int(c.effectiveHeartbeatInterval() / time.Second),
-		UpgradeRequestID:         "",
+	}
+	if strings.TrimSpace(c.upgradeMarkerPath) != "" {
+		report, err := loadAgentUpgradeBootReport(c.upgradeMarkerPath)
+		if err != nil {
+			c.log.Warn("升级结果标记无效，将保留文件等待人工处理")
+		} else {
+			hello.UpgradeReport = report
+		}
+	}
+	return hello
+}
+
+func (c *Client) handleAgentUpgradeAck(message []byte) {
+	var ack struct {
+		Type      string `json:"type"`
+		RequestID string `json:"request_id"`
+		Confirmed bool   `json:"confirmed"`
+	}
+	if err := json.Unmarshal(message, &ack); err != nil || ack.Type != "agent_upgrade_ack" || !ack.Confirmed {
+		return
+	}
+	marker, err := upgrader.LoadUpgradeMarker(c.upgradeMarkerPath)
+	if err != nil || marker == nil || strings.TrimSpace(ack.RequestID) != marker.RequestID {
+		return
+	}
+	if err := upgrader.ClearUpgradeMarker(c.upgradeMarkerPath); err != nil {
+		c.log.Warn("清理已确认的升级结果标记失败")
 	}
 }
 
@@ -496,8 +520,6 @@ func (c *Client) FetchSettings() error {
 	if repo := strings.TrimSpace(response.AgentReleaseRepo); repo != "" && repo != c.cfg.UpdateRepo {
 		c.log.Info("更新Release仓库: %s -> %s", c.cfg.UpdateRepo, repo)
 		c.cfg.UpdateRepo = repo
-		// 同步到环境变量，供 upgrader 包的 resolveDownloadURL 使用
-		os.Setenv("BETTER_MONITOR_AGENT_GITHUB_REPO", repo)
 		configChanged = true
 	}
 
@@ -573,166 +595,157 @@ func (c *Client) IsConnectionError(err error) bool {
 	return false
 }
 
-// ─── Agent 升级（统一使用 upgrader 包） ─────────────────────────────────────────
+// ─── Agent 升级 ───────────────────────────────────────────────────────────────
 
-type agentUpgradePayload struct {
-	Action          string `json:"action"`
-	TargetVersion   string `json:"target_version"`
-	Channel         string `json:"channel"`
-	ServerID        uint   `json:"server_id"`
-	DownloadURL     string `json:"download_url,omitempty"`
-	SHA256          string `json:"sha256,omitempty"`
-	TargetAgentType string `json:"target_agent_type,omitempty"`
+type agentUpgradeStatus struct {
+	Type            string `json:"type"`
+	RequestID       string `json:"request_id"`
+	Status          string `json:"status"`
+	BytesDownloaded int64  `json:"bytes_downloaded,omitempty"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	Message         string `json:"message,omitempty"`
 }
 
-// handleAgentUpgrade 处理面板端下发的升级指令，委托给 upgrader 包执行
-func (c *Client) handleAgentUpgrade(message []byte) {
-	c.log.Info("收到Agent升级请求")
-
-	// 并发保护：同一时间只允许一个升级任务
-	if !atomic.CompareAndSwapInt32(&c.upgrading, 0, 1) {
-		c.log.Warn("升级任务正在进行中，忽略重复请求")
-		return
-	}
-	defer atomic.StoreInt32(&c.upgrading, 0)
-
+func decodeAgentUpgradeInstruction(message []byte) (upgrader.UpgradeInstruction, error) {
 	var envelope struct {
+		Type      string          `json:"type"`
 		RequestID string          `json:"request_id"`
 		Payload   json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(message, &envelope); err != nil {
-		c.log.Error("解析升级消息失败: %v", err)
+		return upgrader.UpgradeInstruction{}, fmt.Errorf("decode upgrade envelope: %w", err)
+	}
+	if envelope.Type != "agent_upgrade" {
+		return upgrader.UpgradeInstruction{}, fmt.Errorf("invalid upgrade message type")
+	}
+	var instruction upgrader.UpgradeInstruction
+	if err := json.Unmarshal(envelope.Payload, &instruction); err != nil {
+		return upgrader.UpgradeInstruction{}, fmt.Errorf("decode upgrade payload: %w", err)
+	}
+	instruction.RequestID = strings.TrimSpace(envelope.RequestID)
+	if err := upgrader.ValidateUpgradeInstruction(instruction); err != nil {
+		return upgrader.UpgradeInstruction{}, err
+	}
+	return instruction, nil
+}
+
+func buildAgentUpgradeStatus(
+	requestID, status string,
+	bytesDownloaded int64,
+	errorCode, message string,
+) agentUpgradeStatus {
+	return agentUpgradeStatus{
+		Type:            "agent_upgrade_status",
+		RequestID:       strings.TrimSpace(requestID),
+		Status:          strings.TrimSpace(status),
+		BytesDownloaded: bytesDownloaded,
+		ErrorCode:       strings.TrimSpace(errorCode),
+		Message:         strings.TrimSpace(message),
+	}
+}
+
+func upgradeRequestID(message []byte) string {
+	var envelope struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(message, &envelope)
+	return strings.TrimSpace(envelope.RequestID)
+}
+
+func (c *Client) handleAgentUpgrade(message []byte) {
+	if !atomic.CompareAndSwapInt32(&c.upgrading, 0, 1) {
+		c.log.Warn("升级任务正在进行中，拒绝重复指令")
+		return
+	}
+	defer atomic.StoreInt32(&c.upgrading, 0)
+
+	instruction, err := decodeAgentUpgradeInstruction(message)
+	if err != nil {
+		if requestID := upgradeRequestID(message); requestID != "" {
+			c.sendUpgradeStatus(requestID, "failed", 0, "upgrade_instruction_invalid", "upgrade instruction rejected")
+		}
+		c.log.Warn("拒绝无效的 Agent 升级指令")
+		return
+	}
+	if upgrader.IsUpgradeNoop(instruction) {
+		c.sendUpgradeStatus(instruction.RequestID, "failed", 0, "upgrade_noop", "target identity is already running")
 		return
 	}
 
-	requestID := strings.TrimSpace(envelope.RequestID)
-	if requestID == "" {
-		requestID = fmt.Sprintf("upgrade-%d-%d", c.cfg.ServerID, time.Now().Unix())
-	}
-
-	c.sendUpgradeStatus(requestID, "received", "收到升级指令", map[string]interface{}{
-		"platform": runtime.GOOS,
-		"arch":     runtime.GOARCH,
-	})
-
-	var p agentUpgradePayload
-	if err := json.Unmarshal(envelope.Payload, &p); err != nil {
-		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("解析升级 payload 失败: %v", err), nil)
-		return
-	}
-
-	if p.ServerID == 0 {
-		p.ServerID = uint(c.cfg.ServerID)
-	}
-	if strings.TrimSpace(p.Action) == "" {
-		p.Action = "upgrade"
-	}
-	if p.Action != "upgrade" {
-		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("不支持的升级动作: %s", p.Action), nil)
-		return
-	}
-	if strings.TrimSpace(p.TargetVersion) == "" {
-		c.sendUpgradeStatus(requestID, "failed", "缺少 target_version", nil)
-		return
-	}
-	if strings.TrimSpace(p.Channel) == "" {
-		p.Channel = "stable"
-	}
-
-	current := version.GetVersion()
-	if current != nil && strings.TrimSpace(current.Version) != "" &&
-		strings.TrimSpace(current.Version) == strings.TrimSpace(p.TargetVersion) {
-		c.sendUpgradeStatus(requestID, "noop", "当前版本已是目标版本，无需升级", map[string]interface{}{
-			"current_version": current.Version,
-			"target_version":  p.TargetVersion,
-		})
-		return
-	}
-
+	c.sendUpgradeStatus(instruction.RequestID, "received", 0, "", "upgrade instruction received")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	req := upgrader.UpgradeRequest{
-		RequestID:       requestID,
-		TargetVersion:   strings.TrimSpace(p.TargetVersion),
-		Channel:         strings.TrimSpace(p.Channel),
-		DownloadURL:     strings.TrimSpace(p.DownloadURL),
-		SHA256:          strings.TrimSpace(p.SHA256),
-		TargetAgentType: strings.TrimSpace(p.TargetAgentType),
-		ServerID:        p.ServerID,
-		SecretKey:       c.secretKey,
-		Args:            os.Args,
-		Env:             os.Environ(),
+		RequestID:         instruction.RequestID,
+		TargetVersion:     instruction.TargetVersion,
+		TargetAgentType:   instruction.TargetAgentType,
+		AssetName:         instruction.AssetName,
+		AssetSize:         instruction.AssetSize,
+		MaxDownloadBytes:  upgrader.DefaultMaxDownloadBytes,
+		MarkerPath:        c.upgradeMarkerPath,
+		ScheduledTaskName: "BetterMonitorAgent",
+		DownloadURL:       instruction.DownloadURL,
+		SHA256:            instruction.SHA256,
+		Args:              os.Args,
+		Env:               os.Environ(),
 	}
 
-	c.sendUpgradeStatus(requestID, "starting", "开始执行升级流程", map[string]interface{}{
-		"current_version": safeVersion(current),
-		"target_version":  req.TargetVersion,
-		"channel":         req.Channel,
-	})
-
-	err := upgrader.Upgrade(ctx, req, func(pr upgrader.Progress) {
-		fields := map[string]interface{}{
-			"current_version": safeVersion(version.GetVersion()),
-			"target_version":  req.TargetVersion,
-			"channel":         req.Channel,
+	err = upgrader.Upgrade(ctx, req, func(progress upgrader.Progress) {
+		switch progress.Status {
+		case "downloading", "verifying", "applying", "restarting":
+			c.sendUpgradeStatus(
+				instruction.RequestID,
+				progress.Status,
+				progress.BytesDownloaded,
+				progress.ErrorCode,
+				agentUpgradeProgressMessage(progress.Status),
+			)
 		}
-		if pr.DownloadURL != "" {
-			fields["download_url"] = pr.DownloadURL
-		}
-		if pr.SHA256 != "" {
-			fields["sha256"] = pr.SHA256
-		}
-		if pr.BytesDownloaded > 0 {
-			fields["bytes_downloaded"] = pr.BytesDownloaded
-		}
-		c.sendUpgradeStatus(requestID, pr.Status, pr.Message, fields)
 	})
 	if err != nil {
-		c.sendUpgradeStatus(requestID, "failed", fmt.Sprintf("升级失败: %v", err), nil)
+		c.log.Warn("Agent 升级执行失败: request_id=%s", instruction.RequestID)
+		c.sendUpgradeStatus(instruction.RequestID, "failed", 0, agentUpgradeFailureCode(err), "upgrade execution failed")
 		return
 	}
 
-	// Upgrade 成功时通常会直接触发进程重启（Unix: exec；Windows: 退出后由 updater 拉起），
-	// 不会执行到这里。但若到达此处，仍发送 success 状态。
-	c.sendUpgradeStatus(requestID, "success", "升级流程完成", nil)
+	c.sendUpgradeStatus(
+		instruction.RequestID,
+		"failed",
+		0,
+		"upgrade_restart_unconfirmed",
+		"upgrade returned before process restart",
+	)
 }
 
-func safeVersion(info *version.Info) string {
-	if info == nil {
+func agentUpgradeFailureCode(err error) string {
+	if code := upgrader.UpgradeErrorCode(err); code != "" {
+		return code
+	}
+	return "upgrade_failed"
+}
+
+func agentUpgradeProgressMessage(status string) string {
+	switch status {
+	case "downloading":
+		return "downloading upgrade asset"
+	case "verifying":
+		return "verifying upgrade asset"
+	case "applying":
+		return "applying upgrade asset"
+	case "restarting":
+		return "restarting agent"
+	default:
 		return ""
 	}
-	return strings.TrimSpace(info.Version)
 }
 
-// sendUpgradeStatus 向面板端发送升级状态消息
-func (c *Client) sendUpgradeStatus(requestID, status, message string, extra map[string]interface{}) {
-	info := version.GetVersion()
-
-	payload := map[string]interface{}{
-		"status":  status,
-		"message": message,
-		"time":    time.Now().UTC().Format(time.RFC3339),
-		"agent": map[string]interface{}{
-			"version":    safeVersion(info),
-			"commit":     strings.TrimSpace(info.Commit),
-			"build_date": strings.TrimSpace(info.BuildDate),
-			"go_version": strings.TrimSpace(info.GoVersion),
-			"platform":   strings.TrimSpace(info.Platform),
-			"arch":       strings.TrimSpace(info.Arch),
-		},
-	}
-	for k, v := range extra {
-		payload[k] = v
-	}
-
-	msg := map[string]interface{}{
-		"type":       "agent_upgrade_status",
-		"request_id": requestID,
-		"payload":    payload,
-	}
-
-	if err := c.writeJSON(msg); err != nil {
-		c.log.Error("发送升级状态消息失败: %v", err)
+func (c *Client) sendUpgradeStatus(
+	requestID, status string,
+	bytesDownloaded int64,
+	errorCode, message string,
+) {
+	if err := c.writeJSON(buildAgentUpgradeStatus(requestID, status, bytesDownloaded, errorCode, message)); err != nil {
+		c.log.Error("发送 Agent 升级状态失败")
 	}
 }

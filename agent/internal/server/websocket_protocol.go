@@ -8,14 +8,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/user/server-ops-agent/internal/upgrader"
 )
 
+type AgentUpgradeBootReport struct {
+	RequestID string `json:"request_id"`
+	Outcome   string `json:"outcome"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
 type AgentHello struct {
-	Type                     string `json:"type"`
-	Version                  string `json:"version"`
-	AgentType                string `json:"agent_type"`
-	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds"`
-	UpgradeRequestID         string `json:"upgrade_request_id"`
+	Type                     string                  `json:"type"`
+	Version                  string                  `json:"version"`
+	AgentType                string                  `json:"agent_type"`
+	HeartbeatIntervalSeconds int                     `json:"heartbeat_interval_seconds"`
+	UpgradeReport            *AgentUpgradeBootReport `json:"upgrade_report,omitempty"`
 }
 
 type AgentHeartbeat struct {
@@ -63,6 +71,18 @@ func BuildAgentWebSocketHeaders(secret string, hello AgentHello) http.Header {
 	headers.Set("X-Agent-Type", hello.AgentType)
 	headers.Set("X-Agent-Heartbeat-Seconds", strconv.Itoa(hello.HeartbeatIntervalSeconds))
 	return headers
+}
+
+func loadAgentUpgradeBootReport(path string) (*AgentUpgradeBootReport, error) {
+	marker, err := upgrader.LoadUpgradeMarker(path)
+	if err != nil || marker == nil {
+		return nil, err
+	}
+	return &AgentUpgradeBootReport{
+		RequestID: marker.RequestID,
+		Outcome:   marker.Outcome,
+		ErrorCode: marker.ErrorCode,
+	}, nil
 }
 
 func runAgentHeartbeat(
