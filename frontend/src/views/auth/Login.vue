@@ -3,7 +3,7 @@ import { ref, reactive, h } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 import request from '../../utils/request';
-import { setToken, setUser } from '../../utils/auth';
+import { setAdmin, setToken } from '../../utils/auth';
 import { UserOutlined, LockOutlined, RightOutlined } from '@ant-design/icons-vue';
 
 // 图标组件
@@ -29,14 +29,11 @@ const loading = ref(false);
 const handleLogin = () => {
   formRef.value.validate().then(() => {
     loading.value = true;
-    console.log('开始登录请求...');
 
     request.post('/login', formState)
       .then((response: any) => {
-        console.log('登录响应:', response);
-
-        // 确保响应中包含token和user
-        if (!response.token) {
+        // 确保响应中包含 token 和单一管理员资料
+        if (!response.token || !response.admin) {
           message.error('登录成功但缺少令牌信息');
           loading.value = false;
           return;
@@ -44,21 +41,19 @@ const handleLogin = () => {
 
         // 保存登录信息
         setToken(response.token);
-        setUser(response.user);
+        setAdmin(response.admin);
 
         message.success('登录成功');
 
         // 跳转到重定向页面或默认页面
         const redirectPath = (route.query.redirect as string) || '/admin';
-        console.log('准备跳转到:', redirectPath);
 
         // 使用setTimeout确保跳转在下一个事件循环执行
         setTimeout(() => {
           router.push(redirectPath);
         }, 100);
       })
-      .catch((error) => {
-        console.error('登录失败:', error);
+      .catch(() => {
         // 错误已经在拦截器中处理
       })
       .finally(() => {

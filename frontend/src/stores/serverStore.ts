@@ -221,7 +221,7 @@ export const useServerStore = defineStore('serverStore', {
               secretKey: server.secret_key || server.SecretKey || existingServer?.secretKey,
               sort_order: server.SortOrder || server.sort_order || 0,
               agent_type: server.AgentType || server.agent_type || 'full',
-              allow_public_view: server.AllowPublicView ?? server.allow_public_view ?? true,
+              allow_public_view: server.AllowPublicView ?? server.allow_public_view ?? false,
               lastUpdate: Date.now(),
               // 确保 monitorData 不被覆盖为空
               monitorData: existingServer?.monitorData || {}

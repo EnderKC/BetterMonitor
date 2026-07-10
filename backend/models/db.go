@@ -3,6 +3,7 @@ package models
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/user/server-ops-backend/config"
@@ -18,7 +19,7 @@ func InitDB() error {
 	cfg := config.LoadConfig()
 
 	// 创建数据目录（如果不存在）
-	dir := "./data"
+	dir := filepath.Dir(cfg.DBPath)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
@@ -44,10 +45,14 @@ func InitDB() error {
 	}
 
 	DB = db
+	if err := MigrateSingleAdmin(DB, func() (AdminBootstrap, error) {
+		return ResolveAdminBootstrap(cfg)
+	}); err != nil {
+		return err
+	}
 
 	// 自动迁移数据库结构
 	if err := DB.AutoMigrate(
-		&User{},
 		&Server{},
 		&ServerMonitor{},
 		&SystemSettings{},
@@ -76,23 +81,6 @@ func InitDB() error {
 			}
 		}
 		log.Println("服务器 sort_order 初始化完成")
-	}
-
-	// 检查是否需要创建管理员账户
-	var count int64
-	DB.Model(&User{}).Count(&count)
-	if count == 0 {
-		// 创建默认管理员用户
-		adminUser := User{
-			Username: "admin",
-			Password: HashPassword("admin123"), // 默认密码，建议首次登录后修改
-			Role:     "admin",
-		}
-		if err := DB.Create(&adminUser).Error; err != nil {
-			log.Printf("创建默认管理员失败: %v", err)
-		} else {
-			log.Println("已创建默认管理员账户，用户名: admin, 密码: admin123")
-		}
 	}
 
 	// 检查是否需要创建默认系统设置

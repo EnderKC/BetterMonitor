@@ -194,23 +194,12 @@ const routes: Array<RouteRecordRaw> = [
         },
       },
       {
-        path: 'users',
-        name: 'UserManagement',
-        component: () => import('../views/user/UserManagement.vue'),
-        meta: {
-          title: '用户管理',
-          requiresAuth: true,
-          admin: true,
-        },
-      },
-      {
         path: 'settings',
         name: 'SystemSettings',
         component: () => import('../views/server/Settings.vue'),
         meta: {
           title: '系统设置',
           requiresAuth: true,
-          admin: true,
         },
       },
       {
@@ -276,40 +265,13 @@ router.beforeEach(async (to, from, next) => {
 
   // 检查是否需要登录权限
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
-  const requiresAdmin = to.matched.some(record => record.meta.admin);
   const token = getToken();
-
-  console.log('当前token状态:', token ? '已登录' : '未登录');
-  console.log('是否需要管理员权限:', requiresAdmin);
 
   if (requiresAuth && !token) {
     // 需要登录但没有token，重定向到登录页
     console.log('未登录，重定向到登录页');
     next({ path: '/login', query: { redirect: to.fullPath } });
     return;
-  }
-
-  // 检查是否需要管理员权限
-  if (requiresAdmin) {
-    // 动态导入 userStore 以避免循环依赖
-    const { useUserStore } = await import('../stores/userStore');
-    const userStore = useUserStore();
-
-    console.log('[Router] 检查管理员权限');
-    console.log('[Router] 当前管理员状态:', userStore.isAdmin);
-
-    // 如果不是管理员，尝试刷新用户信息
-    if (!userStore.isAdmin && token) {
-      console.log('[Router] 尝试刷新用户信息');
-      await userStore.getUserInfo(true);
-      console.log('[Router] 刷新后的管理员状态:', userStore.isAdmin);
-    }
-
-    if (!userStore.isAdmin) {
-      console.error('[Router] 非管理员访问被拒绝:', to.path);
-      next({ path: '/dashboard' });
-      return;
-    }
   }
 
   console.log('允许访问:', to.path);

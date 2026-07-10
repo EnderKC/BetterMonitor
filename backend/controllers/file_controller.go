@@ -306,8 +306,7 @@ func DownloadFile(c *gin.Context) {
 	token := c.Query("token")
 
 	// 验证token
-	claims, err := utils.ParseToken(token)
-	if err != nil || claims == nil {
+	if err := validateAdminDownloadToken(token); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未授权，请重新登录"})
 		return
 	}
@@ -665,8 +664,7 @@ func DownloadContainerFile(c *gin.Context) {
 	path := c.Query("path")
 	token := c.Query("token")
 
-	claims, err := utils.ParseToken(token)
-	if err != nil || claims == nil {
+	if err := validateAdminDownloadToken(token); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未授权，请重新登录"})
 		return
 	}
@@ -698,6 +696,11 @@ func DownloadContainerFile(c *gin.Context) {
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Length", fmt.Sprintf("%d", len(fileData)))
 	c.Data(http.StatusOK, "application/octet-stream", fileData)
+}
+
+func validateAdminDownloadToken(token string) error {
+	_, _, err := utils.ValidateAdminToken(token)
+	return err
 }
 
 // DeleteContainerFiles 删除容器文件

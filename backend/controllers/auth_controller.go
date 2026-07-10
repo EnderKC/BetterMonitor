@@ -6,22 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/utils"
+	"gorm.io/gorm"
 )
 
-// LoginRequest 登录请求结构
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
-// RegisterRequest 注册请求结构
-type RegisterRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required,min=6"`
-	Role     string `json:"role" binding:"required"`
-}
-
-// Login 用户登录
 func Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -33,27 +25,20 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 查找用户
-	user, err := models.GetUserByUsername(req.Username)
-	if err != nil {
-		recordLoginFailure(c, req.Username)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
-		return
-	}
-
-	// 验证密码
-	if !user.CheckPassword(req.Password) {
+	admin, err := models.GetAdminAccountByUsername(req.Username)
+	if err != nil || !admin.CheckPassword(req.Password) {
 		recordLoginFailure(c, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 	clearLoginFailures(c, req.Username)
 
-	// 更新最后登录时间
-	user.UpdateLastLogin()
+	if err := admin.UpdateLastLogin(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新登录状态失败"})
+		return
+	}
 
-	// 生成令牌
-	token, err := utils.GenerateToken(user.ID, user.Username, user.Role)
+	token, err := utils.GenerateToken(admin.ID, admin.Username, admin.SessionVersion)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成令牌失败"})
 		return
@@ -61,128 +46,79 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
-		"user": gin.H{
-			"id":       user.ID,
-			"username": user.Username,
-			"role":     user.Role,
-		},
+		"admin": adminProfilePayload(admin),
 	})
 }
 
-// Register 注册新用户
-func Register(c *gin.Context) {
-	var req RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
-		return
-	}
-
-	// 检查请求者是否为管理员（只有管理员可以创建新用户）
-	role, exists := c.Get("role")
-	if !exists || role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "只有管理员可以创建新用户"})
-		return
-	}
-
-	// 创建用户
-	user, err := models.CreateUser(req.Username, req.Password, req.Role)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "用户创建成功",
-		"user": gin.H{
-			"id":       user.ID,
-			"username": user.Username,
-			"role":     user.Role,
-		},
-	})
-}
-
-// GetProfile 获取当前用户资料
 func GetProfile(c *gin.Context) {
-	userIDValue, ok := c.Get("userId")
+	admin, ok := currentAdminFromContext(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-
-	userID, ok := userIDValue.(uint)
-	if !ok || userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
-	db := models.DB
-	if db == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database not initialized"})
-		return
-	}
-
-	var user models.User
-	if err := db.First(&user, userID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
-		"phone":    user.Phone,
-		"role":     user.Role,
-		// 兼容前端老字段：UserManagement/Profile 页使用 last_login
-		"last_login_at": user.LastLoginAt,
-		"last_login":    user.LastLoginAt,
-	})
+	c.JSON(http.StatusOK, adminProfilePayload(admin))
 }
 
-// ChangePassword 修改密码
 func ChangePassword(c *gin.Context) {
-	type ChangePasswordRequest struct {
+	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required,min=12"`
 	}
-
-	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
 		return
 	}
 
-	// 获取用户ID
-	userIDValue, exists := c.Get("userId")
-	if !exists {
+	admin, ok := currentAdminFromContext(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	id, ok := userIDValue.(uint)
-	if !ok || id == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
-	// 获取用户信息
-	var user models.User
-	if err := models.DB.First(&user, id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "用户不存在"})
-		return
-	}
-
-	// 验证旧密码
-	if !user.CheckPassword(req.OldPassword) {
+	if !admin.CheckPassword(req.OldPassword) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "旧密码不正确"})
 		return
 	}
 
-	// 更新密码
-	user.Password = models.HashPassword(req.NewPassword)
-	if err := models.DB.Save(&user).Error; err != nil {
+	hash, err := models.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码处理失败"})
+		return
+	}
+
+	result := models.DB.Model(&models.AdminAccount{}).
+		Where("id = ? AND session_version = ?", admin.ID, admin.SessionVersion).
+		Updates(map[string]interface{}{
+			"password":        hash,
+			"session_version": gorm.Expr("session_version + 1"),
+		})
+	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码更新失败"})
+		return
+	}
+	if result.RowsAffected != 1 {
+		c.JSON(http.StatusConflict, gin.H{"error": "管理员会话已变更，请重新登录"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "密码已更新"})
+}
+
+func currentAdminFromContext(c *gin.Context) (*models.AdminAccount, bool) {
+	value, ok := c.Get("adminAccount")
+	if !ok {
+		return nil, false
+	}
+	admin, ok := value.(*models.AdminAccount)
+	return admin, ok && admin != nil && admin.ID == models.SingletonAdminID
+}
+
+func adminProfilePayload(admin *models.AdminAccount) gin.H {
+	return gin.H{
+		"id":            admin.ID,
+		"username":      admin.Username,
+		"email":         admin.Email,
+		"phone":         admin.Phone,
+		"last_login_at": admin.LastLoginAt,
+		"last_login":    admin.LastLoginAt,
+	}
 }

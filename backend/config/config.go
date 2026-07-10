@@ -3,8 +3,12 @@ package config
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -15,11 +19,21 @@ import (
 
 // Config 保存应用程序配置
 type Config struct {
-	Port             string
-	DBPath           string
-	JWTSecret        string
-	TokenExpiration  int
-	CORSAllowOrigins []string
+	Port                             string
+	DBPath                           string
+	JWTSecret                        string
+	TokenExpiration                  int
+	CORSAllowOrigins                 []string
+	AdminUsername                    string
+	AdminPassword                    string
+	AdminPasswordFile                string
+	TrustedProxies                   []string
+	LifeIngestMasterKey              string
+	LifeIngestMasterKeyFile          string
+	LifeIngestMaxBodyBytes           int64
+	LifeIngestClockSkewSeconds       int
+	LifeIngestIPRequestsPerMinute    int
+	LifeIngestProbeRequestsPerMinute int
 }
 
 var (
@@ -48,6 +62,14 @@ func LoadConfig() *Config {
 		port := getEnv("PORT", "8085")
 		dbPath := getEnv("DB_PATH", "./data/data.db")
 		corsAllowOrigins := parseCSVEnv("CORS_ALLOW_ORIGINS")
+		adminPasswordFile := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD_FILE"))
+		if adminPasswordFile == "" {
+			adminPasswordFile = filepath.Join(filepath.Dir(dbPath), "admin-password")
+		}
+		lifeIngestMasterKeyFile := strings.TrimSpace(os.Getenv("LIFE_INGEST_MASTER_KEY_FILE"))
+		if lifeIngestMasterKeyFile == "" {
+			lifeIngestMasterKeyFile = filepath.Join(filepath.Dir(dbPath), "life-ingest-master-key")
+		}
 
 		// 如果没有设置JWT_SECRET，自动生成一个随机密钥
 		jwtSecret := os.Getenv("JWT_SECRET")
@@ -58,15 +80,35 @@ func LoadConfig() *Config {
 		}
 
 		instance = &Config{
-			Port:             port,
-			DBPath:           dbPath,
-			JWTSecret:        jwtSecret,
-			TokenExpiration:  24, // 默认24小时
-			CORSAllowOrigins: corsAllowOrigins,
+			Port:                             port,
+			DBPath:                           dbPath,
+			JWTSecret:                        jwtSecret,
+			TokenExpiration:                  24, // 默认24小时
+			CORSAllowOrigins:                 corsAllowOrigins,
+			AdminUsername:                    getEnv("ADMIN_USERNAME", "admin"),
+			AdminPassword:                    os.Getenv("ADMIN_PASSWORD"),
+			AdminPasswordFile:                adminPasswordFile,
+			TrustedProxies:                   parseCSVEnv("TRUSTED_PROXIES"),
+			LifeIngestMasterKey:              strings.TrimSpace(os.Getenv("LIFE_INGEST_MASTER_KEY")),
+			LifeIngestMasterKeyFile:          lifeIngestMasterKeyFile,
+			LifeIngestMaxBodyBytes:           getInt64Env("LIFE_INGEST_MAX_BODY_BYTES", 4<<20),
+			LifeIngestClockSkewSeconds:       getIntEnv("LIFE_INGEST_CLOCK_SKEW_SECONDS", 300),
+			LifeIngestIPRequestsPerMinute:    getIntEnv("LIFE_INGEST_IP_REQUESTS_PER_MINUTE", 240),
+			LifeIngestProbeRequestsPerMinute: getIntEnv("LIFE_INGEST_PROBE_REQUESTS_PER_MINUTE", 120),
 		}
 	})
 
 	return instance
+}
+
+func ConfigureTrustedProxies(engine *gin.Engine, proxies []string) error {
+	if engine == nil {
+		return errors.New("gin engine is required")
+	}
+	if err := engine.SetTrustedProxies(proxies); err != nil {
+		return fmt.Errorf("configure trusted proxies: %w", err)
+	}
+	return nil
 }
 
 // CorsMiddleware 配置CORS中间件
@@ -127,4 +169,30 @@ func parseCSVEnv(key string) []string {
 		}
 	}
 	return values
+}
+
+func getIntEnv(key string, defaultValue int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		log.Printf("配置 %s 无效，使用默认值 %d", key, defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
+func getInt64Env(key string, defaultValue int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		log.Printf("配置 %s 无效，使用默认值 %d", key, defaultValue)
+		return defaultValue
+	}
+	return value
 }

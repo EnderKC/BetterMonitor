@@ -10,10 +10,10 @@ import {
   CameraOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
-import { setUser } from '../../utils/auth';
+import { clearLoginInfo, setAdmin, setToken, type AdminProfile } from '../../utils/auth';
 
-// 用户资料
-const userInfo = ref<any>({});
+// 单一管理员资料
+const adminInfo = ref<AdminProfile | null>(null);
 const loading = ref(true);
 
 // 编辑表单
@@ -35,16 +35,15 @@ const fetchUserProfile = async () => {
   try {
     // axios拦截器已经返回了 response.data，这里直接使用响应体即可
     const response = await request.get('/profile');
-    userInfo.value = response || {};
+    adminInfo.value = response || null;
     // 同步到本地缓存，保证顶部栏等位置的用户名/邮箱实时更新
-    setUser(userInfo.value);
+    if (adminInfo.value) setAdmin(adminInfo.value);
 
     // 填充表单数据
-    formState.username = userInfo.value.username || '';
-    formState.email = userInfo.value.email || '';
-    formState.phone = userInfo.value.phone || '';
-  } catch (error) {
-    console.error('获取用户资料失败:', error);
+    formState.username = adminInfo.value?.username || '';
+    formState.email = adminInfo.value?.email || '';
+    formState.phone = adminInfo.value?.phone || '';
+  } catch {
     message.error('获取用户资料失败');
   } finally {
     loading.value = false;
@@ -54,16 +53,20 @@ const fetchUserProfile = async () => {
 // 更新用户资料
 const updateProfile = async () => {
   try {
-    await request.put('/profile', {
+    const response = await request.put('/profile', {
       username: formState.username,
       email: formState.email,
       phone: formState.phone
     });
 
-    message.success('个人资料已更新');
-    fetchUserProfile();
-  } catch (error) {
-    console.error('更新用户资料失败:', error);
+    if (response?.token) setToken(response.token);
+    if (response?.data) {
+      adminInfo.value = response.data;
+      setAdmin(response.data);
+    }
+    message.success('管理员资料已更新');
+    await fetchUserProfile();
+  } catch {
     message.error('更新用户资料失败');
   }
 };
@@ -103,13 +106,11 @@ const changePassword = async () => {
     showPasswordForm.value = false;
 
     // 清除登录状态，跳转到登录页
-    localStorage.removeItem('server_ops_token');
-    localStorage.removeItem('server_ops_user');
+    clearLoginInfo();
     setTimeout(() => {
       window.location.href = '/login';
     }, 1500);
-  } catch (error) {
-    console.error('修改密码失败:', error);
+  } catch {
     message.error('修改密码失败，请确认当前密码是否正确');
   }
 };
@@ -143,9 +144,9 @@ onMounted(() => {
                     <camera-outlined />
                   </div>
                 </div>
-                <h2 class="user-name">{{ userInfo.username }}</h2>
-                <div class="user-role">
-                  <span class="role-badge">{{ userInfo.role === 'admin' ? '管理员' : '普通用户' }}</span>
+                <h2 class="user-name">{{ adminInfo?.username }}</h2>
+                <div class="account-type">
+                  <span class="admin-badge">管理员</span>
                 </div>
               </div>
 
@@ -154,14 +155,14 @@ onMounted(() => {
                   <div class="info-icon"><mail-outlined /></div>
                   <div class="info-content">
                     <div class="info-label">邮箱</div>
-                    <div class="info-value">{{ userInfo.email || '未设置' }}</div>
+                    <div class="info-value">{{ adminInfo?.email || '未设置' }}</div>
                   </div>
                 </div>
                 <div class="info-item">
                   <div class="info-icon"><phone-outlined /></div>
                   <div class="info-content">
                     <div class="info-label">手机</div>
-                    <div class="info-value">{{ userInfo.phone || '未设置' }}</div>
+                    <div class="info-value">{{ adminInfo?.phone || '未设置' }}</div>
                   </div>
                 </div>
                 <div class="info-item">
@@ -169,8 +170,8 @@ onMounted(() => {
                     <div class="info-content">
                     <div class="info-label">最后登录</div>
                     <div class="info-value">
-                      {{ (userInfo.last_login_at || userInfo.last_login)
-                        ? new Date(userInfo.last_login_at || userInfo.last_login).toLocaleString()
+                      {{ (adminInfo?.last_login_at || adminInfo?.last_login)
+                        ? new Date(adminInfo.last_login_at || adminInfo.last_login || '').toLocaleString()
                         : '未知' }}
                     </div>
                   </div>
@@ -393,7 +394,7 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
-.role-badge {
+.admin-badge {
   display: inline-block;
   padding: 4px 12px;
   background: var(--info-bg);

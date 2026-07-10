@@ -41,6 +41,9 @@ TZ="${TZ:-Asia/Shanghai}"
 COMPOSE_BIN=()
 JWT_SECRET="${JWT_SECRET:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+ADMIN_PASSWORD_PATH="${ADMIN_PASSWORD_PATH:-${DATA_DIR}/admin-password}"
 ENV_LOADED_PATH=""
 LAST_BACKUP_FILE=""
 LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
@@ -225,6 +228,29 @@ generate_jwt_secret() {
     openssl rand -base64 32 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1
 }
 
+# 生成初始管理员密码
+generate_admin_password() {
+    openssl rand -base64 24 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9_-' | fold -w 32 | head -n 1
+}
+
+# 初始管理员密码只保存在数据目录，不输出内容
+ensure_admin_password_file() {
+    if [ -f "${ADMIN_PASSWORD_PATH}" ]; then
+        chmod 600 "${ADMIN_PASSWORD_PATH}"
+        return
+    fi
+
+    local initial_password="${ADMIN_PASSWORD:-$(generate_admin_password)}"
+    if [ "${#initial_password}" -lt 12 ]; then
+        print_error "初始管理员密码长度不能少于 12 位"
+        exit 1
+    fi
+
+    umask 077
+    printf '%s\n' "${initial_password}" > "${ADMIN_PASSWORD_PATH}"
+    chmod 600 "${ADMIN_PASSWORD_PATH}"
+}
+
 # 创建 docker-compose.yml
 create_docker_compose() {
     local jwt_secret="${1:-$(generate_jwt_secret)}"
@@ -234,6 +260,8 @@ create_docker_compose() {
     # 构建 environment 段内容
     local env_lines="      - TZ=${TZ}
       - JWT_SECRET=${jwt_secret}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD_FILE=/app/data/admin-password
       - VERSION=latest"
     if [[ -n "${GITHUB_TOKEN}" ]]; then
         env_lines="${env_lines}
@@ -287,6 +315,10 @@ JWT_SECRET=${jwt_secret}
 
 # 端口配置
 PORT=${PORT}
+
+# 单一管理员引导配置（密码内容仅保存在数据目录文件）
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD_PATH=${ADMIN_PASSWORD_PATH}
 
 # 时区配置
 TZ=${TZ}
@@ -366,6 +398,7 @@ install_dashboard() {
 
     # 创建目录
     create_directories
+    ensure_admin_password_file
 
     # 生成 JWT Secret
     local jwt_secret="${JWT_SECRET:-$(generate_jwt_secret)}"
@@ -417,6 +450,8 @@ install_dashboard() {
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
             -e TZ="${TZ}" \
             -e JWT_SECRET="${jwt_secret}" \
+            -e ADMIN_USERNAME="${ADMIN_USERNAME}" \
+            -e ADMIN_PASSWORD_FILE=/app/data/admin-password \
             -e VERSION=latest \
             "${github_token_args[@]}" \
             --security-opt no-new-privileges:true \
@@ -433,12 +468,12 @@ install_dashboard() {
         echo ""
         echo "=========================================="
         echo "  访问地址: http://$(hostname -I | awk '{print $1}'):${PORT}"
-        echo "  默认账号: admin"
-        echo "  默认密码: admin123"
+        echo "  管理员账号: ${ADMIN_USERNAME}"
+        echo "  初始密码文件: ${ADMIN_PASSWORD_PATH}"
         echo "=========================================="
         echo ""
         echo "重要提示:"
-        echo "  1. 请立即登录并修改默认密码"
+        echo "  1. 请从上述文件读取初始密码，登录后立即修改"
         echo "  2. JWT Secret 已保存在: ${ENV_FILE}"
         echo "  3. 数据目录: ${DATA_DIR}"
         echo "  4. 日志目录: ${LOGS_DIR}"
@@ -561,6 +596,8 @@ EOF
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
             -e TZ="${TZ}" \
             -e JWT_SECRET="${jwt_secret}" \
+            -e ADMIN_USERNAME="${ADMIN_USERNAME}" \
+            -e ADMIN_PASSWORD_FILE=/app/data/admin-password \
             -e VERSION=latest \
             "${github_token_args[@]}" \
             --security-opt no-new-privileges:true \
@@ -888,6 +925,7 @@ migrate_data() {
 
             # 创建目录
             create_directories
+            ensure_admin_password_file
 
             # 解压迁移包
             print_info "导入数据..."
@@ -916,6 +954,8 @@ migrate_data() {
                         -v /var/run/docker.sock:/var/run/docker.sock:ro \
                         -e TZ="${TZ}" \
                         -e JWT_SECRET="${jwt_secret}" \
+                        -e ADMIN_USERNAME="${ADMIN_USERNAME}" \
+                        -e ADMIN_PASSWORD_FILE=/app/data/admin-password \
                         -e VERSION=latest \
                         --security-opt no-new-privileges:true \
                         "${DOCKER_IMAGE}"
@@ -966,8 +1006,8 @@ show_status() {
         # 访问信息
         echo "访问信息:"
         echo "  地址: http://$(hostname -I | awk '{print $1}'):${PORT}"
-        echo "  账号: admin"
-        echo "  密码: admin123 (首次登录请修改)"
+        echo "  管理员账号: ${ADMIN_USERNAME}"
+        echo "  初始密码文件: ${ADMIN_PASSWORD_PATH}"
         echo ""
 
         # 日志

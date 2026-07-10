@@ -136,7 +136,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, reactive, watch } from 'vue';
-import { useAlertStore, useUserStore } from '@/stores';
+import { useAlertStore, useAuthStore } from '@/stores';
 import { useUIStore } from '@/stores/uiStore';
 import { message } from 'ant-design-vue';
 
@@ -145,7 +145,7 @@ export default defineComponent({
   
   setup() {
     const alertStore = useAlertStore();
-    const userStore = useUserStore();
+    const authStore = useAuthStore();
     const uiStore = useUIStore();
     
     const channelModalVisible = ref(false);
@@ -203,12 +203,12 @@ export default defineComponent({
     // 计算属性
     const loading = computed(() => alertStore.loading);
     const notificationChannels = computed(() => alertStore.notificationChannels);
-    const profileEmail = computed(() => userStore.userInfo?.email || '');
+    const profileEmail = computed(() => authStore.adminInfo?.email || '');
     
     // 生命周期钩子
     onMounted(async () => {
       try {
-        await userStore.getUserInfo(true);
+        await authStore.getAdminInfo(true);
         await fetchData();
       } finally {
         uiStore.stopLoading();

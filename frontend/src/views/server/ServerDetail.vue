@@ -216,7 +216,6 @@ const updateServerInfo = (server: any) => {
       (systemInfo.os_version || '未知'),
     kernel_version: systemInfo.kernel_version || '未知',
     tags: server.tags || '',
-    user_id: server.user_id,
     agent_type: server.agent_type || server.AgentType || 'full',
   };
 
@@ -790,8 +789,6 @@ const connectWebSocket = () => {
 
   // 修正WebSocket URL，确保与后端路由匹配
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
-
-  console.log('正在连接WebSocket:', wsUrl);
 
   try {
     ws = new WebSocket(wsUrl);

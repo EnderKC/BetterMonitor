@@ -24,15 +24,17 @@ const (
 // LifeProbe represents a wearable/phone probe device
 type LifeProbe struct {
 	gorm.Model
-	Name              string     `json:"name" gorm:"not null"`
-	DeviceID          string     `json:"device_id" gorm:"uniqueIndex;not null"`
-	Description       string     `json:"description"`
-	Tags              string     `json:"tags"`
-	AllowPublicView   bool       `json:"allow_public_view" gorm:"default:true"`
-	LastSyncAt        *time.Time `json:"last_sync_at"`
-	BatteryLevel      *float64   `json:"battery_level"`
-	LatestHeartRate   float64    `json:"latest_heart_rate"`
-	LatestHeartRateAt *time.Time `json:"latest_heart_rate_at"`
+	Name                   string     `json:"name" gorm:"not null"`
+	DeviceID               string     `json:"device_id" gorm:"uniqueIndex;not null"`
+	Description            string     `json:"description"`
+	Tags                   string     `json:"tags"`
+	AllowPublicView        bool       `json:"allow_public_view" gorm:"default:false"`
+	IngestSecretCiphertext string     `json:"-" gorm:"type:text"`
+	IngestSecretVersion    uint64     `json:"ingest_secret_version" gorm:"not null;default:0"`
+	LastSyncAt             *time.Time `json:"last_sync_at"`
+	BatteryLevel           *float64   `json:"battery_level"`
+	LatestHeartRate        float64    `json:"latest_heart_rate"`
+	LatestHeartRateAt      *time.Time `json:"latest_heart_rate_at"`
 }
 
 // LifeLoggerEvent stores raw incoming payloads for auditing

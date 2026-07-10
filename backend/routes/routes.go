@@ -80,6 +80,9 @@ func SetupRoutes(r *gin.Engine) {
 			auth.GET("/profile", controllers.GetProfile)
 			auth.PUT("/profile", controllers.UpdateProfile)
 			auth.POST("/change-password", controllers.ChangePassword)
+			auth.GET("/settings", controllers.GetSystemSettings)
+			auth.PUT("/settings", controllers.UpdateSystemSettings)
+			auth.GET("/database/stats", controllers.GetDatabaseStats)
 
 			// 服务器管理
 			auth.GET("/servers", controllers.GetAllServers)
@@ -98,6 +101,7 @@ func SetupRoutes(r *gin.Engine) {
 			auth.GET("/life-probes/:id", controllers.GetLifeProbe)
 			auth.POST("/life-probes", controllers.CreateLifeProbe)
 			auth.PUT("/life-probes/:id", controllers.UpdateLifeProbe)
+			auth.POST("/life-probes/:id/rotate-secret", controllers.RotateLifeProbeSecret)
 			auth.DELETE("/life-probes/:id", controllers.DeleteLifeProbe)
 			auth.GET("/life-probes/:id/details", controllers.GetLifeProbeDetails)
 
@@ -207,23 +211,6 @@ func SetupRoutes(r *gin.Engine) {
 				ops.GET("/servers/:id/certificates/:cert_id/content", controllers.GetCertificateContent)
 				ops.POST("/servers/:id/certificates/:cert_id/renew", controllers.RenewCertificate)
 				ops.DELETE("/servers/:id/certificates/:cert_id", controllers.DeleteManagedCertificate)
-			}
-
-			// 需要管理员权限的路由
-			admin := auth.Group("/admin")
-			admin.Use(middleware.AdminAuthMiddleware())
-			{
-				// 用户管理
-				admin.POST("/users", controllers.Register)
-
-				// 系统设置管理
-				admin.GET("/settings", controllers.GetSystemSettings)
-				admin.PUT("/settings", controllers.UpdateSystemSettings)
-
-				// 数据库统计信息
-				admin.GET("/database/stats", controllers.GetDatabaseStats)
-
-				// 其他管理员功能
 			}
 
 			// 预警通知相关API

@@ -15,7 +15,7 @@ import {
   HeartOutlined
 } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
-import { clearLoginInfo, getUser } from '../utils/auth';
+import { clearLoginInfo, getAdmin } from '../utils/auth';
 import ThemeSwitch from '@/components/ThemeSwitch.vue';
 import { getDashboardVersion } from '@/utils/version';
 
@@ -27,7 +27,7 @@ import { useUIStore } from '@/stores/uiStore';
 const router = useRouter();
 const route = useRoute();
 const collapsed = ref(false);
-const user = computed(() => getUser() || {});
+const admin = computed(() => getAdmin());
 const themeStore = useThemeStore();
 const { isDark } = storeToRefs(themeStore);
 const uiStore = useUIStore();
@@ -139,7 +139,7 @@ onMounted(() => {
           <span>个人资料</span>
         </a-menu-item>
 
-        <a-menu-item key="/admin/settings" @click="goToSettings" v-if="user.role === 'admin'">
+        <a-menu-item key="/admin/settings" @click="goToSettings">
           <template #icon>
             <SettingOutlined />
           </template>
@@ -174,10 +174,10 @@ onMounted(() => {
             <ThemeSwitch style="margin-right: 16px" />
             <a-dropdown :trigger="['click']" overlay-class-name="user-dropdown">
               <div class="user-avatar">
-                <a-avatar :size="28" class="user-avatar-inner">{{ user.username ? user.username.charAt(0).toUpperCase()
+                <a-avatar :size="28" class="user-avatar-inner">{{ admin?.username ? admin.username.charAt(0).toUpperCase()
                   :
                   'U' }}</a-avatar>
-                <span class="username">{{ user.username || '用户' }}</span>
+                <span class="username">{{ admin?.username || '管理员' }}</span>
                 <DownOutlined />
               </div>
               <template #overlay>
@@ -438,7 +438,7 @@ onMounted(() => {
 }
 
 
-/* User Dropdown */
+/* Administrator Dropdown */
 :deep(.user-dropdown .ant-dropdown-menu) {
   padding: var(--spacing-xs);
   border-radius: var(--radius-md);

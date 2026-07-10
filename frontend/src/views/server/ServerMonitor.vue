@@ -872,8 +872,6 @@ const connectWebSocket = () => {
   // 修正WebSocket URL，更明确地指定监控专用路径
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId.value}/monitor-ws?token=${encodeURIComponent(token)}`;
 
-  console.log('正在连接监控WebSocket:', wsUrl);
-
   // 设置连接标志
   connecting.value = true;
   wsConnected.value = false;

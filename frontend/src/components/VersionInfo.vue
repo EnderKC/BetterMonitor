@@ -13,7 +13,6 @@ import {
   type ServerVersion,
   type AgentReleaseInfo
 } from '../utils/version';
-import { useUserStore } from '../stores/userStore';
 import moment from 'moment';
 
 // 组件数据
@@ -22,7 +21,6 @@ const dashboardVersion = ref<VersionInfo | null>(null);
 const systemInfo = ref<SystemInfo | null>(null);
 const serversVersions = ref<ServerVersion[]>([]);
 const releaseInfo = ref<AgentReleaseInfo | null>(null);
-const userStore = useUserStore();
 
 // OTA更新相关
 const updating = ref(false);

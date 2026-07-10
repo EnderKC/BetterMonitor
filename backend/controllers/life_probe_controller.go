@@ -3,14 +3,16 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/user/server-ops-backend/config"
 	"github.com/user/server-ops-backend/models"
+	"github.com/user/server-ops-backend/services"
 	"gorm.io/gorm"
 )
 
@@ -20,6 +22,30 @@ type lifeProbeRequest struct {
 	Description     string `json:"description"`
 	Tags            string `json:"tags"`
 	AllowPublicView *bool  `json:"allow_public_view"`
+}
+
+var (
+	defaultLifeIngestSecurityOnce sync.Once
+	defaultLifeIngestSecurity     *services.LifeIngestSecurity
+	defaultLifeIngestSecurityErr  error
+	getLifeIngestSecurity         = loadDefaultLifeIngestSecurity
+)
+
+func loadDefaultLifeIngestSecurity() (*services.LifeIngestSecurity, error) {
+	defaultLifeIngestSecurityOnce.Do(func() {
+		cfg := config.LoadConfig()
+		masterKey, err := services.LoadLifeIngestMasterKey(cfg)
+		if err != nil {
+			defaultLifeIngestSecurityErr = err
+			return
+		}
+		defaultLifeIngestSecurity, defaultLifeIngestSecurityErr = services.NewLifeIngestSecurity(
+			services.LifeIngestPolicyFromConfig(cfg),
+			masterKey,
+			time.Now,
+		)
+	})
+	return defaultLifeIngestSecurity, defaultLifeIngestSecurityErr
 }
 
 // CreateLifeProbe handles creation of a new life probe device.
@@ -34,13 +60,25 @@ func CreateLifeProbe(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "名称和设备ID不能为空"})
 		return
 	}
+	security, err := getLifeIngestSecurity()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "生命探针采集密钥服务不可用"})
+		return
+	}
+	ingestSecret, encryptedSecret, err := security.GenerateProbeSecret()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成生命探针采集密钥失败"})
+		return
+	}
 
 	probe := models.LifeProbe{
-		Name:            req.Name,
-		DeviceID:        req.DeviceID,
-		Description:     req.Description,
-		Tags:            req.Tags,
-		AllowPublicView: true,
+		Name:                   req.Name,
+		DeviceID:               req.DeviceID,
+		Description:            req.Description,
+		Tags:                   req.Tags,
+		AllowPublicView:        false,
+		IngestSecretCiphertext: encryptedSecret,
+		IngestSecretVersion:    1,
 	}
 	if req.AllowPublicView != nil {
 		probe.AllowPublicView = *req.AllowPublicView
@@ -53,7 +91,10 @@ func CreateLifeProbe(c *gin.Context) {
 
 	go notifyLifeProbeListChanged()
 
-	c.JSON(http.StatusCreated, gin.H{"life_probe": probe})
+	c.JSON(http.StatusCreated, gin.H{
+		"life_probe":    probe,
+		"ingest_secret": ingestSecret,
+	})
 }
 
 // ListLifeProbes returns all probes with summary data (authenticated).
@@ -143,6 +184,47 @@ func UpdateLifeProbe(c *gin.Context) {
 	go notifyLifeProbeListChanged()
 
 	c.JSON(http.StatusOK, gin.H{"life_probe": probe})
+}
+
+func RotateLifeProbeSecret(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的探针ID"})
+		return
+	}
+	probe, err := models.GetLifeProbeByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "生命探针不存在"})
+		return
+	}
+	security, err := getLifeIngestSecurity()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "生命探针采集密钥服务不可用"})
+		return
+	}
+	ingestSecret, encryptedSecret, err := security.GenerateProbeSecret()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成生命探针采集密钥失败"})
+		return
+	}
+	nextVersion := probe.IngestSecretVersion + 1
+	if nextVersion == 0 {
+		nextVersion = 1
+	}
+	if err := models.DB.Model(&models.LifeProbe{}).
+		Where("id = ?", probe.ID).
+		Updates(map[string]interface{}{
+			"ingest_secret_ciphertext": encryptedSecret,
+			"ingest_secret_version":    nextVersion,
+		}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新生命探针采集密钥失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"ingest_secret":         ingestSecret,
+		"ingest_secret_version": nextVersion,
+	})
 }
 
 // DeleteLifeProbe removes a probe and historical data.
@@ -324,13 +406,47 @@ type lifeLoggerRequest struct {
 
 // IngestLifeLoggerEvent receives raw payloads from the LifeLogger client.
 func IngestLifeLoggerEvent(c *gin.Context) {
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	security, err := getLifeIngestSecurity()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "读取请求数据失败"})
+		writeLifeIngestError(c, &services.LifeIngestError{
+			Status:  http.StatusServiceUnavailable,
+			Code:    "life_auth_unavailable",
+			Message: "life ingest authentication is unavailable",
+			Err:     err,
+		})
+		return
+	}
+	bodyBytes, err := security.ReadBounded(c.Writer, c.Request, c.ClientIP())
+	if err != nil {
+		writeLifeIngestError(c, err)
 		return
 	}
 	if len(bodyBytes) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体不能为空"})
+		return
+	}
+	var envelope struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.Unmarshal(bodyBytes, &envelope); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的数据格式"})
+		return
+	}
+	probe, err := models.GetLifeProbeByDeviceID(envelope.DeviceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeLifeIngestError(c, &services.LifeIngestError{
+				Status:  http.StatusUnauthorized,
+				Code:    "life_auth_invalid",
+				Message: "invalid life ingest credentials",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询生命探针失败"})
+		return
+	}
+	if err := security.Verify(c.Request, bodyBytes, probe.ID, probe.IngestSecretCiphertext); err != nil {
+		writeLifeIngestError(c, err)
 		return
 	}
 
@@ -342,16 +458,6 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 	if err := json.Unmarshal(bodyBytes, &pingReq); err == nil && pingReq.Ping == "test" {
 		if pingReq.DeviceID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "设备ID不能为空"})
-			return
-		}
-
-		probe, err := models.GetLifeProbeByDeviceID(pingReq.DeviceID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "生命探针不存在"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询生命探针失败"})
 			return
 		}
 
@@ -385,16 +491,6 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 	eventTime, err := time.Parse(time.RFC3339, req.Timestamp)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "timestamp 字段格式错误"})
-		return
-	}
-
-	probe, err := models.GetLifeProbeByDeviceID(req.DeviceID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "未找到对应的生命探针"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询生命探针失败"})
 		return
 	}
 
@@ -508,6 +604,21 @@ func IngestLifeLoggerEvent(c *gin.Context) {
 	go notifyLifeProbeDataChanged(probe.ID)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func writeLifeIngestError(c *gin.Context, err error) {
+	var ingestErr *services.LifeIngestError
+	if errors.As(err, &ingestErr) {
+		c.JSON(ingestErr.Status, gin.H{
+			"error": ingestErr.Message,
+			"code":  ingestErr.Code,
+		})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"error": "life ingest authentication failed",
+		"code":  "life_auth_unavailable",
+	})
 }
 
 // isSupportedLifeDataType checks if a data type is currently supported

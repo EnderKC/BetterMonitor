@@ -190,7 +190,8 @@ func (c *SafeConn) ReadMessage() (int, []byte, error) {
 
 // 从查询参数中验证JWT
 func verifyJWTFromQuery(tokenString string) (*utils.Claims, error) {
-	return utils.ParseToken(tokenString)
+	claims, _, err := utils.ValidateAdminToken(tokenString)
+	return claims, err
 }
 
 // 全局变量导出，供其他控制器使用
@@ -851,10 +852,10 @@ func WebSocketHandler(c *gin.Context) {
 	var isAgent bool
 
 	// 尝试JWT认证
-	userId, exists := c.Get("userId")
+	adminID, exists := c.Get("adminId")
 	if exists {
 		authenticated = true
-		log.Printf("WebSocket通过JWT认证: 用户ID=%v", userId)
+		log.Printf("WebSocket通过JWT认证: 管理员ID=%v", adminID)
 	}
 
 	if !authenticated {
@@ -869,10 +870,9 @@ func WebSocketHandler(c *gin.Context) {
 			claims, err := verifyJWTFromQuery(token)
 			if err == nil && claims != nil {
 				authenticated = true
-				log.Printf("WebSocket通过JWT认证成功: 用户=%s, 角色=%s", claims.Username, claims.Role)
-				c.Set("userId", claims.UserID)
-				c.Set("username", claims.Username)
-				c.Set("role", claims.Role)
+				log.Printf("WebSocket通过JWT认证成功: 管理员=%s", claims.Username)
+				c.Set("adminId", claims.AdminID)
+				c.Set("adminUsername", claims.Username)
 			} else {
 				log.Printf("JWT验证失败: %v", err)
 			}

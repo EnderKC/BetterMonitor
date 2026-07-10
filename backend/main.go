@@ -144,6 +144,9 @@ func main() {
 
 	// 创建Gin引擎
 	r := gin.Default()
+	if err := config.ConfigureTrustedProxies(r, cfg.TrustedProxies); err != nil {
+		log.Fatalf("配置可信代理失败: %v", err)
+	}
 
 	// 配置跨域
 	r.Use(config.CorsMiddleware())

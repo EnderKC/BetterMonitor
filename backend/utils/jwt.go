@@ -2,60 +2,76 @@ package utils
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/user/server-ops-backend/config"
+	"github.com/user/server-ops-backend/models"
 )
 
-// Claims 定义JWT声明
+var ErrInvalidAdminSession = errors.New("invalid administrator session")
+
+// Claims contains the singleton administrator session identity.
 type Claims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	AdminID        uint   `json:"admin_id"`
+	Username       string `json:"username"`
+	SessionVersion uint64 `json:"session_version"`
 	jwt.RegisteredClaims
 }
 
-// GenerateToken 生成JWT令牌
-func GenerateToken(userID uint, username, role string) (string, error) {
+func GenerateToken(adminID uint, username string, sessionVersion uint64) (string, error) {
 	cfg := config.LoadConfig()
-
-	// 创建声明
+	now := time.Now()
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
+		AdminID:        adminID,
+		Username:       username,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(cfg.TokenExpiration))),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour * time.Duration(cfg.TokenExpiration))),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
 
-	// 创建令牌
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// 签名字符串
 	return token.SignedString([]byte(cfg.JWTSecret))
 }
 
-// ParseToken 解析JWT令牌
 func ParseToken(tokenString string) (*Claims, error) {
 	cfg := config.LoadConfig()
-
-	// 解析令牌
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
+		}
 		return []byte(cfg.JWTSecret), nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	// 验证令牌
-	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims, nil
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+	return claims, nil
+}
+
+func ValidateAdminToken(tokenString string) (*Claims, *models.AdminAccount, error) {
+	claims, err := ParseToken(tokenString)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: token validation failed", ErrInvalidAdminSession)
 	}
 
-	return nil, errors.New("invalid token")
+	admin, err := models.GetAdminAccount()
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: administrator unavailable", ErrInvalidAdminSession)
+	}
+	if claims.AdminID != admin.ID ||
+		claims.SessionVersion != admin.SessionVersion ||
+		claims.Username != admin.Username {
+		return nil, nil, ErrInvalidAdminSession
+	}
+
+	return claims, admin, nil
 }

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
 import { message } from 'ant-design-vue';
-import { useRouter } from 'vue-router';
 import service from '../../utils/request';
 import {
   SettingOutlined,
@@ -13,41 +12,12 @@ import {
   DatabaseOutlined,
   CloudSyncOutlined
 } from '@ant-design/icons-vue';
-import { useUserStore } from '../../stores/userStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import VersionInfo from '../../components/VersionInfo.vue';
 
-const userStore = useUserStore();
-const router = useRouter();
 const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
-
-const ensureAdminAccess = async () => {
-  console.log('[Settings] 开始检查管理员权限');
-  console.log('[Settings] 当前管理员状态:', userStore.isAdmin);
-  console.log('[Settings] 当前用户信息:', userStore.userInfo);
-  console.log('[Settings] 当前token:', userStore.token ? '已设置' : '未设置');
-
-  // 如果当前状态不是管理员，尝试刷新一次用户信息
-  if (!userStore.isAdmin) {
-    console.log('[Settings] 不是管理员，尝试刷新用户信息');
-    const success = await userStore.getUserInfo(true);
-    console.log('[Settings] 刷新用户信息结果:', success);
-    console.log('[Settings] 刷新后的管理员状态:', userStore.isAdmin);
-    console.log('[Settings] 刷新后的用户信息:', userStore.userInfo);
-  }
-
-  if (!userStore.isAdmin) {
-    console.error('[Settings] 验证失败：不是管理员');
-    message.error('只有管理员才能访问此页面');
-    router.push('/');
-    return false;
-  }
-
-  console.log('[Settings] 管理员权限验证通过');
-  return true;
-};
 
 // 设置表单
 const form = reactive({
@@ -57,7 +27,7 @@ const form = reactive({
   data_retention_days: 7,
   alert_retention_days: 7,
   life_data_retention_days: 7,
-  allow_public_life_probe_access: true,
+  allow_public_life_probe_access: false,
   agent_release_repo: '',
   agent_release_channel: 'stable',
   agent_release_mirror: ''
@@ -117,7 +87,7 @@ const loadSettings = async () => {
       agent_release_repo?: string;
       agent_release_channel?: string;
       agent_release_mirror?: string;
-    }>('admin/settings');
+    }>('/settings');
 
     // 设置表单值
     if (settings.monitor_interval !== undefined) {
@@ -219,7 +189,7 @@ const saveSettings = async () => {
     console.log('正在保存设置:', form);
 
     // 调整API路径
-    const response = await service.put('admin/settings', form);
+    const response = await service.put('/settings', form);
     console.log('保存设置响应:', response);
 
     // 直接检查响应是否存在 - axios拦截器已经返回了response.data
@@ -242,11 +212,6 @@ const saveSettings = async () => {
 
 // 页面初始化
 onMounted(async () => {
-  const hasAccess = await ensureAdminAccess();
-  if (!hasAccess) {
-    return;
-  }
-
   // 先加载settingsStore的值（如果已有）
   if (settingsStore.loaded) {
     form.monitor_interval = settingsStore.monitorInterval;

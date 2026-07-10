@@ -102,8 +102,6 @@ const fetchServers = () => {
     wsUrl += `?token=${encodeURIComponent(token)}`;
   }
 
-  console.log('连接公开服务器WebSocket:', wsUrl);
-
   const ws = new WebSocket(wsUrl);
   serverListWS.value = ws;
 

@@ -7,12 +7,15 @@ import {
   EditOutlined,
   DeleteOutlined,
   EyeOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  KeyOutlined
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 import type { LifeProbeSummary } from '@/types/life';
 import { getToken } from '@/utils/auth';
 import { useUIStore } from '@/stores/uiStore';
+import { createLifeProbe, rotateLifeProbeSecret } from '@/utils/lifeProbe';
+import OneTimeSecretModal from '@/components/life/OneTimeSecretModal.vue';
 
 const router = useRouter();
 const loading = ref(true);
@@ -21,6 +24,7 @@ const probes = ref<LifeProbeSummary[]>([]);
 const modalVisible = ref(false);
 const submitting = ref(false);
 const editingId = ref<number | null>(null);
+const oneTimeSecret = ref('');
 const lifeWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
 
@@ -32,7 +36,7 @@ const form = reactive({
   device_id: '',
   description: '',
   tags: '',
-  allow_public_view: true
+  allow_public_view: false
 });
 
 const columns = [
@@ -154,7 +158,7 @@ const openCreateModal = () => {
     device_id: '',
     description: '',
     tags: '',
-    allow_public_view: true
+    allow_public_view: false
   });
   modalVisible.value = true;
 };
@@ -191,11 +195,12 @@ const handleSubmit = async () => {
   };
 
   try {
-    if (editingId.value) {
+    if (editingId.value !== null) {
       await request.put(`/life-probes/${editingId.value}`, payload);
       message.success('生命探针已更新');
     } else {
-      await request.post('/life-probes', payload);
+      const response = await createLifeProbe(payload);
+      oneTimeSecret.value = response.ingest_secret;
       message.success('生命探针已创建');
     }
     modalVisible.value = false;
@@ -204,6 +209,30 @@ const handleSubmit = async () => {
   } finally {
     submitting.value = false;
   }
+};
+
+const handleRotateSecret = (probe: LifeProbeSummary) => {
+  Modal.confirm({
+    title: '轮换采集密钥',
+    content: `确认轮换 ${probe.name} 的采集密钥吗？旧密钥将立即失效。`,
+    okText: '确认轮换',
+    cancelText: '取消',
+    async onOk() {
+      try {
+        const response = await rotateLifeProbeSecret(probe.id);
+        oneTimeSecret.value = response.ingest_secret;
+        message.success('采集密钥已轮换');
+      } catch (error) {
+        console.error('轮换生命探针采集密钥失败:', error);
+        message.error('轮换采集密钥失败');
+        throw error;
+      }
+    }
+  });
+};
+
+const clearOneTimeSecret = () => {
+  oneTimeSecret.value = '';
 };
 
 const handleDelete = (probe: LifeProbeSummary) => {
@@ -294,6 +323,11 @@ const totalSteps = computed(() =>
                 <EditOutlined />
               </a-button>
             </a-tooltip>
+            <a-tooltip title="轮换采集密钥">
+              <a-button size="small" @click="handleRotateSecret(record)">
+                <KeyOutlined />
+              </a-button>
+            </a-tooltip>
             <a-tooltip title="删除">
               <a-button size="small" danger @click="handleDelete(record)">
                 <DeleteOutlined />
@@ -327,6 +361,12 @@ const totalSteps = computed(() =>
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <OneTimeSecretModal
+      :visible="oneTimeSecret.length > 0"
+      :secret="oneTimeSecret"
+      @close="clearOneTimeSecret"
+    />
   </div>
 </template>
 

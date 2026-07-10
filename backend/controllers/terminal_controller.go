@@ -17,7 +17,6 @@ type TerminalSession struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	ServerID  uint      `json:"server_id"`
-	UserID    uint      `json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -40,14 +39,6 @@ func CreateTerminalSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
 		return
 	}
-
-	// 获取当前用户ID
-	userIDInterface, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
-		return
-	}
-	userID := userIDInterface.(uint)
 
 	// 解析请求体
 	var request struct {
@@ -79,7 +70,6 @@ func CreateTerminalSession(c *gin.Context) {
 		ID:        sessionID,
 		Name:      request.Name,
 		ServerID:  server.ID,
-		UserID:    userID,
 		CreatedAt: time.Now(),
 	}
 
@@ -119,22 +109,14 @@ func GetTerminalSessions(c *gin.Context) {
 		return
 	}
 
-	// 获取当前用户ID
-	userIDInterface, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
-		return
-	}
-	userID := userIDInterface.(uint)
-
-	// 查找该用户和该服务器的会话
+	// 查找该服务器的会话
 	var sessions []TerminalSession
 	terminalSessions.Range(func(key, value interface{}) bool {
 		session, ok := value.(TerminalSession)
 		if !ok {
 			return true
 		}
-		if session.ServerID == serverID && session.UserID == userID {
+		if session.ServerID == serverID {
 			sessions = append(sessions, session)
 		}
 		return true
@@ -176,14 +158,6 @@ func DeleteTerminalSession(c *gin.Context) {
 		return
 	}
 
-	// 获取当前用户ID
-	userIDInterface, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
-		return
-	}
-	userID := userIDInterface.(uint)
-
 	// 检查会话是否存在
 	sessionVal, ok := terminalSessions.Load(sessionID)
 	if !ok {
@@ -192,8 +166,8 @@ func DeleteTerminalSession(c *gin.Context) {
 	}
 	session := sessionVal.(TerminalSession)
 
-	// 检查会话是否属于当前用户
-	if session.UserID != userID || session.ServerID != serverID {
+	// 检查会话是否属于当前服务器
+	if session.ServerID != serverID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作此会话"})
 		return
 	}
@@ -236,14 +210,6 @@ func GetTerminalWorkingDirectory(c *gin.Context) {
 		return
 	}
 
-	// 获取当前用户ID
-	userIDInterface, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
-		return
-	}
-	userID := userIDInterface.(uint)
-
 	// 检查会话是否存在
 	sessionVal, ok := terminalSessions.Load(sessionID)
 	if !ok {
@@ -252,8 +218,8 @@ func GetTerminalWorkingDirectory(c *gin.Context) {
 	}
 	session := sessionVal.(TerminalSession)
 
-	// 检查会话是否属于当前用户
-	if session.UserID != userID || session.ServerID != serverID {
+	// 检查会话是否属于当前服务器
+	if session.ServerID != serverID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作此会话"})
 		return
 	}

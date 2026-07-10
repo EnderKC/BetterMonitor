@@ -54,7 +54,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const loadSettings = async () => {
     try {
       // 调整API路径
-      const settings = await service.get<SystemSettings>('admin/settings');
+      const settings = await service.get<SystemSettings>('/settings');
       console.log('加载系统设置响应:', settings);
       
       if (settings) {

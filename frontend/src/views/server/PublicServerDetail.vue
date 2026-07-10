@@ -97,8 +97,6 @@ const fetchServerInfo = async () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/servers/public/${serverId.value}/ws`;
 
-    console.log('连接公开服务器详情WebSocket:', wsUrl);
-
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

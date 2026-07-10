@@ -381,7 +381,7 @@ func (s *AlertService) sendEmailNotification(config map[string]string, title, co
 
 	// 优先使用管理员（个人资料）邮箱作为收件人；若未设置则回退到通知渠道配置中的 to_email
 	recipients := make([]string, 0, 4)
-	if adminEmails, err := models.GetAdminEmails(); err == nil && len(adminEmails) > 0 {
+	if adminEmails, err := models.GetAdminNotificationEmails(); err == nil && len(adminEmails) > 0 {
 		recipients = append(recipients, adminEmails...)
 	} else if err != nil {
 		log.Printf("获取管理员邮箱失败: %v", err)

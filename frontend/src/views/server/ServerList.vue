@@ -60,7 +60,7 @@ const formState = reactive({
   name: '',
   description: '',
   agent_type: 'full' as 'full' | 'monitor',
-  allow_public_view: true,
+  allow_public_view: false,
 });
 
 // 部署 Agent 弹窗状态
@@ -181,7 +181,7 @@ const showEditForm = (record: any) => {
   formState.name = record.name;
   formState.description = record.notes || '';
   formState.agent_type = record.agent_type || 'full'; // Fill current agent type
-  formState.allow_public_view = record.allow_public_view !== false;
+  formState.allow_public_view = record.allow_public_view === true;
 
   formVisible.value = true;
 };
@@ -192,7 +192,7 @@ const resetForm = () => {
   formState.name = '';
   formState.description = '';
   formState.agent_type = 'full';
-  formState.allow_public_view = true;
+  formState.allow_public_view = false;
 };
 
 // 关闭表单

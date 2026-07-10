@@ -680,8 +680,6 @@ const downloadFile = (file: any) => {
 
   // 创建下载链接 (注意，需要添加/api前缀，确保与request.ts中的baseURL一致)
   const downloadUrl = `${window.location.origin}/api/servers/${serverId.value}/files/download?path=${encodeURIComponent(filePath)}&token=${token}`;
-  console.log('下载文件URL:', downloadUrl);
-
   // 创建一个临时的a标签，模拟点击下载
   const a = document.createElement('a');
   a.href = downloadUrl;
@@ -933,8 +931,6 @@ const onSelectChange = (keys: string[], rows: any[]) => {
 // 页面挂载时初始化
 onMounted(async () => {
   console.log('文件管理页面挂载，服务器ID:', serverId.value);
-  console.log('当前授权令牌:', getToken());
-
   // 先获取服务器信息
   await fetchServerInfo();
 

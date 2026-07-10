@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/services"
+	"github.com/user/server-ops-backend/utils"
 )
 
 // 生成随机密钥
@@ -61,7 +62,7 @@ func CreateServer(c *gin.Context) {
 		Name:            createData.Name,
 		Tags:            createData.Tags,
 		AgentType:       agentType,
-		AllowPublicView: true,
+		AllowPublicView: false,
 		SecretKey:       generateRandomKey(), // 自动生成随机密钥
 		Status:          "offline",           // 设置默认状态
 	}
@@ -135,11 +136,13 @@ func GetServerStatus(c *gin.Context) {
 		return
 	}
 	if !server.AllowPublicView {
-		c.JSON(http.StatusForbidden, gin.H{
-			"success": false,
-			"error":   "该服务器未开启公开访问",
-		})
-		return
+		if !hasValidAdminBearerToken(c) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"error":   "该服务器未开启公开访问",
+			})
+			return
+		}
 	}
 
 	// 检查服务器是否真正在线 - 使用Online字段和心跳时间双重判断
@@ -168,6 +171,15 @@ func GetServerStatus(c *gin.Context) {
 		"last_heartbeat": server.LastHeartbeat,
 		"name":           server.Name,
 	})
+}
+
+func hasValidAdminBearerToken(c *gin.Context) bool {
+	parts := strings.SplitN(c.GetHeader("Authorization"), " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" || strings.TrimSpace(parts[1]) == "" {
+		return false
+	}
+	_, _, err := utils.ValidateAdminToken(parts[1])
+	return err == nil
 }
 
 // GetPublicServerMonitor 获取服务器监控历史数据（公开API，不需要认证）

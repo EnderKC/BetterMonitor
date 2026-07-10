@@ -110,14 +110,18 @@ func TestLogin_RateLimitAfterFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建测试数据库失败: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}); err != nil {
+	if err := db.AutoMigrate(&models.AdminAccount{}); err != nil {
 		t.Fatalf("迁移测试数据库失败: %v", err)
 	}
 	models.DB = db
 	loginAttempts = make(map[string]*loginAttempt)
 
-	user := models.User{Username: "limited", Password: models.HashPassword("correct"), Role: "admin"}
-	if err := db.Create(&user).Error; err != nil {
+	hash, err := models.HashPassword("correct")
+	if err != nil {
+		t.Fatalf("生成测试密码失败: %v", err)
+	}
+	admin := models.AdminAccount{ID: models.SingletonAdminID, Username: "limited", Password: hash, SessionVersion: 1}
+	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("创建测试用户失败: %v", err)
 	}
 
@@ -153,7 +157,7 @@ func TestLogin_RateLimitAfterFailures(t *testing.T) {
 func TestGetProfile_BasicUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// GetProfile 现在从数据库读取用户，先准备内存数据库并写入用户
+	// GetProfile 从认证中间件写入的单一管理员上下文读取资料
 	prevDB := models.DB
 	defer func() { models.DB = prevDB }()
 
@@ -161,13 +165,13 @@ func TestGetProfile_BasicUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建测试数据库失败: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}); err != nil {
+	if err := db.AutoMigrate(&models.AdminAccount{}); err != nil {
 		t.Fatalf("迁移测试数据库失败: %v", err)
 	}
 	models.DB = db
 
-	user := models.User{Username: "testuser", Password: "x", Role: "admin"}
-	if err := db.Create(&user).Error; err != nil {
+	admin := models.AdminAccount{ID: models.SingletonAdminID, Username: "testuser", Password: "x", SessionVersion: 1}
+	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("创建测试用户失败: %v", err)
 	}
 
@@ -178,9 +182,7 @@ func TestGetProfile_BasicUsage(t *testing.T) {
 	// 创建Gin上下文
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userId", user.ID)
-	c.Set("username", "testuser")
-	c.Set("role", "admin")
+	c.Set("adminAccount", &admin)
 
 	// 调用获取用户资料函数
 	GetProfile(c)
@@ -193,9 +195,9 @@ func TestGetProfile_BasicUsage(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
-	assert.Equal(t, float64(user.ID), response["id"])
+	assert.Equal(t, float64(admin.ID), response["id"])
 	assert.Equal(t, "testuser", response["username"])
-	assert.Equal(t, "admin", response["role"])
+	assert.NotContains(t, response, "role")
 }
 
 func TestCreateServer_InvalidJSON(t *testing.T) {
@@ -374,15 +376,6 @@ func TestStructureValidation(t *testing.T) {
 	assert.Equal(t, "testuser", loginReq.Username)
 	assert.Equal(t, "testpass", loginReq.Password)
 
-	// 测试注册请求结构
-	registerReq := RegisterRequest{
-		Username: "newuser",
-		Password: "newpass",
-		Role:     "user",
-	}
-	assert.Equal(t, "newuser", registerReq.Username)
-	assert.Equal(t, "newpass", registerReq.Password)
-	assert.Equal(t, "user", registerReq.Role)
 }
 
 func TestResponseTimeValidation(t *testing.T) {

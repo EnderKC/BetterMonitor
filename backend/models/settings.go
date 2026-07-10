@@ -36,7 +36,7 @@ type SystemSettings struct {
 	LifeProbeRetentionJSON string `json:"life_probe_retention_json" gorm:"type:text"` // JSON格式存储
 
 	// 生命探针公开访问设置
-	AllowPublicLifeProbeAccess bool `json:"allow_public_life_probe_access" gorm:"default:true"` // 是否允许公开访问生命探针详情
+	AllowPublicLifeProbeAccess bool `json:"allow_public_life_probe_access" gorm:"default:false"` // 是否允许公开访问生命探针详情
 
 	// Agent升级设置
 	AgentReleaseRepo    string `json:"agent_release_repo" gorm:"default:'EnderKC/BetterMonitor'"` // GitHub仓库
@@ -89,9 +89,10 @@ var defaultSettings = SystemSettings{
 		"step_detail_days": 180,
 		"sleep_detail_days": 365
 	}`,
-	AgentReleaseRepo:    "EnderKC/BetterMonitor",
-	AgentReleaseChannel: "stable",
-	AgentReleaseMirror:  "",
+	AllowPublicLifeProbeAccess: false,
+	AgentReleaseRepo:           "EnderKC/BetterMonitor",
+	AgentReleaseChannel:        "stable",
+	AgentReleaseMirror:         "",
 }
 
 // GetSettings 获取系统设置
