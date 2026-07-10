@@ -79,10 +79,10 @@ func (s *SystemSettings) SetLifeProbeRetention(config *LifeProbeRetentionConfig)
 
 // 默认设置值
 var defaultSettings = SystemSettings{
-	MonitorInterval:   "30s",
-	UIRefreshInterval: "10s",
-	ChartHistoryHours: 24,
-	DataRetentionDays: 7,
+	MonitorInterval:    "30s",
+	UIRefreshInterval:  "10s",
+	ChartHistoryHours:  24,
+	DataRetentionDays:  7,
 	AlertRetentionDays: 7,
 	LifeProbeRetentionJSON: `{
 		"heart_rate_days": 90,

@@ -1029,7 +1029,9 @@ const connectStatusWebSocket = () => {
         serverInfo.value.online = false;
         message.warning(data.message || 'Agent连接已断开');
       }
-    } catch (e) { }
+    } catch {
+      // Ignore malformed status messages and wait for the next update.
+    }
   };
 };
 
@@ -1150,12 +1152,12 @@ const workspaceContainerStyle = computed(() => {
   if (fileManagerVisible.value) deductions.push(`${fileManagerWidth.value}px`);
   if (systemStatusVisible.value) deductions.push(`${systemStatusWidth.value}px`);
   if (deductions.length > 0) width = `calc(100% - ${deductions.join(' - ')})`;
-  return { width, height: 'fit-content', display: 'flex', flexDirection: 'column' as 'column' };
+  return { width, height: 'fit-content', display: 'flex', flexDirection: 'column' as const };
 });
 
 const terminalContainerStyle = computed(() => ({
   flex: 1,
-  position: 'relative' as 'relative',
+  position: 'relative' as const,
   height: editorVisible.value ? `calc(100% - ${editorHeight.value}px)` : '100%'
 }));
 

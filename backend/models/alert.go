@@ -12,34 +12,34 @@ import (
 // AlertSetting 预警设置模型
 type AlertSetting struct {
 	gorm.Model
-	Type        string  `json:"type" gorm:"type:varchar(20);not null"`  // cpu, memory, network, status
-	Threshold   float64 `json:"threshold" gorm:"not null"`              // 阈值百分比(0-100)或具体数值，对status类型：1表示上线报警，2表示离线报警，3表示上线和离线都报警
-	Duration    int     `json:"duration" gorm:"not null"`               // 持续时间(秒)
-	Enabled     bool    `json:"enabled" gorm:"default:true"`            // 是否启用
-	ServerID    uint    `json:"server_id" gorm:"default:0"`             // 0表示全局设置，非0表示特定服务器
+	Type      string  `json:"type" gorm:"type:varchar(20);not null"` // cpu, memory, network, status
+	Threshold float64 `json:"threshold" gorm:"not null"`             // 阈值百分比(0-100)或具体数值，对status类型：1表示上线报警，2表示离线报警，3表示上线和离线都报警
+	Duration  int     `json:"duration" gorm:"not null"`              // 持续时间(秒)
+	Enabled   bool    `json:"enabled" gorm:"default:true"`           // 是否启用
+	ServerID  uint    `json:"server_id" gorm:"default:0"`            // 0表示全局设置，非0表示特定服务器
 }
 
 // NotificationChannel 通知渠道模型
 type NotificationChannel struct {
 	gorm.Model
-	Type        string `json:"type" gorm:"type:varchar(20);not null"`  // email, serverchan
-	Name        string `json:"name" gorm:"type:varchar(50);not null"`  // 渠道名称
-	Config      string `json:"config" gorm:"type:text"`                // JSON格式配置，包含密钥等
-	Enabled     bool   `json:"enabled" gorm:"default:true"`            // 是否启用
+	Type    string `json:"type" gorm:"type:varchar(20);not null"` // email, serverchan
+	Name    string `json:"name" gorm:"type:varchar(50);not null"` // 渠道名称
+	Config  string `json:"config" gorm:"type:text"`               // JSON格式配置，包含密钥等
+	Enabled bool   `json:"enabled" gorm:"default:true"`           // 是否启用
 }
 
 // AlertRecord 预警记录模型
 type AlertRecord struct {
 	gorm.Model
-	ServerID     uint      `json:"server_id" gorm:"index"`
-	ServerName   string    `json:"server_name"`
-	AlertType    string    `json:"alert_type"`          // cpu, memory, network
-	Value        float64   `json:"value"`               // 触发时的值
-	Threshold    float64   `json:"threshold"`           // 阈值
-	Resolved     bool      `json:"resolved"`            // 是否已解决
-	ResolvedAt   time.Time `json:"resolved_at"`         // 解决时间
-	NotifiedAt   time.Time `json:"notified_at"`         // 通知时间
-	ChannelIDs   string    `json:"channel_ids"`         // 通知渠道ID列表，逗号分隔
+	ServerID   uint      `json:"server_id" gorm:"index"`
+	ServerName string    `json:"server_name"`
+	AlertType  string    `json:"alert_type"`  // cpu, memory, network
+	Value      float64   `json:"value"`       // 触发时的值
+	Threshold  float64   `json:"threshold"`   // 阈值
+	Resolved   bool      `json:"resolved"`    // 是否已解决
+	ResolvedAt time.Time `json:"resolved_at"` // 解决时间
+	NotifiedAt time.Time `json:"notified_at"` // 通知时间
+	ChannelIDs string    `json:"channel_ids"` // 通知渠道ID列表，逗号分隔
 }
 
 // GetGlobalAlertSettings 获取全局预警设置
@@ -125,35 +125,35 @@ func DeleteNotificationChannel(id uint) error {
 func GetAlertRecords(serverID uint, alertType string, onlyUnresolved bool, page, limit int) ([]AlertRecord, int64, error) {
 	var records []AlertRecord
 	var total int64
-	
+
 	query := DB.Model(&AlertRecord{})
-	
+
 	if serverID > 0 {
 		query = query.Where("server_id = ?", serverID)
 	}
-	
+
 	if alertType != "" {
 		query = query.Where("alert_type = ?", alertType)
 	}
-	
+
 	if onlyUnresolved {
 		query = query.Where("resolved = ?", false)
 	}
-	
+
 	// 计算总数
 	query.Count(&total)
-	
+
 	// 分页查询
 	offset := (page - 1) * limit
 	result := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&records)
-	
+
 	return records, total, result.Error
 }
 
 // GetLatestUnresolvedAlert 获取最新的未解决预警
 func GetLatestUnresolvedAlert(serverID uint, alertType string) (*AlertRecord, error) {
 	var record AlertRecord
-	result := DB.Where("server_id = ? AND alert_type = ? AND resolved = ?", 
+	result := DB.Where("server_id = ? AND alert_type = ? AND resolved = ?",
 		serverID, alertType, false).Order("created_at DESC").First(&record)
 	return &record, result.Error
 }
@@ -207,4 +207,4 @@ func (r *AlertRecord) GetFormattedChannelIDs() []uint {
 func DeleteAlertRecordsBefore(cutoff time.Time) (int64, error) {
 	result := DB.Unscoped().Where("created_at < ?", cutoff).Delete(&AlertRecord{})
 	return result.RowsAffected, result.Error
-} 
+}

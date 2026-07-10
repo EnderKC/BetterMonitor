@@ -21,12 +21,12 @@ func TestStructures(t *testing.T) {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
 	}
-	
+
 	test := TestStruct{
 		ID:   1,
 		Name: "test",
 	}
-	
+
 	assert.Equal(t, 1, test.ID)
 	assert.Equal(t, "test", test.Name)
 }

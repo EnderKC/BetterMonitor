@@ -322,14 +322,14 @@ func GetTerminalWorkingDirectory(sessionID string, log *logger.Logger) (string, 
 func getLinuxProcessWorkingDirectory(pid int, log *logger.Logger) (string, error) {
 	// 通过/proc/{pid}/cwd获取进程当前工作目录
 	cwdPath := fmt.Sprintf("/proc/%d/cwd", pid)
-	
+
 	// 读取符号链接指向的真实路径
 	realPath, err := os.Readlink(cwdPath)
 	if err != nil {
 		log.Error("读取进程工作目录失败 PID=%d: %v", pid, err)
 		return "/", nil // 返回根目录作为默认值
 	}
-	
+
 	log.Debug("获取到进程工作目录 PID=%d: %s", pid, realPath)
 	return realPath, nil
 }
@@ -337,20 +337,20 @@ func getLinuxProcessWorkingDirectory(pid int, log *logger.Logger) (string, error
 // getWindowsProcessWorkingDirectory 获取Windows进程的工作目录
 func getWindowsProcessWorkingDirectory(pid int, log *logger.Logger) (string, error) {
 	// Windows下通过PowerShell命令获取进程工作目录
-	cmd := exec.Command("powershell", "-Command", 
+	cmd := exec.Command("powershell", "-Command",
 		fmt.Sprintf("(Get-Process -Id %d).Path | Split-Path", pid))
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		log.Error("获取Windows进程工作目录失败 PID=%d: %v", pid, err)
 		return "C:\\", nil // 返回C盘根目录作为默认值
 	}
-	
+
 	workingDir := strings.TrimSpace(string(output))
 	if workingDir == "" {
 		workingDir = "C:\\"
 	}
-	
+
 	log.Debug("获取到Windows进程工作目录 PID=%d: %s", pid, workingDir)
 	return workingDir, nil
 }

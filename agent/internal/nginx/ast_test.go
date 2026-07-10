@@ -67,4 +67,3 @@ func TestDetermineSiteType(t *testing.T) {
 		t.Fatalf("expected proxy, got %q", got)
 	}
 }
-

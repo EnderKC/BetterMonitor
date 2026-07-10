@@ -37,11 +37,11 @@ type containerExecSession struct {
 
 // logStreamSession 容器日志流会话
 type logStreamSession struct {
-	reader      io.ReadCloser           // 解复用后的日志流
-	cancel      context.CancelFunc      // 用于取消 Docker SDK 的 Follow 请求
-	stopCh      chan struct{}            // 通知读取 goroutine 停止
+	reader      io.ReadCloser      // 解复用后的日志流
+	cancel      context.CancelFunc // 用于取消 Docker SDK 的 Follow 请求
+	stopCh      chan struct{}      // 通知读取 goroutine 停止
 	containerID string
-	manager     *monitor.DockerManager  // 持有引用以便关闭时释放
+	manager     *monitor.DockerManager // 持有引用以便关闭时释放
 }
 
 // initOpsFields 初始化操作类字段

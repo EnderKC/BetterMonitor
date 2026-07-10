@@ -51,9 +51,9 @@ func CreateTerminalSession(c *gin.Context) {
 
 	// 解析请求体
 	var request struct {
-		ID   string `json:"id"`                  // 可选：自定义会话ID
+		ID   string `json:"id"` // 可选：自定义会话ID
 		Name string `json:"name" binding:"required"`
-		Cwd  string `json:"cwd"`                 // 可选：工作目录
+		Cwd  string `json:"cwd"` // 可选：工作目录
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {

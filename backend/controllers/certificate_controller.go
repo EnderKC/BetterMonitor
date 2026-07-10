@@ -303,4 +303,3 @@ func RenewCertificate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "证书续期成功"})
 }
-

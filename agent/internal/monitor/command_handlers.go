@@ -46,4 +46,4 @@ func SendTerminalInput(params map[string]interface{}) (string, error) {
 func CloseTerminalSession(params map[string]interface{}) (string, error) {
 	// 在这里实现终端会话关闭逻辑
 	return "", fmt.Errorf("未实现的终端会话关闭")
-} 
+}

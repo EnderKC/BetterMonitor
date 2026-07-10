@@ -133,7 +133,7 @@ func (fm *FileManager) SaveFileContent(path, content string) error {
 		// 文件存在，获取原始权限和内容
 		originalExists = true
 		originalMode = fileInfo.Mode()
-		
+
 		// 读取原始内容用于恢复
 		originalContent, err = os.ReadFile(path)
 		if err != nil {
@@ -144,7 +144,7 @@ func (fm *FileManager) SaveFileContent(path, content string) error {
 
 	// 创建临时文件，使用随机后缀防止冲突
 	tempPath = path + fmt.Sprintf(".tmp-%d", time.Now().UnixNano())
-	
+
 	// 首先写入临时文件
 	if err := os.WriteFile(tempPath, []byte(content), originalMode); err != nil {
 		fm.log.Error("写入临时文件失败: %v", err)
@@ -164,10 +164,10 @@ func (fm *FileManager) SaveFileContent(path, content string) error {
 	// 重命名临时文件为目标文件
 	if err := os.Rename(tempPath, path); err != nil {
 		fm.log.Error("重命名文件失败: %v", err)
-		
+
 		// 清理临时文件
 		os.Remove(tempPath)
-		
+
 		// 如果原始文件存在，尝试恢复
 		if originalExists && len(originalContent) > 0 {
 			fm.log.Info("尝试恢复原始文件内容...")
@@ -177,7 +177,7 @@ func (fm *FileManager) SaveFileContent(path, content string) error {
 			}
 			fm.log.Info("成功恢复原始文件内容")
 		}
-		
+
 		return fmt.Errorf("重命名文件失败: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func syncFile(path string) error {
 		return err
 	}
 	defer file.Close()
-	
+
 	// 同步文件到磁盘
 	return file.Sync()
 }

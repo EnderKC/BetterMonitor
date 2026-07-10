@@ -12,7 +12,7 @@ import (
 )
 
 type User struct {
-	ID       uint   `gorm:"primarykey"`
+	ID       uint `gorm:"primarykey"`
 	Username string
 	Role     string
 }

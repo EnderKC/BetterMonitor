@@ -89,20 +89,20 @@ func (cfg *NginxConfig) Render() (string, error) {
 
 func (sb *ServerBlock) templateData() map[string]interface{} {
 	data := map[string]interface{}{
-		"Listen":        sb.Listen,
-		"ServerNames":   sb.ServerNames,
-		"Root":          sb.Root,
-		"Index":         sb.Index,
-		"AccessLog":     sb.AccessLog,
-		"ErrorLog":      sb.ErrorLog,
+		"Listen":            sb.Listen,
+		"ServerNames":       sb.ServerNames,
+		"Root":              sb.Root,
+		"Index":             sb.Index,
+		"AccessLog":         sb.AccessLog,
+		"ErrorLog":          sb.ErrorLog,
 		"ClientMaxBodySize": sb.ClientMaxBodySize,
-		"Proxy":         sb.Proxy,
-		"PHP":           sb.PHP,
-		"Locations":     sb.Locations,
-		"SSL":           sb.SSL,
-		"ForceSSL":      sb.ForceSSL,
-		"ChallengeRoot": sb.ChallengeRoot,
-		"Extra":         sb.Extra,
+		"Proxy":             sb.Proxy,
+		"PHP":               sb.PHP,
+		"Locations":         sb.Locations,
+		"SSL":               sb.SSL,
+		"ForceSSL":          sb.ForceSSL,
+		"ChallengeRoot":     sb.ChallengeRoot,
+		"Extra":             sb.Extra,
 	}
 	return data
 }

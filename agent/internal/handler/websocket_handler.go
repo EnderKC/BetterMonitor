@@ -76,12 +76,12 @@ func SendErrorResponse(c *websocket.Conn, errMsg string) {
 		"error":  errMsg,
 	}
 	responseBytes, _ := json.Marshal(response)
-	
+
 	// 添加写入超时
 	if c != nil {
 		c.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		defer c.SetWriteDeadline(time.Time{}) // 重置写入超时
-		
+
 		if err := c.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 			// 记录错误但不中断流程
 			fmt.Printf("发送错误响应失败: %v\n", err)
@@ -95,11 +95,11 @@ func SendSuccessResponse(c *websocket.Conn, data string) {
 		fmt.Println("警告: WebSocket连接为空，无法发送响应")
 		return
 	}
-	
+
 	// 添加写入超时
 	c.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	defer c.SetWriteDeadline(time.Time{}) // 重置写入超时
-	
+
 	// 添加错误处理
 	if err := c.WriteMessage(websocket.TextMessage, []byte(data)); err != nil {
 		fmt.Printf("发送成功响应失败: %v\n", err)
@@ -121,4 +121,4 @@ func isOperationAction(action string) bool {
 	default:
 		return false
 	}
-} 
+}

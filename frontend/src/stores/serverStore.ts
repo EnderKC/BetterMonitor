@@ -300,9 +300,7 @@ export const useServerStore = defineStore('serverStore', {
         // 更新本地状态中的 sort_order
         orderedIds.forEach((serverId, index) => {
           if (this.servers[serverId]) {
-            // TypeScript需要我们先读取再修改
             const server = this.servers[serverId];
-            // @ts-ignore - 动态添加 sort_order 字段
             server.sort_order = index + 1;
           }
         });

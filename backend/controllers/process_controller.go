@@ -187,4 +187,4 @@ func HandleProcessResponse(requestID string, response interface{}) {
 	default:
 		log.Printf("无法发送进程响应到通道，可能已关闭")
 	}
-} 
+}

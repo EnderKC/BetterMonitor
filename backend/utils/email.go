@@ -9,14 +9,14 @@ import (
 
 // EmailConfig 邮件配置
 type EmailConfig struct {
-	SMTPHost   string
-	SMTPPort   int
-	Username   string
-	Password   string
-	FromEmail  string
-	FromName   string
-	ToEmail    string
-	UseTLS     bool
+	SMTPHost  string
+	SMTPPort  int
+	Username  string
+	Password  string
+	FromEmail string
+	FromName  string
+	ToEmail   string
+	UseTLS    bool
 }
 
 // SendEmail 发送邮件
@@ -38,10 +38,10 @@ func SendEmail(config EmailConfig, subject, body string) error {
 
 	// 设置认证信息
 	auth := smtp.PlainAuth("", config.Username, config.Password, config.SMTPHost)
-	
+
 	// 设置收件人列表
 	toList := []string{config.ToEmail}
-	
+
 	// SMTP服务器地址
 	addr := fmt.Sprintf("%s:%d", config.SMTPHost, config.SMTPPort)
 
@@ -107,12 +107,12 @@ func ParseEmailConfig(config map[string]string) EmailConfig {
 	if portStr, ok := config["smtp_port"]; ok {
 		fmt.Sscanf(portStr, "%d", &port)
 	}
-	
+
 	useTLS := false
 	if tlsStr, ok := config["use_tls"]; ok {
 		useTLS = strings.ToLower(tlsStr) == "true"
 	}
-	
+
 	return EmailConfig{
 		SMTPHost:  config["smtp_host"],
 		SMTPPort:  port,
@@ -123,4 +123,4 @@ func ParseEmailConfig(config map[string]string) EmailConfig {
 		ToEmail:   config["to_email"],
 		UseTLS:    useTLS,
 	}
-} 
+}

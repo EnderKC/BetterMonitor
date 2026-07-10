@@ -26,9 +26,9 @@ func (c *Client) handleOperationMessage(msgType string, message []byte, _ []byte
 		"type":       msgType + "_error",
 		"request_id": baseMsg.RequestID,
 		"payload": map[string]interface{}{
-			"error":   fmt.Sprintf("此Agent为监控版(monitor-only)，不支持 %s 操作", msgType),
-			"code":    "ERR_UNSUPPORTED_OPERATION",
-			"time":    time.Now().UTC().Format(time.RFC3339),
+			"error": fmt.Sprintf("此Agent为监控版(monitor-only)，不支持 %s 操作", msgType),
+			"code":  "ERR_UNSUPPORTED_OPERATION",
+			"time":  time.Now().UTC().Format(time.RFC3339),
 		},
 	}
 
