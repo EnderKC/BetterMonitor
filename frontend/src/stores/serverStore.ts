@@ -234,7 +234,7 @@ export const useServerStore = defineStore('serverStore', {
           console.log(`[Store] 服务器列表已更新: ${Object.keys(this.servers).length} 台服务器`);
           return Object.values(this.servers);
         } else {
-          console.error('[Store] 服务器数据格式错误', responseData);
+          console.error('[Store] 服务器列表响应格式异常');
           return [];
         }
       } catch (error) {

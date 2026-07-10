@@ -109,8 +109,7 @@ func (s *CertificateRenewalService) renewCertificate(cert *models.ManagedCertifi
 	}
 
 	// 检查服务器是否在线
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !IsServerOnline(server, time.Now()) {
 		return fmt.Errorf("服务器离线，无法续期")
 	}
 

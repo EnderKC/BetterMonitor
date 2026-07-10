@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 import type { LifeProbeSummary } from '@/types/life';
-import { getToken } from '@/utils/auth';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 import { useUIStore } from '@/stores/uiStore';
 import { createLifeProbe, rotateLifeProbeSecret } from '@/utils/lifeProbe';
 import OneTimeSecretModal from '@/components/life/OneTimeSecretModal.vue';
@@ -27,6 +27,7 @@ const editingId = ref<number | null>(null);
 const oneTimeSecret = ref('');
 const lifeWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
+const lifeConnecting = ref(false);
 
 const lifeReconnectTimer = ref<number | null>(null);
 const uiStore = useUIStore();
@@ -56,6 +57,7 @@ const clearLifeHeartbeat = () => {
 };
 
 const cleanupLifeWS = () => {
+  lifeConnecting.value = false;
   clearLifeHeartbeat();
   if (lifeReconnectTimer.value !== null) {
     clearTimeout(lifeReconnectTimer.value);
@@ -68,18 +70,12 @@ const cleanupLifeWS = () => {
   }
 };
 
-const connectLifeProbeListWS = () => {
+const connectLifeProbeListWS = async () => {
+  if (lifeConnecting.value) return;
   if (
     lifeWS.value &&
     (lifeWS.value.readyState === WebSocket.OPEN || lifeWS.value.readyState === WebSocket.CONNECTING)
   ) {
-    return;
-  }
-
-  const token = getToken();
-  if (!token) {
-    message.error('请先登录');
-    loading.value = false;
     return;
   }
 
@@ -89,13 +85,26 @@ const connectLifeProbeListWS = () => {
   }
 
   loading.value = true;
+  lifeConnecting.value = true;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/life-probes/public/ws?token=${encodeURIComponent(token)}`;
+  let wsUrl: string;
+  try {
+    wsUrl = await buildAuthenticatedWebSocketURL('/api/life-probes/public/ws', {
+      purpose: 'life_probe_list',
+    });
+  } catch {
+    lifeConnecting.value = false;
+    loading.value = false;
+    uiStore.stopLoading();
+    return;
+  }
+
   const ws = new WebSocket(wsUrl);
   lifeWS.value = ws;
+  lifeConnecting.value = false;
 
   ws.onopen = () => {
+    lifeConnecting.value = false;
     clearLifeHeartbeat();
     lifeHeartbeatTimer.value = window.setInterval(() => {
       if (lifeWS.value && lifeWS.value.readyState === WebSocket.OPEN) {
@@ -123,14 +132,15 @@ const connectLifeProbeListWS = () => {
     }
   };
 
-  ws.onerror = (error) => {
-    console.error('生命探针列表WebSocket错误:', error);
+  ws.onerror = () => {
+    lifeConnecting.value = false;
     message.error('生命探针列表连接失败');
     loading.value = false;
     uiStore.stopLoading();
   };
 
   ws.onclose = () => {
+    lifeConnecting.value = false;
     clearLifeHeartbeat();
     lifeWS.value = null;
     if (lifeReconnectTimer.value !== null) {

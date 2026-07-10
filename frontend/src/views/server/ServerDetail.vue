@@ -18,6 +18,7 @@ import { useServerStore } from '../../stores/serverStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined, DownOutlined } from '@ant-design/icons-vue';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 
 // 注册必要的ECharts组件
 use([
@@ -45,6 +46,7 @@ const loading = ref(true);
 // WebSocket连接
 let ws: WebSocket | null = null;
 const wsConnected = ref(false);
+let wsConnecting = false;
 
 // 心跳定时器
 let heartbeatTimer: number | null = null;
@@ -152,7 +154,6 @@ const switchAgentType = () => {
 // 更新服务器信息并解析系统信息
 const updateServerInfo = (server: any) => {
   console.log('🔄 updateServerInfo被调用');
-  console.log('传入的server对象:', server);
   console.log('调用堆栈:', new Error().stack);
 
   // 处理系统信息 JSON
@@ -174,7 +175,6 @@ const updateServerInfo = (server: any) => {
   }
 
   console.log('最终系统信息对象:', systemInfo);
-  console.log('原始服务器数据:', server);
   console.log('原始last_heartbeat:', server.last_heartbeat);
 
   // 获取状态信息
@@ -227,12 +227,10 @@ const fetchServerInfo = async () => {
   loading.value = true;
   try {
     const response = await request.get(`/servers/${serverId.value}`);
-    console.log('获取到服务器信息响应:', response);
     if (response && (response as any).server) {
       // 处理返回的服务器数据
       updateServerInfo((response as any).server);
     } else {
-      console.warn('服务器信息API返回格式异常:', response);
       serverInfo.value = {};
       message.warning('获取服务器信息返回格式异常');
     }
@@ -758,13 +756,9 @@ const uptimeText = computed(() => {
 });
 
 // 建立WebSocket连接获取实时监控数据
-const connectWebSocket = () => {
-  // 获取token
-  const token = localStorage.getItem('server_ops_token');
-  if (!token) {
-    message.error('未登录，无法获取实时数据');
-    return;
-  }
+const connectWebSocket = async () => {
+  if (wsConnecting) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
   // 关闭之前的连接并清除定时器
   if (ws) {
@@ -785,13 +779,14 @@ const connectWebSocket = () => {
   // 重置心跳失败计数
   heartbeatFailureCount = 0;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-  // 修正WebSocket URL，确保与后端路由匹配
-  const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
-
+  wsConnecting = true;
   try {
+    const wsUrl = await buildAuthenticatedWebSocketURL(`/api/servers/${serverId.value}/ws`, {
+      purpose: 'server',
+      server_id: serverId.value,
+    });
     ws = new WebSocket(wsUrl);
+    wsConnecting = false;
 
     // 设置超时处理，如果10秒内没有连接成功则认为失败
     const connectionTimeout = setTimeout(() => {
@@ -800,6 +795,7 @@ const connectWebSocket = () => {
         if (ws) {
           ws.close();
         }
+        wsConnecting = false;
         wsConnected.value = false;
         message.error('连接超时，请稍后重试');
 
@@ -811,19 +807,11 @@ const connectWebSocket = () => {
     // 监听连接打开事件
     ws.onopen = () => {
       clearTimeout(connectionTimeout);
+      wsConnecting = false;
       console.log('WebSocket连接成功');
       wsConnected.value = true;
       reconnectAttempts = 0; // 成功连接后重置重连计数
       message.success('实时监控已连接');
-
-      // WebSocket连接成功时，更新服务器状态为在线
-      serverStore.updateServerStatus(serverId.value, 'online');
-
-      // 同时更新本地状态
-      if (!serverInfo.value.online) {
-        console.log('WebSocket连接成功，更新服务器状态为在线');
-        serverInfo.value.online = true;
-      }
 
       // 设置心跳定时器
       heartbeatTimer = window.setInterval(() => {
@@ -977,11 +965,7 @@ const connectWebSocket = () => {
             serverStore.updateServerStatus(serverId.value, data.status);
             // 更新本地状态
             serverInfo.value.online = data.status === 'online';
-          } else {
-            // 收到欢迎消息，服务器应该是在线的
-            serverStore.updateServerStatus(serverId.value, 'online');
-            serverInfo.value.online = true;
-          }
+		  }
 
           // 如果欢迎消息中包含系统信息，尝试解析并更新
           if (data.system_info) {
@@ -1025,8 +1009,9 @@ const connectWebSocket = () => {
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket错误:', error);
+    ws.onerror = () => {
+      wsConnecting = false;
+      console.error('WebSocket连接错误');
       wsConnected.value = false;
       // WebSocket错误不一定意味着服务器离线，这里不更新状态
       message.error('监控连接发生错误');
@@ -1037,6 +1022,7 @@ const connectWebSocket = () => {
 
     // 添加onclose处理
     ws.onclose = (event) => {
+      wsConnecting = false;
       console.log(`WebSocket连接已关闭，代码: ${event.code}, 原因: ${event.reason}`);
       wsConnected.value = false;
 
@@ -1049,8 +1035,9 @@ const connectWebSocket = () => {
       // 尝试重连
       handleReconnect();
     };
-  } catch (error) {
-    console.error('建立WebSocket连接失败:', error);
+  } catch {
+    wsConnecting = false;
+    console.error('建立WebSocket连接失败');
     wsConnected.value = false;
     message.error('建立WebSocket连接失败，请稍后重试');
 
@@ -1072,12 +1059,6 @@ const handleReconnect = () => {
   } else {
     console.log('已达到最大重连次数，不再自动重连');
     message.warning('监控连接已断开，请刷新页面重试');
-
-    // 重连失败，标记服务器为离线
-    serverStore.updateServerStatus(serverId.value, 'offline');
-    if (serverInfo.value) {
-      serverInfo.value.online = false;
-    }
   }
 };
 

@@ -243,8 +243,7 @@ func GetCertificateContent(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}

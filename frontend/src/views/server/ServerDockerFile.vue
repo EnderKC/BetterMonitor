@@ -26,6 +26,7 @@ import {
 import request from '../../utils/request';
 import { isCancelledRequest } from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 import { useFileUpload } from '../../composables/useFileUpload';
 import UploadProgress from '../../components/UploadProgress.vue';
 // 导入服务器状态store
@@ -162,6 +163,7 @@ const terminalRef = ref<HTMLElement | null>(null);
 const terminal = ref<Terminal | null>(null);
 const fitAddon = ref<FitAddon | null>(null);
 let terminalWs: WebSocket | null = null;
+let terminalWsConnecting = false;
 let terminalDataDisposable: { dispose: () => void } | null = null;
 const terminalWorkingDir = ref<string>('/');
 const terminalSessionId = ref<string>(''); // 存储终端会话ID
@@ -290,7 +292,6 @@ const fetchServerInfo = async () => {
   try {
     // 使用any类型避免TypeScript错误
     const response: any = await request.get(`/servers/${serverId.value}`);
-    console.log('服务器详情响应:', response);
 
     // 从响应中提取服务器数据
     if (response && response.server) {
@@ -1079,12 +1080,10 @@ const resizeTerminal = () => {
 };
 
 // 连接终端WebSocket
-const connectTerminalWs = () => {
+const connectTerminalWs = async () => {
   if (!terminal.value) return;
-
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsHost = window.location.host;
-  const token = getToken();
+  if (terminalWsConnecting) return;
+  if (terminalWs && (terminalWs.readyState === WebSocket.OPEN || terminalWs.readyState === WebSocket.CONNECTING)) return;
 
   // 使用已创建的会话ID
   if (!terminalSessionId.value) {
@@ -1092,10 +1091,26 @@ const connectTerminalWs = () => {
     return;
   }
 
-  // WebSocket URL 需要包含 session 参数
-  terminalWs = new WebSocket(
-    `${wsProtocol}//${wsHost}/api/servers/${serverId.value}/ws?token=${token}&session=${terminalSessionId.value}`
-  );
+  terminalWsConnecting = true;
+  const sessionId = terminalSessionId.value;
+  let socketUrl: string;
+  try {
+    socketUrl = await buildAuthenticatedWebSocketURL(
+      `/api/servers/${serverId.value}/ws?session=${encodeURIComponent(sessionId)}`,
+      { purpose: 'terminal', server_id: serverId.value, session_id: sessionId },
+    );
+  } catch {
+    terminalWsConnecting = false;
+    message.error('终端连接凭证申请失败');
+    return;
+  }
+  if (terminalSessionId.value !== sessionId) {
+    terminalWsConnecting = false;
+    return;
+  }
+
+  terminalWs = new WebSocket(socketUrl);
+  terminalWsConnecting = false;
 
   terminalWs.onopen = () => {
     console.log('Terminal WebSocket connected');
@@ -1156,12 +1171,14 @@ const connectTerminalWs = () => {
     }
   };
 
-  terminalWs.onerror = (error) => {
-    console.error('Terminal WebSocket error:', error);
+  terminalWs.onerror = () => {
+    terminalWsConnecting = false;
+    console.error('Terminal WebSocket error');
     message.error('终端连接失败');
   };
 
   terminalWs.onclose = () => {
+    terminalWsConnecting = false;
     console.log('Terminal WebSocket closed');
   };
 
@@ -1182,6 +1199,7 @@ const connectTerminalWs = () => {
 
 // 关闭终端
 const closeTerminal = async () => {
+  terminalWsConnecting = false;
   // 清理终端
   terminalDataDisposable?.dispose();
   terminal.value?.dispose();

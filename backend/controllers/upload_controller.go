@@ -449,13 +449,9 @@ func sanitizeChunkedFilename(name string) (string, error) {
 // sendChunkedRequest 向 Agent 发送分片上传相关的 WebSocket 消息并等待 ACK
 func sendChunkedRequest(serverID uint, msgType string, payload map[string]interface{}) (map[string]interface{}, error) {
 	// 获取 Agent 连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID

@@ -149,13 +149,13 @@ const connect = () => {
       emit('disconnected');
     };
 
-    socket.onerror = (err) => {
-      console.error('WebSocket error:', err);
+    socket.onerror = () => {
+      console.error('WebSocket error');
       emit('error', 'Connection error');
     };
 
-  } catch (err) {
-    console.error('Connection failed:', err);
+  } catch {
+    console.error('Connection failed');
     emit('error', 'Failed to establish connection');
   }
 };

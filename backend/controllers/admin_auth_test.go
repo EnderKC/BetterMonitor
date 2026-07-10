@@ -170,7 +170,7 @@ func TestUpdateProfileRejectsSessionChangedAfterMiddlewareValidation(t *testing.
 	assert.Equal(t, "admin", persisted.Username)
 }
 
-func TestQueryTokenCompatibilityPathsRejectStaleSession(t *testing.T) {
+func TestDownloadQueryTokenRejectsStaleSession(t *testing.T) {
 	_, admin := setupAdminAuthTest(t, "admin", "correct-password")
 	staleToken, err := utils.GenerateToken(admin.ID, admin.Username, admin.SessionVersion)
 	require.NoError(t, err)
@@ -179,8 +179,6 @@ func TestQueryTokenCompatibilityPathsRejectStaleSession(t *testing.T) {
 		Update("session_version", admin.SessionVersion+1).Error)
 
 	assert.Error(t, validateAdminDownloadToken(staleToken))
-	_, err = verifyJWTFromQuery(staleToken)
-	assert.Error(t, err)
 }
 
 func TestLoginRateLimitIgnoresSpoofedForwardedForByDefault(t *testing.T) {

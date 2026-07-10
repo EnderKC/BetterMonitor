@@ -366,8 +366,7 @@ func main() {
 	// 创建一个配置更新通道
 	configUpdateCh := make(chan struct{}, 1)
 
-	// 启动监控任务（同时承担心跳功能）
-	// 监控数据上报时会更新 LastHeartbeat，因此不需要单独的心跳机制
+	// 启动监控任务；WebSocket 客户端按独立间隔发送轻量心跳。
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

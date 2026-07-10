@@ -145,18 +145,7 @@ func GetServerStatus(c *gin.Context) {
 		}
 	}
 
-	// 检查服务器是否真正在线 - 使用Online字段和心跳时间双重判断
-	isOnline := server.Online && time.Since(server.LastHeartbeat) <= 15*time.Second
-
-	// 如果数据库状态不一致，确保更新数据库
-	if isOnline != (server.Status == "online") {
-		status := "offline"
-		if isOnline {
-			status = "online"
-		}
-		// 异步更新数据库状态，不阻塞API响应
-		go models.UpdateServerStatusOnly(server.ID, status)
-	}
+	isOnline := isServerOnline(server)
 
 	// 确定返回的状态
 	serverStatus := "offline"
@@ -338,8 +327,8 @@ func SwitchAgentType(c *gin.Context) {
 	}
 
 	// 检查 Agent 是否在线
-	connVal, ok := ActiveAgentConnections.Load(server.ID)
-	if !ok || !server.Online {
+	conn, ok := ActiveAgentConnections.Current(server.ID)
+	if !ok || !isServerOnline(server) {
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Agent 离线，类型已更新，Agent 上线后需手动重装对应变体",
 			"target_agent_type":  targetType,
@@ -348,8 +337,7 @@ func SwitchAgentType(c *gin.Context) {
 		return
 	}
 
-	conn, ok := connVal.(*SafeConn)
-	if !ok || conn == nil {
+	if conn == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Agent 连接异常，类型已更新，请稍后手动触发升级",
 			"target_agent_type":  targetType,

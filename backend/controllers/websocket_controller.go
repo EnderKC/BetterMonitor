@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-backend/config"
 	"github.com/user/server-ops-backend/models"
+	"github.com/user/server-ops-backend/services"
 	"github.com/user/server-ops-backend/utils"
 )
 
@@ -88,6 +88,7 @@ func maskIP(rawIP string) string {
 const (
 	TypeShellCommand    = "shell_command"
 	TypeShellResponse   = "shell_response"
+	TypeAgentHeartbeat  = "agent_heartbeat"
 	TypeFileList        = "file_list"
 	TypeFileContent     = "file_content"
 	TypeFileUpload      = "file_upload"
@@ -162,6 +163,9 @@ func (c *SafeConn) WriteMessage(messageType int, data []byte) error {
 
 // 安全地关闭WebSocket连接
 func (c *SafeConn) Close() error {
+	if c == nil || c.Conn == nil {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.Conn.Close()
@@ -188,24 +192,18 @@ func (c *SafeConn) ReadMessage() (int, []byte, error) {
 	return c.Conn.ReadMessage()
 }
 
-// 从查询参数中验证JWT
-func verifyJWTFromQuery(tokenString string) (*utils.Claims, error) {
-	claims, _, err := utils.ValidateAdminToken(tokenString)
-	return claims, err
-}
-
 // 全局变量导出，供其他控制器使用
 // 存储活跃的Agent WebSocket连接
-var ActiveAgentConnections sync.Map
+var ActiveAgentConnections = NewConnectionRegistry[uint]()
 
 // 存储活跃的用户终端WebSocket连接 - 按会话ID索引
-var ActiveTerminalConnections sync.Map
+var ActiveTerminalConnections = NewConnectionRegistry[string]()
 
 // 存储活跃的日志流连接 - key: streamID, value: *SafeConn (用户连接)
 var ActiveLogStreamConnections sync.Map
 
 // 存储公开探针监控连接
-var ActivePublicMonitorConnections sync.Map
+var ActivePublicMonitorConnections = NewSubscriberRegistry[uint, *SafeConn]()
 
 // 存储上次广播时间，用于限流
 var LastBroadcastTimes sync.Map
@@ -252,35 +250,35 @@ func (s *publicConnSet) broadcast(v interface{}) {
 }
 
 func registerPublicMonitorConnection(serverID uint, conn *SafeConn) {
-	value, _ := ActivePublicMonitorConnections.LoadOrStore(serverID, &publicConnSet{})
-	set, _ := value.(*publicConnSet)
-	set.add(conn)
+	ActivePublicMonitorConnections.Add(serverID, conn)
 }
 
 func unregisterPublicMonitorConnection(serverID uint, conn *SafeConn) {
-	if value, ok := ActivePublicMonitorConnections.Load(serverID); ok {
-		if set, _ := value.(*publicConnSet); set != nil {
-			set.remove(conn)
-			if set.len() == 0 {
-				ActivePublicMonitorConnections.Delete(serverID)
-			}
+	ActivePublicMonitorConnections.Remove(serverID, conn)
+}
+
+func broadcastPublicMonitor(serverID uint, data map[string]interface{}) {
+	message := struct {
+		Type string                 `json:"type"`
+		Data map[string]interface{} `json:"data"`
+	}{
+		Type: TypeMonitor,
+		Data: data,
+	}
+	for _, conn := range ActivePublicMonitorConnections.Snapshot(serverID) {
+		if err := conn.WriteJSON(message); err != nil {
+			log.Printf("广播公开监控数据失败: %v", err)
 		}
 	}
 }
 
-func broadcastPublicMonitor(serverID uint, data map[string]interface{}) {
-	if value, ok := ActivePublicMonitorConnections.Load(serverID); ok {
-		if set, _ := value.(*publicConnSet); set != nil {
-			message := struct {
-				Type string                 `json:"type"`
-				Data map[string]interface{} `json:"data"`
-			}{
-				Type: TypeMonitor,
-				Data: data,
-			}
-			set.broadcast(message)
-		}
-	}
+func NotifyAgentOffline(serverID uint) {
+	broadcastPublicMonitor(serverID, map[string]interface{}{
+		"type":      "agent_offline",
+		"server_id": serverID,
+		"message":   "Agent连接已超时",
+		"timestamp": time.Now().Unix(),
+	})
 }
 
 // dockerResponseChannels 通用 request-response 关联映射。
@@ -406,6 +404,9 @@ func notifyDockerChannel(respChanVal interface{}, requestID string, errorRespons
 
 // PublicWebSocketHandler 处理公开的WebSocket连接，不需要鉴权
 func PublicWebSocketHandler(c *gin.Context) {
+	if rejectLegacyWebSocketAuth(c) {
+		return
+	}
 	// 记录请求URL
 	log.Printf("公开WebSocket连接请求: %s", c.Request.URL.Path)
 
@@ -462,15 +463,11 @@ func PublicWebSocketHandler(c *gin.Context) {
 func PublicServersWebSocketHandler(c *gin.Context) {
 	log.Printf("公开服务器列表WebSocket连接请求: %s", c.Request.URL.Path)
 
-	// 检查是否已认证（通过Token）
-	token := c.Query("token")
-	isAuthenticated := false
-	if token != "" {
-		// 验证JWT Token
-		claims, err := verifyJWTFromQuery(token)
-		if err == nil && claims != nil {
-			isAuthenticated = true
-		}
+	isAuthenticated, ok := authorizeOptionalBrowserTicket(c, services.WSTicketClaims{
+		Purpose: services.WSTicketServerList,
+	})
+	if !ok {
+		return
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -526,10 +523,7 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 				_ = json.Unmarshal([]byte(server.SystemInfo), &systemInfo)
 			}
 
-			status := "offline"
-			if server.Online && time.Since(server.LastHeartbeat) <= 15*time.Second {
-				status = "online"
-			}
+			status := serverOnlineStatus(&server)
 
 			monitorData, _ := models.GetLatestMonitorData(server.ID, 1)
 			lastMonitor := models.ServerMonitor{}
@@ -658,7 +652,7 @@ func handlePublicWebSocket(conn *SafeConn, server *models.Server, interrupt chan
 		Message:    "连接成功，服务器ID: " + strconv.Itoa(int(server.ID)),
 		ServerID:   server.ID,
 		SystemInfo: safeSystemInfo(server),
-		Status:     server.Status,
+		Status:     serverOnlineStatus(server),
 		Name:       server.Name,
 		Hostname:   server.Hostname,
 		IP:         maskIP(server.IP),
@@ -754,7 +748,7 @@ func buildMonitorData(server *models.Server, monitor *models.ServerMonitor) map[
 		"swap_used":         monitor.SwapUsed,
 		"swap_total":        monitor.SwapTotal,
 		"boot_time":         monitor.BootTime,
-		"status":            server.Status,
+		"status":            serverOnlineStatus(server),
 		"network_in_total":  server.NetworkInTotal,
 		"network_out_total": server.NetworkOutTotal,
 		"latency":           monitor.Latency,
@@ -818,118 +812,28 @@ func sendInitialMonitorData(conn *SafeConn, server *models.Server) error {
 	return sendMonitorDataMessage(conn, server, monitor)
 }
 
-// WebSocketHandler 处理WebSocket连接
-func WebSocketHandler(c *gin.Context) {
-	// 鉴权
-
-	log.Printf("WebSocket连接请求: %s", c.Request.URL.Path)
-
-	// 尝试从不同的路由参数中获取服务器ID
-	var idStr string
-	idStr = c.Param("id")
-
-	// 检查ID参数是否有效
-	if idStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID"})
-		return
-	}
-
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的服务器ID格式"})
-		return
-	}
-
-	// 查找服务器
-	server, err := models.GetServerByID(uint(id))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
-		return
-	}
-
-	// 检查认证来源（JWT或Secret Key）
-	var authenticated bool
-	var isAgent bool
-
-	// 尝试JWT认证
-	adminID, exists := c.Get("adminId")
-	if exists {
-		authenticated = true
-		log.Printf("WebSocket通过JWT认证: 管理员ID=%v", adminID)
-	}
-
-	if !authenticated {
-		token := c.Query("token")
-		if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(server.SecretKey)) == 1 {
-			authenticated = true
-			isAgent = true // 标记为Agent连接
-			log.Printf("WebSocket通过Secret Key认证成功")
-		} else if token != "" {
-			// 如果提供了Token但不匹配，尝试作为JWT验证
-			log.Printf("Secret Key不匹配，尝试作为JWT验证")
-			claims, err := verifyJWTFromQuery(token)
-			if err == nil && claims != nil {
-				authenticated = true
-				log.Printf("WebSocket通过JWT认证成功: 管理员=%s", claims.Username)
-				c.Set("adminId", claims.AdminID)
-				c.Set("adminUsername", claims.Username)
-			} else {
-				log.Printf("JWT验证失败: %v", err)
-			}
-		}
-	}
-
-	// 如果都未通过认证
-	if !authenticated {
-		log.Printf("WebSocket认证失败")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "未经授权"})
-		return
-	}
-
-	// 获取会话参数（用于后续使用）
-	sessionParam := c.Query("session")
-
-	// 检查是否是监控专用WebSocket
-	isMonitorWs := strings.HasSuffix(c.Request.URL.Path, "/monitor-ws")
-
-	// 升级HTTP连接为WebSocket
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("升级WebSocket连接失败: %v", err)
-		return
-	}
-
-	// 创建安全连接包装器
-	safeConn := &SafeConn{Conn: conn}
+func serveServerWebSocket(
+	safeConn *SafeConn,
+	server *models.Server,
+	sessionParam string,
+	isAgent, isMonitorWs bool,
+	agentHeartbeat time.Duration,
+) {
 	defer safeConn.Close()
 
 	// 如果是Agent连接，保存到全局映射中
 	if isAgent {
 		log.Printf("发现Agent连接，保存到连接映射中，服务器ID: %d", server.ID)
-		// 如果已存在，先关闭旧连接
-		if oldConn, loaded := ActiveAgentConnections.LoadAndDelete(server.ID); loaded {
-			if old, ok := oldConn.(*SafeConn); ok {
-				log.Printf("关闭服务器 %d 的旧Agent连接", server.ID)
-				old.Close()
-			}
-		}
-		// 存储新连接
-		ActiveAgentConnections.Store(server.ID, safeConn)
+		handle := ActiveAgentConnections.Replace(server.ID, safeConn)
 
 		// 设置函数在连接关闭时从映射中移除，并使所有待处理请求失败
 		defer func(id uint) {
+			if !ActiveAgentConnections.DeleteIfCurrent(id, handle) {
+				return
+			}
 			log.Printf("Agent连接关闭，从映射中移除，服务器ID: %d", id)
-			ActiveAgentConnections.Delete(id)
 			// 【安全修复】使该服务器的所有待处理请求立即失败
 			failAllPendingRequests(id)
-
-			// 通知前端监控订阅者Agent已离线
-			broadcastPublicMonitor(id, map[string]interface{}{
-				"type":      "agent_offline",
-				"server_id": id,
-				"message":   "Agent连接已断开",
-				"timestamp": time.Now().Unix(),
-			})
 
 			// 通知该服务器所有终端会话用户Agent已断开
 			terminalSessions.Range(func(key, value interface{}) bool {
@@ -941,28 +845,17 @@ func WebSocketHandler(c *gin.Context) {
 				if !ok {
 					return true
 				}
-				if userConnVal, ok := ActiveTerminalConnections.Load(sessionID); ok {
-					if userConn, ok := userConnVal.(*SafeConn); ok {
-						userConn.WriteJSON(map[string]interface{}{
-							"type":       "terminal_error",
-							"session_id": sessionID,
-							"message":    "Agent连接已断开，终端会话不可用",
-							"timestamp":  time.Now().Unix(),
-						})
-					}
+				if userConn, ok := ActiveTerminalConnections.Current(sessionID); ok {
+					userConn.WriteJSON(map[string]interface{}{
+						"type":       "terminal_error",
+						"session_id": sessionID,
+						"message":    "Agent连接已断开，终端会话不可用",
+						"timestamp":  time.Now().Unix(),
+					})
 				}
 				return true
 			})
 		}(server.ID)
-
-		// 更新服务器状态为在线
-		server.Status = "online"
-		err = models.UpdateServerStatus(server.ID, "online")
-		if err != nil {
-			log.Printf("更新服务器状态失败: %v", err)
-		} else {
-			log.Printf("服务器 %d 状态已更新为在线", server.ID)
-		}
 	}
 
 	// 设置一个通道来接收中断信号
@@ -977,7 +870,7 @@ func WebSocketHandler(c *gin.Context) {
 	}
 
 	// 启动标准WebSocket处理
-	handleWebSocket(safeConn, server, interrupt, sessionParam, isAgent)
+	handleWebSocket(safeConn, server, interrupt, sessionParam, isAgent, agentHeartbeat)
 }
 
 // 新增：处理监控专用WebSocket连接
@@ -1002,7 +895,7 @@ func handleMonitorWebSocket(conn *SafeConn, server *models.Server, interrupt cha
 		IP:         server.IP,
 		LastSeen:   server.LastHeartbeat.Unix(),
 		SystemInfo: safeSystemInfo(server),
-		Status:     server.Status,
+		Status:     serverOnlineStatus(server),
 	}
 
 	if err := conn.WriteJSON(welcomeMsg); err != nil {
@@ -1033,7 +926,14 @@ func handleMonitorWebSocket(conn *SafeConn, server *models.Server, interrupt cha
 }
 
 // 处理WebSocket连接
-func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struct{}, sessionParam string, isAgent bool) {
+func handleWebSocket(
+	conn *SafeConn,
+	server *models.Server,
+	interrupt chan struct{},
+	sessionParam string,
+	isAgent bool,
+	agentHeartbeat time.Duration,
+) {
 	// WebSocket消息结构
 	type Message struct {
 		Type    string          `json:"type"`
@@ -1052,7 +952,7 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 		Message:    "连接成功，服务器ID: " + strconv.Itoa(int(server.ID)),
 		ServerID:   server.ID,
 		SystemInfo: safeSystemInfo(server),
-		Status:     server.Status, // 添加状态字段
+		Status:     serverOnlineStatus(server),
 	}
 
 	// 如果不是Agent，发送欢迎消息
@@ -1079,50 +979,24 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 	if !isAgent && sessionParam != "" {
 		// 存储会话ID对应的用户连接
 		log.Printf("存储终端会话 %s 的用户连接，服务器ID: %d", sessionParam, server.ID)
-
-		// 如果已有连接，先关闭旧连接
-		if oldConn, loaded := ActiveTerminalConnections.LoadAndDelete(sessionParam); loaded {
-			if old, ok := oldConn.(*SafeConn); ok {
-				log.Printf("关闭终端会话 %s 的旧用户连接", sessionParam)
-				old.Close()
-			}
-		}
-
-		// 存储新连接
-		ActiveTerminalConnections.Store(sessionParam, conn)
+		handle := ActiveTerminalConnections.Replace(sessionParam, conn)
 
 		// 设置函数在连接关闭时从映射中移除
 		defer func(sessionID string) {
+			if !ActiveTerminalConnections.DeleteIfCurrent(sessionID, handle) {
+				return
+			}
 			log.Printf("用户连接关闭，从映射中移除终端会话连接: %s", sessionID)
-			ActiveTerminalConnections.Delete(sessionID)
 		}(sessionParam)
 	}
 
-	// Agent连接启用ping/pong心跳，及时感知断连
+	agentReadTimeout := time.Duration(0)
 	if isAgent {
-		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-		conn.SetPongHandler(func(appData string) error {
-			conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-			return nil
-		})
-
-		pingDone := make(chan struct{})
-		defer close(pingDone)
-		go func() {
-			pingTicker := time.NewTicker(30 * time.Second)
-			defer pingTicker.Stop()
-			for {
-				select {
-				case <-pingTicker.C:
-					if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-						log.Printf("服务器 %d 的ping发送失败: %v", server.ID, err)
-						return
-					}
-				case <-pingDone:
-					return
-				}
-			}
-		}()
+		agentReadTimeout = services.OnlineTimeout(agentHeartbeat)
+		if err := conn.SetReadDeadline(time.Now().Add(agentReadTimeout)); err != nil {
+			log.Printf("设置服务器 %d 的Agent读取超时失败: %v", server.ID, err)
+			return
+		}
 	}
 
 	// 处理接收到的消息
@@ -1148,6 +1022,18 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 
 		// 根据消息类型处理
 		switch msg.Type {
+		case TypeAgentHeartbeat:
+			if !isAgent {
+				continue
+			}
+			if err := touchAgentHeartbeat(server, time.Now()); err != nil {
+				log.Printf("更新服务器 %d 的Agent心跳失败: %v", server.ID, err)
+				continue
+			}
+			if err := conn.SetReadDeadline(time.Now().Add(agentReadTimeout)); err != nil {
+				log.Printf("重置服务器 %d 的Agent读取超时失败: %v", server.ID, err)
+				return
+			}
 		case TypeShellCommand:
 			// Shell命令的处理
 			handleShellCommand(conn, server, msg.Payload)
@@ -1186,6 +1072,10 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			if err != nil {
 				log.Printf("保存监控数据失败: %v", err)
 				continue
+			}
+			if err := conn.SetReadDeadline(time.Now().Add(agentReadTimeout)); err != nil {
+				log.Printf("重置服务器 %d 的Agent读取超时失败: %v", server.ID, err)
+				return
 			}
 
 			// 推送给公开探针的订阅者
@@ -1303,27 +1193,30 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 			server.Online = true
 			server.LastHeartbeat = time.Now()
 
-			if err := models.UpdateServerHeartbeatAndStatus(server.ID, server.Status); err != nil {
-				log.Printf("更新服务器状态失败: %v", err)
-			}
-
 			updates := map[string]interface{}{
-				"system_info":   server.SystemInfo,
-				"ip":            server.IP,
-				"public_ip":     server.PublicIP,
-				"os":            server.OS,
-				"arch":          server.Arch,
-				"cpu_cores":     server.CPUCores,
-				"cpu_model":     server.CPUModel,
-				"agent_version": server.AgentVersion,
-				"memory_total":  server.MemoryTotal,
-				"disk_total":    server.DiskTotal,
+				"system_info":    server.SystemInfo,
+				"ip":             server.IP,
+				"public_ip":      server.PublicIP,
+				"os":             server.OS,
+				"arch":           server.Arch,
+				"cpu_cores":      server.CPUCores,
+				"cpu_model":      server.CPUModel,
+				"agent_version":  server.AgentVersion,
+				"memory_total":   server.MemoryTotal,
+				"disk_total":     server.DiskTotal,
+				"last_heartbeat": server.LastHeartbeat,
+				"online":         server.Online,
+				"status":         server.Status,
 			}
 			// agent_type 不在 system_info 路径中更新，完全由 SwitchAgentType 和创建时管理
 
 			if err := models.DB.Model(&models.Server{}).Where("id = ?", server.ID).Updates(updates).Error; err != nil {
 				log.Printf("更新服务器信息失败: %v", err)
 			} else {
+				if err := conn.SetReadDeadline(time.Now().Add(agentReadTimeout)); err != nil {
+					log.Printf("重置服务器 %d 的Agent读取超时失败: %v", server.ID, err)
+					return
+				}
 				geoIP := server.PublicIP
 				shouldUpdateCountry := publicIPChanged && geoIP != ""
 				if !shouldUpdateCountry && server.PublicIP == "" && clientIPChanged {
@@ -1396,15 +1289,9 @@ func handleWebSocket(conn *SafeConn, server *models.Server, interrupt chan struc
 				log.Printf("从Agent收到会话 %s 的Shell响应，尝试转发给用户", sessionID)
 
 				// 查找对应会话的用户连接
-				userConnVal, ok := ActiveTerminalConnections.Load(sessionID)
+				userConn, ok := ActiveTerminalConnections.Current(sessionID)
 				if !ok {
 					log.Printf("找不到会话 %s 的用户连接，无法转发响应", sessionID)
-					continue
-				}
-
-				userConn, ok := userConnVal.(*SafeConn)
-				if !ok {
-					log.Printf("会话 %s 的用户连接类型错误", sessionID)
 					continue
 				}
 
@@ -1729,18 +1616,12 @@ func handleShellCommand(conn *SafeConn, server *models.Server, payload json.RawM
 		}
 	}
 
-	// 如果是create类型的消息，确保保存当前用户连接到会话映射
-	if cmdData.Type == "create" {
-		log.Printf("创建终端会话 %s，存储用户连接", sessionID)
-		ActiveTerminalConnections.Store(sessionID, conn)
-	}
-
 	// 如果是close类型的消息，清理会话资源
 	if cmdData.Type == "close" && !isDockerSession {
 		log.Printf("关闭终端会话: %s", sessionID)
 
 		// 从活跃会话中删除
-		ActiveTerminalConnections.Delete(sessionID)
+		ActiveTerminalConnections.CloseCurrent(sessionID)
 		terminalSessions.Delete(sessionID)
 	}
 
@@ -1764,21 +1645,12 @@ func handleShellCommand(conn *SafeConn, server *models.Server, payload json.RawM
 
 	// 发送到Agent
 	// 通过ActiveAgentConnections查找该服务器的Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		log.Printf("服务器 %d 的Agent未连接", server.ID)
 
 		// 使用新函数发送错误消息给用户
 		sendTerminalError(sessionID, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-
-		// 使用新函数发送错误消息给用户
-		sendTerminalError(sessionID, "服务器连接错误")
 		return
 	}
 
@@ -1822,17 +1694,10 @@ func handleProcessList(conn *SafeConn, server *models.Server, payload json.RawMe
 	}
 
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		log.Printf("服务器 %d 的Agent未连接", server.ID)
 		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-		sendErrorMessage(conn, "服务器连接错误")
 		return
 	}
 
@@ -1884,17 +1749,10 @@ func handleProcessKill(conn *SafeConn, server *models.Server, payload json.RawMe
 	}
 
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		log.Printf("服务器 %d 的Agent未连接", server.ID)
 		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-		sendErrorMessage(conn, "服务器连接错误")
 		return
 	}
 
@@ -1952,17 +1810,10 @@ func handleDockerCommand(conn *SafeConn, server *models.Server, payload json.Raw
 	}
 
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		log.Printf("服务器 %d 的Agent未连接", server.ID)
 		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-		sendErrorMessage(conn, "服务器连接错误")
 		return
 	}
 
@@ -2007,17 +1858,10 @@ func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.
 	}
 
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		log.Printf("服务器 %d 的Agent未连接", server.ID)
 		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("服务器 %d 的连接类型错误", server.ID)
-		sendErrorMessage(conn, "服务器连接错误")
 		return
 	}
 
@@ -2089,15 +1933,9 @@ func generateRequestID() string {
 // 发送终端错误消息给特定会话的用户
 func sendTerminalError(sessionID string, errMsg string) {
 	// 查找对应会话的用户连接
-	userConnVal, ok := ActiveTerminalConnections.Load(sessionID)
+	userConn, ok := ActiveTerminalConnections.Current(sessionID)
 	if !ok {
 		log.Printf("找不到会话 %s 的用户连接，无法发送错误消息", sessionID)
-		return
-	}
-
-	userConn, ok := userConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("会话 %s 的用户连接类型错误", sessionID)
 		return
 	}
 
@@ -2123,15 +1961,9 @@ func sendTerminalError(sessionID string, errMsg string) {
 // 发送终端关闭消息给特定会话的用户
 func sendTerminalClose(sessionID string) {
 	// 查找对应会话的用户连接
-	userConnVal, ok := ActiveTerminalConnections.Load(sessionID)
+	userConn, ok := ActiveTerminalConnections.Current(sessionID)
 	if !ok {
 		log.Printf("找不到会话 %s 的用户连接，无法发送关闭消息", sessionID)
-		return
-	}
-
-	userConn, ok := userConnVal.(*SafeConn)
-	if !ok {
-		log.Printf("会话 %s 的用户连接类型错误", sessionID)
 		return
 	}
 
@@ -2154,21 +1986,16 @@ func sendTerminalClose(sessionID string) {
 	}
 
 	// 从活跃会话中移除
-	ActiveTerminalConnections.Delete(sessionID)
+	ActiveTerminalConnections.CloseCurrent(sessionID)
 	terminalSessions.Delete(sessionID)
 }
 
 // 导出函数：获取ActiveAgentConnections中的agent连接
 // 供utils.GetAgentConnectionFunc使用
 func GetAgentConnection(serverID uint) (*websocket.Conn, error) {
-	val, ok := ActiveAgentConnections.Load(serverID)
+	safeConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器(ID: %d)未连接", serverID)
-	}
-
-	safeConn, ok := val.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器(ID: %d)连接类型错误", serverID)
 	}
 
 	if safeConn == nil || safeConn.Conn == nil {
@@ -2178,8 +2005,6 @@ func GetAgentConnection(serverID uint) (*websocket.Conn, error) {
 	// 检查连接是否存活
 	err := safeConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(time.Second))
 	if err != nil {
-		// 连接已断开，从映射中移除
-		ActiveAgentConnections.Delete(serverID)
 		return nil, fmt.Errorf("服务器(ID: %d)连接已断开: %v", serverID, err)
 	}
 
@@ -2195,14 +2020,9 @@ func init() {
 // requestTerminalWorkingDirectoryViaWebSocket 通过WebSocket获取终端当前工作目录
 func requestTerminalWorkingDirectoryViaWebSocket(serverID uint, sessionID string) (string, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return "", fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return "", fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID

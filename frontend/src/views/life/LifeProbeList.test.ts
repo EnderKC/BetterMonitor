@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 const requestMocks = vi.hoisted(() => ({
+  post: vi.fn(),
   put: vi.fn(),
   delete: vi.fn(),
 }));
@@ -104,6 +105,11 @@ describe('LifeProbeList one-time secret lifecycle', () => {
     apiMocks.rotateLifeProbeSecret.mockReset();
     requestMocks.put.mockReset();
     requestMocks.delete.mockReset();
+    requestMocks.post.mockReset();
+    requestMocks.post.mockResolvedValue({
+      ticket: 'life-ticket',
+      expires_at: '2026-07-10T16:00:30Z',
+    });
     modalMocks.confirm.mockReset();
   });
 
@@ -113,6 +119,7 @@ describe('LifeProbeList one-time secret lifecycle', () => {
       ingest_secret: 'created-secret',
     });
     const wrapper = mountView();
+    await flushPromises();
 
     await openCreateForm(wrapper);
     await wrapper.get('input[placeholder="例如：王小明 · iPhone"]').setValue('手表');
@@ -136,6 +143,7 @@ describe('LifeProbeList one-time secret lifecycle', () => {
       ingest_secret_version: 2,
     });
     const wrapper = mountView();
+    await flushPromises();
     const socket = FakeWebSocket.instances[0];
     socket.onmessage?.({
       data: JSON.stringify({
@@ -171,5 +179,25 @@ describe('LifeProbeList one-time secret lifecycle', () => {
     await openCreateForm(wrapper);
 
     expect(wrapper.findAll('textarea')).toHaveLength(1);
+  });
+
+  it('requests a fresh list ticket after reconnect', async () => {
+    vi.useFakeTimers();
+    requestMocks.post
+      .mockResolvedValueOnce({ ticket: 'life-ticket-1', expires_at: '2026-07-10T16:00:30Z' })
+      .mockResolvedValueOnce({ ticket: 'life-ticket-2', expires_at: '2026-07-10T16:00:31Z' });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(FakeWebSocket.instances[0].url).toContain('ticket=life-ticket-1');
+    FakeWebSocket.instances[0].onclose?.();
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushPromises();
+
+    expect(requestMocks.post).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances[1].url).toContain('ticket=life-ticket-2');
+    expect(FakeWebSocket.instances[1].url).not.toContain('life-ticket-1');
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 });

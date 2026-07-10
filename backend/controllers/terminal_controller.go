@@ -77,7 +77,7 @@ func CreateTerminalSession(c *gin.Context) {
 	terminalSessions.Store(sessionID, session)
 
 	// 检查服务器是否在线
-	if server.Status != "online" {
+	if !isServerOnline(server) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "服务器当前离线，无法创建终端会话",
@@ -198,7 +198,7 @@ func GetTerminalWorkingDirectory(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线"})
 		return
 	}

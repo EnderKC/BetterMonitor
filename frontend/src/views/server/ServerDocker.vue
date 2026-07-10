@@ -27,7 +27,7 @@ import {
   ContainerOutlined
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
-import { getToken } from '../../utils/auth';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 import { useServerStore } from '../../stores/serverStore';
 import { useUIStore } from '../../stores/uiStore';
 import Convert from 'ansi-to-html';
@@ -359,18 +359,29 @@ const removeContainer = (id: string, name: string) => {
 // ==================== WebSocket 连接管理 ====================
 const ws = ref<WebSocket | null>(null);
 const wsConnected = ref(false);
+const wsConnecting = ref(false);
 
-const connectWebSocket = () => {
-  const token = getToken();
-  if (!token) return;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  const url = `${protocol}//${host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
+const connectWebSocket = async () => {
+  if (wsConnecting.value) return;
+  if (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)) return;
+  wsConnecting.value = true;
+
+  let url: string;
+  try {
+    url = await buildAuthenticatedWebSocketURL(`/api/servers/${serverId.value}/ws`, {
+      purpose: 'server',
+      server_id: serverId.value,
+    });
+  } catch {
+    wsConnecting.value = false;
+    return;
+  }
 
   const socket = new WebSocket(url);
-  socket.onopen = () => { wsConnected.value = true; };
-  socket.onclose = () => { wsConnected.value = false; ws.value = null; };
-  socket.onerror = () => { wsConnected.value = false; };
+  wsConnecting.value = false;
+  socket.onopen = () => { wsConnected.value = true; wsConnecting.value = false; };
+  socket.onclose = () => { wsConnected.value = false; wsConnecting.value = false; ws.value = null; };
+  socket.onerror = () => { wsConnected.value = false; wsConnecting.value = false; };
   socket.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
@@ -385,6 +396,7 @@ const connectWebSocket = () => {
 };
 
 const disconnectWebSocket = () => {
+  wsConnecting.value = false;
   if (ws.value) {
     ws.value.close();
     ws.value = null;

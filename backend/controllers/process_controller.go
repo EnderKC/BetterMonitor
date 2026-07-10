@@ -34,7 +34,7 @@ func GetProcesses(c *gin.Context) {
 	}
 
 	// 检查服务器是否在线
-	if server.Status != "online" {
+	if !isServerOnline(server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -48,16 +48,9 @@ func GetProcesses(c *gin.Context) {
 	defer processResponseChannels.Delete(requestID)
 
 	// 查找Agent WebSocket连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器Agent未连接"})
-		return
-	}
-
-	// 转换为SafeConn类型
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器连接类型错误"})
 		return
 	}
 
@@ -112,7 +105,7 @@ func KillProcess(c *gin.Context) {
 	}
 
 	// 检查服务器是否在线
-	if server.Status != "online" {
+	if !isServerOnline(server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -126,16 +119,9 @@ func KillProcess(c *gin.Context) {
 	defer processResponseChannels.Delete(requestID)
 
 	// 查找Agent WebSocket连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器Agent未连接"})
-		return
-	}
-
-	// 转换为SafeConn类型
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器连接类型错误"})
 		return
 	}
 

@@ -230,6 +230,7 @@ server_url: '$ServerUrl'
 server_id: $ServerId
 secret_key: '$SecretKey'
 register_token: ''
+heartbeat_interval: '10s'
 monitor_interval: '30s'
 log_level: '$lvl'
 log_file: '$LogPath'

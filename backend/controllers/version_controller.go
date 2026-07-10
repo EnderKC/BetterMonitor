@@ -90,7 +90,7 @@ func GetServerVersions(c *gin.Context) {
 	var serverVersions []gin.H
 	for _, server := range servers {
 		var status int
-		if server.Online {
+		if services.IsServerOnline(server, time.Now()) {
 			status = 1
 		} else {
 			status = 0
@@ -202,20 +202,14 @@ func ForceAgentUpgrade(c *gin.Context) {
 			result.Missing = append(result.Missing, id)
 			continue
 		}
-		if !server.Online {
+		if !services.IsServerOnline(*server, time.Now()) {
 			result.Offline = append(result.Offline, id)
 			continue
 		}
 
-		connVal, ok := ActiveAgentConnections.Load(server.ID)
+		conn, ok := ActiveAgentConnections.Current(server.ID)
 		if !ok {
 			result.Offline = append(result.Offline, id)
-			continue
-		}
-
-		conn, ok := connVal.(*SafeConn)
-		if !ok {
-			result.Failure = append(result.Failure, id)
 			continue
 		}
 

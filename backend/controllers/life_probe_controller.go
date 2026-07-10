@@ -13,6 +13,7 @@ import (
 	"github.com/user/server-ops-backend/config"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/services"
+	"github.com/user/server-ops-backend/utils"
 	"gorm.io/gorm"
 )
 
@@ -254,18 +255,14 @@ func GetLifeProbeDetails(c *gin.Context) {
 // GetPublicLifeProbeDetails returns detailed metrics for public probes.
 func GetPublicLifeProbeDetails(c *gin.Context) {
 	// 检查是否为认证用户（authenticated override）
-	token := strings.TrimSpace(c.Query("token"))
-	if token == "" {
-		// 尝试从Authorization header获取
-		token = strings.TrimSpace(c.GetHeader("Authorization"))
-		if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
-			token = strings.TrimSpace(token[7:])
-		}
+	token := strings.TrimSpace(c.GetHeader("Authorization"))
+	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
 	}
 
 	isAuthenticated := false
 	if token != "" {
-		if _, err := verifyJWTFromQuery(token); err == nil {
+		if _, _, err := utils.ValidateAdminToken(token); err == nil {
 			isAuthenticated = true
 		}
 	}

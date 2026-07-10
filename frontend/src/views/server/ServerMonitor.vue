@@ -20,6 +20,7 @@ import { useServerStore } from '../../stores/serverStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import { ClockCircleOutlined } from '@ant-design/icons-vue';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 
 // 注册必须的组件
 echarts.use([
@@ -831,17 +832,11 @@ const updateCharts = () => {
 };
 
 // 修改连接WebSocket方法
-const connectWebSocket = () => {
+const connectWebSocket = async () => {
+  if (connecting.value) return;
   // 检查是否已有活跃连接
   if (ws && ws.readyState === WebSocket.OPEN) {
     console.log('WebSocket连接已存在且处于活跃状态，不需要重新连接');
-    return;
-  }
-
-  // 获取token
-  const token = localStorage.getItem('server_ops_token');
-  if (!token) {
-    message.error('未登录，无法获取实时数据');
     return;
   }
 
@@ -868,15 +863,15 @@ const connectWebSocket = () => {
   // 重置心跳失败计数
   heartbeatFailCount = 0;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // 修正WebSocket URL，更明确地指定监控专用路径
-  const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId.value}/monitor-ws?token=${encodeURIComponent(token)}`;
-
   // 设置连接标志
   connecting.value = true;
   wsConnected.value = false;
 
   try {
+    const wsUrl = await buildAuthenticatedWebSocketURL(`/api/servers/${serverId.value}/monitor-ws`, {
+      purpose: 'monitor',
+      server_id: serverId.value,
+    });
     ws = new WebSocket(wsUrl);
 
     // 设置超时处理，如果10秒内没有连接成功则认为失败
@@ -909,13 +904,6 @@ const connectWebSocket = () => {
       connecting.value = false;
       reconnectCount.value = 0; // 成功连接后重置重连计数
       message.success('实时监控已连接');
-
-      // 服务器在线时更新服务器状态
-      if (serverInfo.value && !isOnline.value) {
-        serverInfo.value.status = 'online';
-        // 同步更新到store
-        serverStore.updateServerStatus(serverId.value, 'online');
-      }
 
       // 添加心跳机制，每30秒发送一次心跳包
       if (heartbeatInterval) {
@@ -1112,16 +1100,11 @@ const connectWebSocket = () => {
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = () => {
       clearTimeout(connectionTimeout);
-      console.error('WebSocket发生错误:', error);
+      console.error('WebSocket发生错误');
       wsConnected.value = false;
       connecting.value = false;
-      if (serverInfo.value) {
-        serverInfo.value.status = 'offline';
-        // 同步更新到store
-        serverStore.updateServerStatus(serverId.value, 'offline');
-      }
       message.error('监控连接发生错误');
     };
 
@@ -1130,11 +1113,6 @@ const connectWebSocket = () => {
       wsConnected.value = false;
       connecting.value = false;
       console.log(`WebSocket连接已关闭，代码: ${event.code}, 原因: ${event.reason}`);
-      if (serverInfo.value) {
-        serverInfo.value.status = 'offline';
-        // 同步更新到store
-        serverStore.updateServerStatus(serverId.value, 'offline');
-      }
 
       // 清除心跳定时器
       if (heartbeatInterval) {
@@ -1154,8 +1132,8 @@ const connectWebSocket = () => {
         console.log('WebSocket连接正常关闭，不尝试重新连接');
       }
     };
-  } catch (error) {
-    console.error('创建WebSocket连接失败:', error);
+  } catch {
+    console.error('创建WebSocket连接失败');
     message.error('创建WebSocket连接失败');
     connecting.value = false;
 

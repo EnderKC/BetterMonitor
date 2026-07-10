@@ -383,6 +383,7 @@ import {
 import service from '../../utils/request';
 import { isCancelledRequest } from '../../utils/request';
 import { getToken } from '../../utils/auth';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 import { useFileUpload } from '../../composables/useFileUpload';
 import { useUIStore } from '../../stores/uiStore';
 
@@ -447,6 +448,7 @@ const sessionModalVisible = ref<boolean>(false);
 const checkingHeartbeat = ref(false);
 const agentNotConnected = ref(false);
 let statusWs: WebSocket | null = null;
+let statusWsConnecting = false;
 const uiStore = useUIStore();
 
 // 文件管理器状态
@@ -524,15 +526,33 @@ const systemStatusData = ref({
   network_out: 0
 });
 
-// 计算终端Socket URL
-const terminalSocketUrl = computed(() => {
-  if (!serverInfo.value.online || !currentSession.value) return '';
-  const token = getToken();
-  if (!token) return '';
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  return `${protocol}//${host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}&session=${currentSession.value}`;
-});
+const terminalSocketUrl = ref('');
+let terminalTicketGeneration = 0;
+
+const refreshTerminalSocketUrl = async () => {
+  const generation = ++terminalTicketGeneration;
+  terminalSocketUrl.value = '';
+  if (!serverInfo.value.online || !currentSession.value) return;
+
+  const sessionId = currentSession.value;
+  try {
+    const url = await buildAuthenticatedWebSocketURL(
+      `/api/servers/${serverId.value}/ws?session=${encodeURIComponent(sessionId)}`,
+      {
+        purpose: 'terminal',
+        server_id: serverId.value,
+        session_id: sessionId,
+      },
+    );
+    if (generation === terminalTicketGeneration && currentSession.value === sessionId) {
+      terminalSocketUrl.value = url;
+    }
+  } catch {
+    if (generation === terminalTicketGeneration) {
+      message.error('终端连接凭证申请失败');
+    }
+  }
+};
 
 // 获取服务器详情
 const fetchServerInfo = async () => {
@@ -984,7 +1004,7 @@ const deleteSession = async (sessionId: string) => {
 
 const connectTerminal = () => {
   if (!currentSession.value) return message.warning('请先选择一个会话');
-  terminalViewRef.value?.connect();
+  void refreshTerminalSocketUrl();
 };
 
 const disconnectTerminal = () => {
@@ -1010,15 +1030,28 @@ const currentSessionName = computed(() => {
 });
 
 // 系统状态
-const connectStatusWebSocket = () => {
-  if (statusWs) statusWs.close();
-  const token = getToken();
-  if (!token) return;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  const wsUrl = `${protocol}//${host}/api/servers/${serverId.value}/ws?token=${encodeURIComponent(token)}`;
+const connectStatusWebSocket = async () => {
+  if (statusWsConnecting) return;
+  if (statusWs) {
+    statusWs.onclose = null;
+    statusWs.close();
+    statusWs = null;
+  }
+  statusWsConnecting = true;
+
+  let wsUrl: string;
+  try {
+    wsUrl = await buildAuthenticatedWebSocketURL(`/api/servers/${serverId.value}/ws`, {
+      purpose: 'server',
+      server_id: serverId.value,
+    });
+  } catch {
+    statusWsConnecting = false;
+    return;
+  }
 
   statusWs = new WebSocket(wsUrl);
+  statusWsConnecting = false;
   statusWs.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
@@ -1032,6 +1065,13 @@ const connectStatusWebSocket = () => {
     } catch {
       // Ignore malformed status messages and wait for the next update.
     }
+  };
+  statusWs.onerror = () => {
+    statusWsConnecting = false;
+  };
+  statusWs.onclose = () => {
+    statusWsConnecting = false;
+    statusWs = null;
   };
 };
 
@@ -1166,6 +1206,10 @@ watch(showHiddenFiles, () => {
   fetchFileList();
 });
 
+watch([() => serverInfo.value.online, currentSession], () => {
+  void refreshTerminalSocketUrl();
+});
+
 onMounted(async () => {
   updateMaxEditorHeight();
   window.addEventListener('resize', updateMaxEditorHeight);
@@ -1177,6 +1221,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  terminalTicketGeneration++;
+  terminalSocketUrl.value = '';
+  statusWsConnecting = false;
   window.removeEventListener('resize', updateMaxEditorHeight);
   if (statusWs) statusWs.close();
   stopSidebarResize();

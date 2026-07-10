@@ -40,10 +40,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 }
 
 func clearActiveConnections() {
-	ActiveAgentConnections.Range(func(key, value interface{}) bool {
-		ActiveAgentConnections.Delete(key)
-		return true
-	})
+	ActiveAgentConnections.ClearForTest()
 }
 
 func TestHealthCheckWithVersion(t *testing.T) {
@@ -239,8 +236,8 @@ func TestForceAgentUpgrade(t *testing.T) {
 	clearActiveConnections()
 	defer clearActiveConnections()
 
-	ActiveAgentConnections.Store(serverOnline.ID, &SafeConn{})
-	ActiveAgentConnections.Store(serverSendError.ID, &SafeConn{})
+	ActiveAgentConnections.Replace(serverOnline.ID, &SafeConn{})
+	ActiveAgentConnections.Replace(serverSendError.ID, &SafeConn{})
 
 	sentCommands := make([]map[string]interface{}, 0)
 	origSender := agentUpgradeSender

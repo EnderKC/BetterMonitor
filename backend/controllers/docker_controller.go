@@ -836,16 +836,10 @@ func CreateContainer(c *gin.Context) {
 // 【安全修复】添加success字段验证，确保Agent返回成功状态
 func sendAgentRequest(server *models.Server, message map[string]interface{}, requestID string) (map[string]interface{}, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(server.ID)
+	agentConn, ok := ActiveAgentConnections.Current(server.ID)
 	if !ok {
 		fmt.Printf("[错误] 服务器ID=%d 的Agent未连接\n", server.ID)
 		return nil, ErrAgentNotConnected
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		fmt.Printf("[错误] 服务器ID=%d 的连接类型错误，获取到类型: %T\n", server.ID, agentConnVal)
-		return nil, ErrInvalidConnectionType
 	}
 
 	// 创建响应通道

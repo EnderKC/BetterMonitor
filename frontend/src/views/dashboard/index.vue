@@ -8,6 +8,7 @@ import { ref, onMounted, onUnmounted, onActivated, onDeactivated, computed } fro
 import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { getToken } from '../../utils/auth';
+import { buildAuthenticatedWebSocketURL, buildWebSocketURL } from '@/utils/websocket';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';
 import type { LifeProbeSummary } from '@/types/life';
@@ -65,6 +66,7 @@ const reconnectCounts = ref<{ [key: string]: number }>({});
 const serverListWS = ref<WebSocket | null>(null);
 const serverListHeartbeatTimer = ref<number | null>(null);
 const serverListReconnectTimer = ref<number | null>(null);
+const serverListConnecting = ref(false);
 
 // 生命探针数据
 const lifeProbes = ref<LifeProbeSummary[]>([]);
@@ -73,9 +75,12 @@ const LIFE_STEP_GOAL = 10000;
 const lifeProbesWS = ref<WebSocket | null>(null);
 const lifeHeartbeatTimer = ref<number | null>(null);
 const lifeReconnectTimer = ref<number | null>(null);
+const lifeProbesConnecting = ref(false);
+const connectingServerIds = new Set<number>();
 
 // 获取所有服务器的状态（通过公开WebSocket）
-const fetchServers = () => {
+const fetchServers = async () => {
+  if (serverListConnecting.value) return;
   // 如果已有连接且处于打开或正在连接状态，则无需重新建立
   if (
     serverListWS.value &&
@@ -92,18 +97,23 @@ const fetchServers = () => {
   }
 
   loading.value = true;
+  serverListConnecting.value = true;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let wsUrl = `${protocol}//${window.location.host}/api/servers/public/ws`;
-
-  // 如果用户已登录，添加token参数
-  const token = getToken();
-  if (token) {
-    wsUrl += `?token=${encodeURIComponent(token)}`;
+  let wsUrl: string;
+  try {
+    wsUrl = isLoggedIn.value
+      ? await buildAuthenticatedWebSocketURL('/api/servers/public/ws', { purpose: 'server_list' })
+      : buildWebSocketURL('/api/servers/public/ws');
+  } catch {
+    serverListConnecting.value = false;
+    loading.value = false;
+    uiStore.stopLoading();
+    return;
   }
 
   const ws = new WebSocket(wsUrl);
   serverListWS.value = ws;
+  serverListConnecting.value = false;
 
   const connectionTimeout = window.setTimeout(() => {
     if (ws.readyState !== WebSocket.OPEN) {
@@ -130,6 +140,7 @@ const fetchServers = () => {
   };
 
   ws.onopen = () => {
+    serverListConnecting.value = false;
     clearTimeout(connectionTimeout);
     console.log('公开服务器WebSocket连接成功');
 
@@ -150,8 +161,8 @@ const fetchServers = () => {
     }, 25000);
   };
 
-  ws.onerror = (error) => {
-    console.error('公开服务器WebSocket错误:', error);
+  ws.onerror = () => {
+    serverListConnecting.value = false;
     if (servers.value.length === 0) {
       message.error('获取服务器状态失败');
       loading.value = false;
@@ -235,6 +246,7 @@ const fetchServers = () => {
   };
 
   ws.onclose = () => {
+    serverListConnecting.value = false;
     clearTimeout(connectionTimeout);
     clearHeartbeat();
     serverListWS.value = null;
@@ -263,7 +275,8 @@ const scheduleLifeReconnect = () => {
   }, 5000);
 };
 
-const connectLifeProbesWS = () => {
+const connectLifeProbesWS = async () => {
+  if (lifeProbesConnecting.value) return;
   if (
     lifeProbesWS.value &&
     (lifeProbesWS.value.readyState === WebSocket.OPEN ||
@@ -278,18 +291,25 @@ const connectLifeProbesWS = () => {
   }
 
   lifeLoading.value = true;
+  lifeProbesConnecting.value = true;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let wsUrl = `${protocol}//${window.location.host}/api/life-probes/public/ws`;
-  const token = getToken();
-  if (token) {
-    wsUrl += `?token=${encodeURIComponent(token)}`;
+  let wsUrl: string;
+  try {
+    wsUrl = isLoggedIn.value
+      ? await buildAuthenticatedWebSocketURL('/api/life-probes/public/ws', { purpose: 'life_probe_list' })
+      : buildWebSocketURL('/api/life-probes/public/ws');
+  } catch {
+    lifeProbesConnecting.value = false;
+    lifeLoading.value = false;
+    return;
   }
 
   const ws = new WebSocket(wsUrl);
   lifeProbesWS.value = ws;
+  lifeProbesConnecting.value = false;
 
   ws.onopen = () => {
+    lifeProbesConnecting.value = false;
     clearLifeHeartbeat();
     lifeHeartbeatTimer.value = window.setInterval(() => {
       if (lifeProbesWS.value && lifeProbesWS.value.readyState === WebSocket.OPEN) {
@@ -316,14 +336,15 @@ const connectLifeProbesWS = () => {
     }
   };
 
-  ws.onerror = (error) => {
-    console.error('生命探针WebSocket错误:', error);
+  ws.onerror = () => {
+    lifeProbesConnecting.value = false;
     if (!lifeProbes.value.length) {
       message.error('生命探针数据连接失败');
     }
   };
 
   ws.onclose = () => {
+    lifeProbesConnecting.value = false;
     clearLifeHeartbeat();
     lifeProbesWS.value = null;
     scheduleLifeReconnect();
@@ -331,11 +352,18 @@ const connectLifeProbesWS = () => {
 };
 
 // 为每个在线服务器建立WebSocket连接
-const connectWebSocket = (serverId: number) => {
+const connectWebSocket = async (serverId: number) => {
+  if (connectingServerIds.has(serverId)) return;
   // 如果已存在连接，且是打开状态，则不需再次连接
-  if (wsConnections.value[serverId] && wsConnections.value[serverId]?.readyState === WebSocket.OPEN) {
+  if (
+    wsConnections.value[serverId] &&
+    (wsConnections.value[serverId]?.readyState === WebSocket.OPEN ||
+      wsConnections.value[serverId]?.readyState === WebSocket.CONNECTING)
+  ) {
     return;
   }
+
+  connectingServerIds.add(serverId);
 
   // 关闭之前的连接（如果存在）
   if (wsConnections.value[serverId]) {
@@ -344,13 +372,16 @@ const connectWebSocket = (serverId: number) => {
     wsConnections.value[serverId] = null;
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // 使用新的公开WebSocket接口
-  const wsUrl = `${protocol}//${window.location.host}/api/servers/public/${serverId}/ws`;
-
   try {
+    const wsUrl = isLoggedIn.value
+      ? await buildAuthenticatedWebSocketURL(`/api/servers/${serverId}/ws`, {
+          purpose: 'server',
+          server_id: serverId,
+        })
+      : buildWebSocketURL(`/api/servers/public/${serverId}/ws`);
     const ws = new WebSocket(wsUrl);
     wsConnections.value[serverId] = ws;
+    connectingServerIds.delete(serverId);
 
     // 设置超时处理
     const connectionTimeout = setTimeout(() => {
@@ -391,7 +422,7 @@ const connectWebSocket = (serverId: number) => {
 
         // 更新欢迎消息中的系统信息
         if (data.type === 'welcome') {
-          updateServerStatus(serverId, true);
+          updateServerStatus(serverId, data.status === 'online');
         }
 
         // 更新监控数据
@@ -422,7 +453,7 @@ const connectWebSocket = (serverId: number) => {
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = () => {
       clearTimeout(connectionTimeout);
     };
 
@@ -439,13 +470,11 @@ const connectWebSocket = (serverId: number) => {
         setTimeout(() => {
           connectWebSocket(serverId);
         }, 5000); // 延长重连间隔到5秒
-      } else {
-        // 更新服务器状态为离线
-        updateServerStatus(serverId, false);
       }
     };
-  } catch (error) {
-    console.error(`创建服务器 ${serverId} WebSocket连接失败:`, error);
+  } catch {
+    connectingServerIds.delete(serverId);
+    console.error(`创建服务器 ${serverId} WebSocket连接失败`);
   }
 };
 
@@ -560,6 +589,9 @@ const startDashboard = async () => {
 };
 
 const stopDashboard = () => {
+  serverListConnecting.value = false;
+  lifeProbesConnecting.value = false;
+  connectingServerIds.clear();
   if (timer !== null) {
     clearInterval(timer);
     timer = null;

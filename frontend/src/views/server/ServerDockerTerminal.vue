@@ -69,10 +69,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
-import { getToken } from '../../utils/auth';
+import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
 import { useUIStore } from '../../stores/uiStore';
 import TerminalView from '../../components/server/TerminalView.vue';
 
@@ -88,17 +88,12 @@ const terminalView = ref<InstanceType<typeof TerminalView> | null>(null);
 const connected = ref(false);
 const connecting = ref(false);
 const sessionId = ref<string>('');
+const wsUrl = ref('');
 
 const generateSessionId = () => `docker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const wsUrl = computed(() => {
-  if (!sessionId.value) return '';
-  const token = getToken();
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${token}&session=${sessionId.value}`;
-});
-
-const connect = () => {
+const connect = async () => {
+  if (connecting.value) return;
   if (!containerId) {
     message.error('缺少容器ID');
     return;
@@ -106,11 +101,28 @@ const connect = () => {
   
   connecting.value = true;
   sessionId.value = generateSessionId();
-  
-  // TerminalView will watch wsUrl and connect automatically
+  wsUrl.value = '';
+  const currentSession = sessionId.value;
+  try {
+    const url = await buildAuthenticatedWebSocketURL(
+      `/api/servers/${serverId}/ws?session=${encodeURIComponent(currentSession)}`,
+      {
+        purpose: 'terminal',
+        server_id: Number(serverId),
+        session_id: currentSession,
+      },
+    );
+    if (sessionId.value === currentSession) {
+      wsUrl.value = url;
+    }
+  } catch {
+    connecting.value = false;
+    message.error('终端连接凭证申请失败');
+  }
 };
 
 const disconnect = () => {
+  wsUrl.value = '';
   sessionId.value = ''; // This will trigger TerminalView to disconnect
   connected.value = false;
 };
@@ -150,7 +162,7 @@ const onError = (msg: string) => {
 };
 
 onMounted(() => {
-  connect();
+  void connect();
   uiStore.stopLoading();
 });
 </script>

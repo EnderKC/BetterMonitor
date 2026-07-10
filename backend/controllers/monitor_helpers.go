@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/user/server-ops-backend/models"
+	"github.com/user/server-ops-backend/services"
 )
 
 // MonitorPayload 表示从Agent或HTTP上报的监控数据
@@ -99,6 +100,36 @@ func persistMonitorPayload(server *models.Server, payload *MonitorPayload) (*mod
 	}
 
 	return &record, nil
+}
+
+func touchAgentHeartbeat(server *models.Server, now time.Time) error {
+	if server == nil {
+		return fmt.Errorf("server is required")
+	}
+	if err := models.DB.Model(&models.Server{}).
+		Where("id = ?", server.ID).
+		Updates(map[string]interface{}{
+			"last_heartbeat": now,
+			"online":         true,
+			"status":         "online",
+		}).Error; err != nil {
+		return err
+	}
+	server.LastHeartbeat = now
+	server.Online = true
+	server.Status = "online"
+	return nil
+}
+
+func isServerOnline(server *models.Server) bool {
+	return server != nil && services.IsServerOnline(*server, time.Now())
+}
+
+func serverOnlineStatus(server *models.Server) string {
+	if isServerOnline(server) {
+		return "online"
+	}
+	return "offline"
 }
 
 // isMonitorOnlyServer 检查服务器是否为监控模式（monitor-only）

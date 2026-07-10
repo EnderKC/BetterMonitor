@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,7 @@ type Client struct {
 	wsConnected      bool
 	wsMutex          sync.Mutex
 	wsShutdown       bool
+	wsCancel         context.CancelFunc
 	reconnectHandler func()
 
 	// WebSocket写入锁，防止并发写入
@@ -47,6 +49,9 @@ type Client struct {
 
 // New 创建一个新的服务器客户端
 func New(config *config.Config, log *logger.Logger) *Client {
+	if config.HeartbeatInterval <= 0 {
+		config.HeartbeatInterval = 10 * time.Second
+	}
 	c := &Client{
 		cfg: config,
 		log: log,
@@ -114,15 +119,6 @@ func (c *Client) SendMonitorData(data *monitor.MonitorData) error {
 
 	if err := c.writeJSON(msg); err != nil {
 		c.log.Warn("通过WebSocket发送监控数据失败: %v", err)
-
-		c.wsMutex.Lock()
-		c.wsConnected = false
-		if c.wsConn != nil {
-			c.wsConn.Close()
-			c.wsConn = nil
-		}
-		c.wsMutex.Unlock()
-
 		c.triggerReconnect()
 
 		return fmt.Errorf("websocket监控数据发送失败: %w", err)
@@ -160,15 +156,6 @@ func (c *Client) SendSystemInfo(info *monitor.SystemInfo) error {
 
 	if err := c.writeJSON(msg); err != nil {
 		c.log.Warn("通过WebSocket发送系统信息失败: %v", err)
-
-		c.wsMutex.Lock()
-		c.wsConnected = false
-		if c.wsConn != nil {
-			c.wsConn.Close()
-			c.wsConn = nil
-		}
-		c.wsMutex.Unlock()
-
 		c.triggerReconnect()
 
 		return fmt.Errorf("websocket系统信息发送失败: %w", err)
@@ -184,65 +171,48 @@ func (c *Client) ConnectWebSocket() error {
 		return fmt.Errorf("未配置服务器ID或密钥")
 	}
 
-	// 加锁保护连接过程
 	c.wsMutex.Lock()
 	defer c.wsMutex.Unlock()
 	c.wsShutdown = false
 
-	// 如果已经连接，先关闭
+	if c.wsCancel != nil {
+		c.wsCancel()
+		c.wsCancel = nil
+	}
 	if c.wsConn != nil {
-		c.log.Debug("已存在WebSocket连接，先关闭")
-		c.wsConn.Close()
+		_ = c.wsConn.Close()
 		c.wsConn = nil
 	}
+	c.wsConnected = false
 
-	c.log.Debug("连接WebSocket...")
+	hello := c.agentHello()
+	websocketURL, err := BuildAgentWebSocketURL(c.cfg.ServerURL, c.cfg.ServerID)
+	if err != nil {
+		return err
+	}
+	headers := BuildAgentWebSocketHeaders(c.secretKey, hello)
 
-	// 获取服务器URL（不带协议前缀）
-	serverURL := c.cfg.ServerURL
-	serverHost := removeProtocolPrefix(serverURL)
-
-	// 尝试可能的WebSocket URL路径
-	paths := []string{
-		fmt.Sprintf("/api/servers/%d/ws", c.cfg.ServerID),
-		fmt.Sprintf("/servers/%d/ws", c.cfg.ServerID),
-		fmt.Sprintf("/api/ws/%d/server", c.cfg.ServerID),
-		fmt.Sprintf("/ws/%d/server", c.cfg.ServerID),
+	conn, response, err := websocket.DefaultDialer.Dial(websocketURL, headers)
+	if err != nil {
+		if response != nil && response.Body != nil {
+			_ = response.Body.Close()
+		}
+		return fmt.Errorf("WebSocket连接失败: %w", err)
+	}
+	if err := c.writeJSONToConnection(conn, hello); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("发送Agent握手失败: %w", err)
 	}
 
-	var lastError error
-	for _, path := range paths {
-		// 构建完整的WebSocket URL
-		wsProtocol := "ws://"
-		if strings.HasPrefix(c.cfg.ServerURL, "https://") {
-			wsProtocol = "wss://"
-		}
-		url := wsProtocol + serverHost + path + "?token=" + c.secretKey
+	ctx, cancel := context.WithCancel(context.Background())
+	c.wsConn = conn
+	c.wsConnected = true
+	c.wsCancel = cancel
+	c.log.Info("WebSocket连接成功")
 
-		c.log.Debug("尝试连接WebSocket: %s", path)
-
-		// 尝试连接
-		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-		if err != nil {
-			c.log.Debug("连接失败: %v，尝试下一个路径", err)
-			lastError = err
-			continue
-		}
-
-		// 如果连接成功
-		c.wsConn = conn
-		c.wsConnected = true // 设置连接状态
-		c.log.Info("WebSocket连接成功: %s", path)
-
-		// 开始监听消息
-		go c.handleWebSocketMessages()
-
-		return nil
-	}
-
-	// 所有路径都失败了
-	c.wsConnected = false // 确保连接状态为断开
-	return fmt.Errorf("WebSocket连接失败，尝试了所有可能的路径: %w", lastError)
+	go c.handleWebSocketMessages(conn, cancel)
+	go c.handleAgentHeartbeat(ctx, conn)
+	return nil
 }
 
 // CloseWebSocket 关闭WebSocket连接
@@ -252,9 +222,13 @@ func (c *Client) CloseWebSocket() {
 
 	// 设置关闭标志，停止重连
 	c.wsShutdown = true
+	if c.wsCancel != nil {
+		c.wsCancel()
+		c.wsCancel = nil
+	}
 
 	if c.wsConn != nil {
-		c.wsConn.Close()
+		_ = c.wsConn.Close()
 		c.wsConn = nil
 		c.wsConnected = false
 		c.log.Info("WebSocket连接已关闭")
@@ -262,25 +236,28 @@ func (c *Client) CloseWebSocket() {
 }
 
 // 处理WebSocket消息
-func (c *Client) handleWebSocketMessages() {
-	if c.wsConn == nil {
-		return
-	}
-
+func (c *Client) handleWebSocketMessages(conn *websocket.Conn, cancel context.CancelFunc) {
 	defer func() {
-		// 连接已关闭，更新状态
+		cancel()
+		_ = conn.Close()
 		c.wsMutex.Lock()
-		c.wsConnected = false
+		isCurrent := c.wsConn == conn
+		if isCurrent {
+			c.wsConn = nil
+			c.wsConnected = false
+			c.wsCancel = nil
+		}
+		shutdown := c.wsShutdown
 		c.wsMutex.Unlock()
 
-		if !c.wsShutdown {
+		if isCurrent && !shutdown {
 			c.triggerReconnect()
 		}
 	}()
 
 	for {
 		// 读取消息
-		_, message, err := c.wsConn.ReadMessage()
+		_, message, err := conn.ReadMessage()
 		if err != nil {
 			c.log.Error("读取WebSocket消息失败: %v", err)
 			break
@@ -340,17 +317,74 @@ func (c *Client) handleWebSocketMessages() {
 	}
 }
 
-// 安全地向WebSocket写入JSON数据
-func (c *Client) writeJSON(v interface{}) error {
-	// 使用互斥锁保护WebSocket写入操作
-	c.wsWriteMutex.Lock()
-	defer c.wsWriteMutex.Unlock()
+func (c *Client) agentHello() AgentHello {
+	agentType := strings.ToLower(strings.TrimSpace(version.AgentType))
+	if agentType != "full" && agentType != "monitor" {
+		agentType = "full"
+	}
+	return AgentHello{
+		Type:                     "agent_hello",
+		Version:                  version.Version,
+		AgentType:                agentType,
+		HeartbeatIntervalSeconds: int(c.effectiveHeartbeatInterval() / time.Second),
+		UpgradeRequestID:         "",
+	}
+}
 
-	if c.wsConn == nil {
+func (c *Client) effectiveHeartbeatInterval() time.Duration {
+	interval := c.cfg.HeartbeatInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	seconds := (interval + time.Second - 1) / time.Second
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds * time.Second
+}
+
+func (c *Client) handleAgentHeartbeat(ctx context.Context, conn *websocket.Conn) {
+	err := runAgentHeartbeat(ctx, c.effectiveHeartbeatInterval(), time.Now, func(heartbeat AgentHeartbeat) error {
+		return c.writeJSONToConnection(conn, heartbeat)
+	})
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	c.log.Warn("Agent心跳发送失败: %v", err)
+	_ = conn.Close()
+}
+
+// 安全地向当前WebSocket写入JSON数据
+func (c *Client) writeJSON(v interface{}) error {
+	c.wsMutex.Lock()
+	defer c.wsMutex.Unlock()
+
+	conn := c.wsConn
+	if conn == nil || !c.wsConnected {
 		return fmt.Errorf("WebSocket连接为空")
 	}
+	if err := c.writeJSONToConnection(conn, v); err != nil {
+		if c.wsConn == conn {
+			c.wsConnected = false
+			c.wsConn = nil
+			if c.wsCancel != nil {
+				c.wsCancel()
+				c.wsCancel = nil
+			}
+			_ = conn.Close()
+		}
+		return err
+	}
+	return nil
+}
 
-	return c.wsConn.WriteJSON(v)
+func (c *Client) writeJSONToConnection(conn *websocket.Conn, v interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("WebSocket连接为空")
+	}
+	c.wsWriteMutex.Lock()
+	defer c.wsWriteMutex.Unlock()
+	return conn.WriteJSON(v)
 }
 
 // sendResponse 发送WebSocket响应
@@ -367,25 +401,9 @@ func (c *Client) sendResponse(requestID, responseType string, data map[string]in
 		"data":       data,
 	}
 
-	c.wsWriteMutex.Lock()
-	defer c.wsWriteMutex.Unlock()
-
-	if c.wsConn != nil {
-		if err := c.wsConn.WriteJSON(response); err != nil {
-			c.log.Error("发送WebSocket响应失败: type=%s, requestID=%s, error=%v", responseType, requestID, err)
-		}
-	} else {
-		c.log.Error("WebSocket连接未建立，无法发送响应")
+	if err := c.writeJSON(response); err != nil {
+		c.log.Error("发送WebSocket响应失败: type=%s, requestID=%s, error=%v", responseType, requestID, err)
 	}
-}
-
-// removeProtocolPrefix 移除URL的协议前缀
-func removeProtocolPrefix(url string) string {
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
-	url = strings.TrimPrefix(url, "wss://")
-	url = strings.TrimPrefix(url, "ws://")
-	return url
 }
 
 // ensureURLProtocol 确保URL有协议前缀
@@ -394,22 +412,6 @@ func ensureURLProtocol(url string) string {
 		return url
 	}
 	return "http://" + url
-}
-
-// getWSProtocolURL 将HTTP URL转换为WebSocket URL
-func getWSProtocolURL(url string) string {
-	// 先确保有协议前缀
-	urlWithProtocol := ensureURLProtocol(url)
-
-	// 再将HTTP协议转换为WS协议
-	if strings.HasPrefix(urlWithProtocol, "https://") {
-		return "wss://" + urlWithProtocol[8:]
-	} else if strings.HasPrefix(urlWithProtocol, "http://") {
-		return "ws://" + urlWithProtocol[7:]
-	}
-
-	// 默认使用ws协议
-	return "ws://" + url
 }
 
 // FetchSettings 从服务器获取最新配置
@@ -730,15 +732,7 @@ func (c *Client) sendUpgradeStatus(requestID, status, message string, extra map[
 		"payload":    payload,
 	}
 
-	b, err := json.Marshal(msg)
-	if err != nil {
-		c.log.Error("序列化升级状态消息失败: %v", err)
-		return
-	}
-
-	c.wsWriteMutex.Lock()
-	defer c.wsWriteMutex.Unlock()
-	if c.wsConn != nil {
-		_ = c.wsConn.WriteMessage(websocket.TextMessage, b)
+	if err := c.writeJSON(msg); err != nil {
+		c.log.Error("发送升级状态消息失败: %v", err)
 	}
 }

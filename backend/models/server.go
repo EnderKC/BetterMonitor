@@ -10,32 +10,33 @@ import (
 // Server 服务器模型
 type Server struct {
 	gorm.Model
-	Name            string    `json:"name" gorm:"not null"`                              // 服务器名称
-	Hostname        string    `json:"hostname" gorm:"type:varchar(255)"`                 // 主机名
-	IP              string    `json:"ip"`                                                // 服务器IP
-	PublicIP        string    `json:"public_ip" gorm:"type:varchar(100)"`                // 公网IP
-	OS              string    `json:"os"`                                                // 操作系统
-	Arch            string    `json:"arch"`                                              // 架构
-	CPUCores        int       `json:"cpu_cores"`                                         // CPU核心数
-	CPUModel        string    `json:"cpu_model"`                                         // CPU型号
-	MemoryTotal     int64     `json:"memory_total"`                                      // 总内存(KB)
-	DiskTotal       int64     `json:"disk_total"`                                        // 总磁盘空间(KB)
-	LastHeartbeat   time.Time `json:"last_heartbeat"`                                    // 最后心跳时间
-	Online          bool      `json:"online" gorm:"default:false"`                       // 是否在线
-	SecretKey       string    `json:"secret_key" gorm:"type:varchar(64)"`                // 密钥
-	Tags            string    `json:"tags" gorm:"type:varchar(255)"`                     // 标签，用逗号分隔
-	Description     string    `json:"description" gorm:"type:text"`                      // 描述
-	AllowPublicView bool      `json:"allow_public_view" gorm:"default:false"`            // 是否允许公开查看
-	Status          string    `json:"status" gorm:"default:'offline'"`                   // 服务器状态
-	SystemInfo      string    `json:"system_info" gorm:"type:text"`                      // 系统信息 JSON
-	AgentVersion    string    `json:"agent_version" gorm:"type:varchar(64)"`             // Agent版本
-	AgentType       string    `json:"agent_type" gorm:"type:varchar(20);default:'full'"` // Agent类型: full 或 monitor
-	CountryCode     string    `json:"country_code" gorm:"type:varchar(10)"`              // 国家代码
-	NetworkInTotal  uint64    `json:"network_in_total" gorm:"default:0"`                 // 总入网流量
-	NetworkOutTotal uint64    `json:"network_out_total" gorm:"default:0"`                // 总出网流量
-	Latency         float64   `json:"latency" gorm:"default:0"`                          // 延迟(ms)
-	PacketLoss      float64   `json:"packet_loss" gorm:"default:0"`                      // 丢包率(%)
-	SortOrder       int       `json:"sort_order" gorm:"default:0;index"`                 // 显示顺序
+	Name                  string    `json:"name" gorm:"not null"`                              // 服务器名称
+	Hostname              string    `json:"hostname" gorm:"type:varchar(255)"`                 // 主机名
+	IP                    string    `json:"ip"`                                                // 服务器IP
+	PublicIP              string    `json:"public_ip" gorm:"type:varchar(100)"`                // 公网IP
+	OS                    string    `json:"os"`                                                // 操作系统
+	Arch                  string    `json:"arch"`                                              // 架构
+	CPUCores              int       `json:"cpu_cores"`                                         // CPU核心数
+	CPUModel              string    `json:"cpu_model"`                                         // CPU型号
+	MemoryTotal           int64     `json:"memory_total"`                                      // 总内存(KB)
+	DiskTotal             int64     `json:"disk_total"`                                        // 总磁盘空间(KB)
+	LastHeartbeat         time.Time `json:"last_heartbeat"`                                    // 最后心跳时间
+	Online                bool      `json:"online" gorm:"default:false"`                       // 是否在线
+	SecretKey             string    `json:"secret_key" gorm:"type:varchar(64)"`                // 密钥
+	Tags                  string    `json:"tags" gorm:"type:varchar(255)"`                     // 标签，用逗号分隔
+	Description           string    `json:"description" gorm:"type:text"`                      // 描述
+	AllowPublicView       bool      `json:"allow_public_view" gorm:"default:false"`            // 是否允许公开查看
+	Status                string    `json:"status" gorm:"default:'offline'"`                   // 服务器状态
+	SystemInfo            string    `json:"system_info" gorm:"type:text"`                      // 系统信息 JSON
+	AgentVersion          string    `json:"agent_version" gorm:"type:varchar(64)"`             // Agent版本
+	AgentType             string    `json:"agent_type" gorm:"type:varchar(20);default:'full'"` // Agent类型: full 或 monitor
+	AgentHeartbeatSeconds int       `json:"agent_heartbeat_seconds" gorm:"not null;default:10"`
+	CountryCode           string    `json:"country_code" gorm:"type:varchar(10)"` // 国家代码
+	NetworkInTotal        uint64    `json:"network_in_total" gorm:"default:0"`    // 总入网流量
+	NetworkOutTotal       uint64    `json:"network_out_total" gorm:"default:0"`   // 总出网流量
+	Latency               float64   `json:"latency" gorm:"default:0"`             // 延迟(ms)
+	PacketLoss            float64   `json:"packet_loss" gorm:"default:0"`         // 丢包率(%)
+	SortOrder             int       `json:"sort_order" gorm:"default:0;index"`    // 显示顺序
 	// Monitor 统计信息使用一对多关系
 	Monitors []ServerMonitor `json:"-"`
 }
@@ -102,21 +103,6 @@ func GetAllServers() ([]Server, error) {
 	return servers, nil
 }
 
-// CheckServerOnlineStatus 检查服务器在线状态
-func CheckServerOnlineStatus() {
-	var servers []Server
-	if err := DB.Find(&servers).Error; err != nil {
-		return
-	}
-
-	for _, server := range servers {
-		// 如果最后心跳时间超过1分钟，则标记为离线
-		if time.Since(server.LastHeartbeat) > time.Minute {
-			DB.Model(&server).Update("online", false)
-		}
-	}
-}
-
 // SaveServerMonitorData 保存服务器监控数据
 func SaveServerMonitorData(data *ServerMonitorData) error {
 	return DB.Create(data).Error
@@ -177,58 +163,7 @@ func GetServerByID(id uint) (*Server, error) {
 	if result.Error != nil {
 		return nil, result.Error
 	}
-
-	// 检查服务器的在线状态
-	CheckServerStatus(&server)
-
 	return &server, nil
-}
-
-// CheckServerStatus 检查服务器的在线状态
-// 如果最后心跳时间超过15秒，则将状态设置为离线
-func CheckServerStatus(server *Server) {
-	// 定义心跳超时时间为15秒
-	const heartbeatTimeout = 15 * time.Second
-
-	// 检查最后心跳时间是否超过超时时间
-	timeSinceLastHeartbeat := time.Since(server.LastHeartbeat)
-
-	// 记录日志方便调试
-	log.Printf("服务器 %d (%s) 状态检查: 当前状态=%t, 上次心跳=%v, 距今=%v",
-		server.ID, server.Name, server.Online,
-		server.LastHeartbeat.Format(time.RFC3339),
-		timeSinceLastHeartbeat)
-
-	// 如果超过超时时间且当前状态为在线，则更新为离线
-	if timeSinceLastHeartbeat > heartbeatTimeout {
-		if server.Online {
-			server.Online = false
-			server.Status = "offline"
-			// 只在数据库中更新状态，不更新其他字段
-			result := DB.Model(server).Updates(map[string]interface{}{
-				"online": false,
-				"status": "offline",
-			})
-			if result.Error != nil {
-				log.Printf("更新服务器 %d 状态为离线失败: %v", server.ID, result.Error)
-			} else {
-				log.Printf("服务器 %d 状态已更新为离线", server.ID)
-			}
-		}
-	} else if !server.Online && timeSinceLastHeartbeat <= heartbeatTimeout {
-		// 如果心跳在超时窗口内，但状态是离线，则更新为在线
-		server.Online = true
-		server.Status = "online"
-		result := DB.Model(server).Updates(map[string]interface{}{
-			"online": true,
-			"status": "online",
-		})
-		if result.Error != nil {
-			log.Printf("更新服务器 %d 状态为在线失败: %v", server.ID, result.Error)
-		} else {
-			log.Printf("服务器 %d 状态已更新为在线", server.ID)
-		}
-	}
 }
 
 // CreateServer 创建服务器

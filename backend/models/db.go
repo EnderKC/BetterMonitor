@@ -70,6 +70,11 @@ func InitDB() error {
 	); err != nil {
 		return err
 	}
+	if err := DB.Model(&Server{}).
+		Where("agent_heartbeat_seconds IS NULL OR agent_heartbeat_seconds <= ?", 0).
+		Update("agent_heartbeat_seconds", 10).Error; err != nil {
+		return err
+	}
 
 	// 回填现有服务器的 sort_order 字段（只处理 sort_order 为 NULL 或 0 的记录）
 	var serversNeedOrder []Server

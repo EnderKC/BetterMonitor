@@ -46,7 +46,6 @@ const fetchServerInfo = async () => {
   try {
     // 使用any类型避免TypeScript错误
     const response: any = await request.get(`/servers/${serverId.value}`);
-    console.log('服务器详情响应:', response);
 
     // 从响应中提取服务器数据
     if (response && response.server) {

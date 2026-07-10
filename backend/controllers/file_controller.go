@@ -57,7 +57,7 @@ func GetFileList(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -85,7 +85,7 @@ func GetFileTree(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -113,7 +113,7 @@ func GetFileContent(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -156,7 +156,7 @@ func SaveFileContent(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -199,7 +199,7 @@ func CreateFile(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -241,7 +241,7 @@ func CreateDirectory(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -272,7 +272,7 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -319,7 +319,7 @@ func DownloadFile(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -368,7 +368,7 @@ func DeleteFiles(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -405,7 +405,7 @@ func GetContainerFileList(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -436,7 +436,7 @@ func GetContainerDirectoryChildren(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -467,7 +467,7 @@ func GetContainerFileContent(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -507,7 +507,7 @@ func SaveContainerFileContent(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -546,7 +546,7 @@ func CreateContainerFile(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -584,7 +584,7 @@ func CreateContainerDirectory(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -616,7 +616,7 @@ func UploadContainerFile(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -675,7 +675,7 @@ func DownloadContainerFile(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -723,7 +723,7 @@ func DeleteContainerFiles(c *gin.Context) {
 		return
 	}
 
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -756,7 +756,7 @@ func GetDirectoryChildren(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器离线"})
 		return
 	}
@@ -780,14 +780,9 @@ func GetDirectoryChildren(c *gin.Context) {
 // 通过WebSocket获取文件列表
 func requestFileListViaWebSocket(serverID uint, path string) ([]FileInfo, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -872,14 +867,9 @@ func requestFileListViaWebSocket(serverID uint, path string) ([]FileInfo, error)
 // 通过WebSocket获取文件树
 func requestFileTreeViaWebSocket(serverID uint, depth string) ([]*FileInfo, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -956,14 +946,9 @@ func requestFileTreeViaWebSocket(serverID uint, depth string) ([]*FileInfo, erro
 // 通过WebSocket获取文件内容
 func requestFileContentViaWebSocket(serverID uint, path string) (string, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return "", fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return "", fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1105,14 +1090,9 @@ func HandleFileResponse(requestID string, data map[string]interface{}) {
 // 通过WebSocket保存文件内容
 func saveFileContentViaWebSocket(serverID uint, path string, content string) error {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1170,14 +1150,9 @@ func saveFileContentViaWebSocket(serverID uint, path string, content string) err
 // 通过WebSocket创建文件
 func createFileViaWebSocket(serverID uint, path string, content string) error {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1235,14 +1210,9 @@ func createFileViaWebSocket(serverID uint, path string, content string) error {
 // 通过WebSocket创建目录
 func createDirectoryViaWebSocket(serverID uint, path string) error {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1299,14 +1269,9 @@ func createDirectoryViaWebSocket(serverID uint, path string) error {
 // 通过WebSocket上传文件
 func uploadFileViaWebSocket(serverID uint, path string, content []byte) error {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1375,14 +1340,9 @@ func uploadFileViaWebSocket(serverID uint, path string, content []byte) error {
 // 通过WebSocket下载文件
 func downloadFileViaWebSocket(serverID uint, path string) ([]byte, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1455,14 +1415,9 @@ func downloadFileViaWebSocket(serverID uint, path string) ([]byte, error) {
 // 通过WebSocket删除文件
 func deleteFilesViaWebSocket(serverID uint, paths []string) error {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1526,14 +1481,9 @@ func deleteFilesViaWebSocket(serverID uint, paths []string) error {
 // 通过WebSocket获取指定目录的直接子目录
 func requestDirectoryChildrenViaWebSocket(serverID uint, path string) ([]*FileInfo, error) {
 	// 获取Agent连接
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	// 创建请求ID
@@ -1614,13 +1564,9 @@ func requestDirectoryChildrenViaWebSocket(serverID uint, path string) ([]*FileIn
 // ---------------- 容器文件 WebSocket 请求封装 ----------------
 
 func requestContainerFileListViaWebSocket(serverID uint, containerID string, path string) ([]FileInfo, error) {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_list_%d", time.Now().UnixNano())
@@ -1687,13 +1633,9 @@ func requestContainerFileListViaWebSocket(serverID uint, containerID string, pat
 }
 
 func requestContainerDirectoryChildrenViaWebSocket(serverID uint, containerID, path string) ([]*FileInfo, error) {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_dir_children_%d", time.Now().UnixNano())
@@ -1759,13 +1701,9 @@ func requestContainerDirectoryChildrenViaWebSocket(serverID uint, containerID, p
 }
 
 func requestContainerFileContentViaWebSocket(serverID uint, containerID, path string) (string, error) {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return "", fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return "", fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_content_%d", time.Now().UnixNano())
@@ -1832,13 +1770,9 @@ func createContainerDirectoryViaWebSocket(serverID uint, containerID, path strin
 }
 
 func deleteContainerFilesViaWebSocket(serverID uint, containerID string, paths []string) error {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_delete_%d", time.Now().UnixNano())
@@ -1892,13 +1826,9 @@ func deleteContainerFilesViaWebSocket(serverID uint, containerID string, paths [
 }
 
 func uploadContainerFileViaWebSocket(serverID uint, containerID, path string, content []byte) error {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_upload_%d", time.Now().UnixNano())
@@ -1954,13 +1884,9 @@ func uploadContainerFileViaWebSocket(serverID uint, containerID, path string, co
 }
 
 func downloadContainerFileViaWebSocket(serverID uint, containerID, path string) ([]byte, error) {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return nil, fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return nil, fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_download_%d", time.Now().UnixNano())
@@ -2019,13 +1945,9 @@ func downloadContainerFileViaWebSocket(serverID uint, containerID, path string) 
 }
 
 func genericContainerFileContentAction(serverID uint, containerID, path, action, content string) error {
-	agentConnVal, ok := ActiveAgentConnections.Load(serverID)
+	agentConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok {
 		return fmt.Errorf("服务器Agent未连接")
-	}
-	agentConn, ok := agentConnVal.(*SafeConn)
-	if !ok {
-		return fmt.Errorf("服务器连接类型错误")
 	}
 
 	requestID := fmt.Sprintf("docker_file_%s_%d", action, time.Now().UnixNano())

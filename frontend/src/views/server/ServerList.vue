@@ -219,7 +219,6 @@ const handleSubmit = () => {
         message.success('服务器添加成功');
 
         // 显示服务器令牌
-        console.log('创建服务器响应:', response);
         if (response && response.server) {
           viewToken(response.server);
         }

@@ -12,6 +12,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useThemeStore } from '../../stores/theme';
 import { storeToRefs } from 'pinia';
 import { useUIStore } from '../../stores/uiStore';
+import { buildWebSocketURL } from '@/utils/websocket';
 // 导入图表组件
 import CpuUsageChartCard from '../../components/server/monitor/CpuUsageChartCard.vue';
 import MemoryUsageChartCard from '../../components/server/monitor/MemoryUsageChartCard.vue';
@@ -94,8 +95,7 @@ const fetchServerInfo = async () => {
   try {
     // 使用公开WebSocket接口获取服务器信息
     // 注意：这里假设后端提供了公开访问的接口
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/servers/public/${serverId.value}/ws`;
+    const wsUrl = buildWebSocketURL(`/api/servers/public/${serverId.value}/ws`);
 
     ws = new WebSocket(wsUrl);
 
@@ -121,8 +121,8 @@ const fetchServerInfo = async () => {
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket错误:', error);
+    ws.onerror = () => {
+      console.error('WebSocket错误');
       wsConnected.value = false;
       message.error('获取服务器信息失败');
     };

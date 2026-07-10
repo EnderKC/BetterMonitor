@@ -53,11 +53,11 @@ func NginxConfigsList(c *gin.Context) {
 	}
 
 	// 检查服务器在线状态
-	models.CheckServerStatus(&server)
-	log.Printf("[DEBUG] 服务器 %d 当前在线状态: %t, 状态: %s", id, server.Online, server.Status)
+	online := isServerOnline(&server)
+	log.Printf("[DEBUG] 服务器 %d 当前在线状态: %t", id, online)
 
 	// 如果服务器离线，直接返回错误
-	if !server.Online {
+	if !online {
 		log.Printf("[WARN] 服务器 %d 当前离线，无法获取Nginx配置文件列表", id)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
@@ -822,8 +822,7 @@ func ListWebsites(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -878,8 +877,7 @@ func GetWebsiteDetail(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -936,8 +934,7 @@ func GetWebsiteNginxConfig(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -994,8 +991,7 @@ func SaveWebsiteNginxConfig(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -1060,8 +1056,7 @@ func OpenRestyStatus(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -1109,8 +1104,7 @@ func InstallOpenResty(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -1164,8 +1158,7 @@ func GetOpenRestyInstallLogs(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -1214,8 +1207,7 @@ func ApplyWebsiteConfig(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}
@@ -1311,8 +1303,7 @@ func IssueWebsiteCertificate(c *gin.Context) {
 		return
 	}
 
-	models.CheckServerStatus(&server)
-	if !server.Online {
+	if !isServerOnline(&server) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务器当前离线，无法连接"})
 		return
 	}

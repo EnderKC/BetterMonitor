@@ -21,9 +21,6 @@ var (
 	alertServiceOnce   sync.Once
 )
 
-// serverHeartbeatTimeout 用于估算“离线开始时间”，需要与 models.CheckServerStatus 的超时时间保持一致
-const serverHeartbeatTimeout = 15 * time.Second
-
 // MetricState 指标状态缓存结构
 type MetricState struct {
 	Value      float64
@@ -135,7 +132,7 @@ func (s *AlertService) checkAllServers() {
 		}
 
 		// 只对在线服务器检查资源指标
-		if !server.Online {
+		if !IsServerOnline(server, time.Now()) {
 			continue
 		}
 
@@ -545,7 +542,7 @@ func offlineSince(server models.Server, now time.Time) time.Time {
 	if server.LastHeartbeat.IsZero() {
 		return now
 	}
-	t := server.LastHeartbeat.Add(serverHeartbeatTimeout)
+	t := OfflineSince(server)
 	if t.After(now) {
 		return now
 	}
@@ -579,7 +576,7 @@ func (s *AlertService) checkServerStatus(
 	}
 
 	now := time.Now()
-	currentStatus := statusValueFromOnline(server.Online)
+	currentStatus := statusValueFromOnline(IsServerOnline(server, now))
 
 	// 获取旧状态
 	oldState, exists := s.metricStates["status"][server.ID]

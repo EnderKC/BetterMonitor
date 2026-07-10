@@ -24,11 +24,6 @@ func SetupRoutes(r *gin.Engine) {
 	r.GET("/", controllers.HealthCheck)
 	r.HEAD("/", controllers.HealthCheck)
 
-	// 添加不带前缀的WebSocket路由，便于客户端连接
-	r.GET("/servers/:id/ws", controllers.WebSocketHandler)
-	// 添加前端当前使用的WebSocket路由路径
-	r.GET("/ws/:id/server", controllers.WebSocketHandler)
-
 	// API路由组
 	api := r.Group("/api")
 	{
@@ -64,10 +59,10 @@ func SetupRoutes(r *gin.Engine) {
 		// Agent 获取配置接口
 		api.GET("/servers/:id/settings", controllers.GetAgentSettings)
 
-		// WebSocket接口（支持Secret Key认证）
-		api.GET("/servers/:id/ws", controllers.WebSocketHandler)
-		api.GET("/servers/:id/monitor-ws", controllers.WebSocketHandler)
-		api.GET("/ws/:id/server", controllers.WebSocketHandler)
+		// WebSocket接口：Agent 仅 Header 认证，浏览器仅单用途 ticket 认证
+		api.GET("/servers/:id/agent-ws", controllers.AgentWebSocketHandler)
+		api.GET("/servers/:id/ws", controllers.BrowserWebSocketHandler)
+		api.GET("/servers/:id/monitor-ws", controllers.BrowserWebSocketHandler)
 
 		// LifeLogger数据采集接口
 		api.POST("/life-logger/events", controllers.IngestLifeLoggerEvent)
@@ -83,6 +78,7 @@ func SetupRoutes(r *gin.Engine) {
 			auth.GET("/settings", controllers.GetSystemSettings)
 			auth.PUT("/settings", controllers.UpdateSystemSettings)
 			auth.GET("/database/stats", controllers.GetDatabaseStats)
+			auth.POST("/ws-tickets", controllers.IssueWSTicket)
 
 			// 服务器管理
 			auth.GET("/servers", controllers.GetAllServers)

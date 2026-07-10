@@ -21,7 +21,8 @@ type Config struct {
 	AgentType string `mapstructure:"agent_type"`
 
 	// 监控设置
-	MonitorInterval time.Duration `mapstructure:"monitor_interval"`
+	MonitorInterval   time.Duration `mapstructure:"monitor_interval"`
+	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
 
 	// 日志设置
 	LogLevel string `mapstructure:"log_level"`
@@ -49,6 +50,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("secret_key", "")
 	v.SetDefault("register_token", "")
 	v.SetDefault("monitor_interval", "30s")
+	v.SetDefault("heartbeat_interval", "10s")
 	v.SetDefault("log_level", "info")
 	v.SetDefault("log_file", "./agent.log")
 	v.SetDefault("enable_cpu_monitor", true)
@@ -101,6 +103,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	} else {
 		config.MonitorInterval = 30 * time.Second
 	}
+	heartbeatInterval, err := time.ParseDuration(v.GetString("heartbeat_interval"))
+	if err == nil && heartbeatInterval > 0 {
+		config.HeartbeatInterval = heartbeatInterval
+	} else {
+		config.HeartbeatInterval = 10 * time.Second
+	}
 
 	// 兼容旧版配置文件（无 agent_type 字段）
 	if config.AgentType == "" {
@@ -115,6 +123,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	fmt.Printf("RegisterTokenConfigured: %t\n", config.RegisterToken != "")
 	fmt.Printf("AgentType: %s\n", config.AgentType)
 	fmt.Printf("MonitorInterval: %s\n", config.MonitorInterval)
+	fmt.Printf("HeartbeatInterval: %s\n", config.HeartbeatInterval)
 	fmt.Printf("LogLevel: %s\n", config.LogLevel)
 	fmt.Printf("LogFile: %s\n", config.LogFile)
 	fmt.Printf("EnableCPUMonitor: %t\n", config.EnableCPUMonitor)
@@ -137,6 +146,7 @@ func SaveConfig(config *Config, configPath string) error {
 	v.Set("register_token", config.RegisterToken)
 	v.Set("agent_type", config.AgentType)
 	v.Set("monitor_interval", config.MonitorInterval.String())
+	v.Set("heartbeat_interval", config.HeartbeatInterval.String())
 	v.Set("log_level", config.LogLevel)
 	v.Set("log_file", config.LogFile)
 	v.Set("enable_cpu_monitor", config.EnableCPUMonitor)

@@ -7,6 +7,7 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/user/server-ops-backend/config"
+	"github.com/user/server-ops-backend/controllers"
 	"github.com/user/server-ops-backend/jobs"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/routes"
@@ -15,21 +16,31 @@ import (
 
 // 定期检查服务器状态
 func startServerStatusChecker() {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		for range ticker.C {
-			servers, err := models.GetAllServers()
-			if err != nil {
-				log.Printf("获取服务器列表失败: %v", err)
-				continue
+			if err := reconcileServerStatuses(time.Now()); err != nil {
+				log.Printf("检查服务器状态失败: %v", err)
 			}
-
-			for i := range servers {
-				models.CheckServerStatus(&servers[i])
-			}
-			log.Println("已完成服务器状态检查")
 		}
 	}()
+}
+
+func reconcileServerStatuses(now time.Time) error {
+	servers, err := models.GetAllServers()
+	if err != nil {
+		return err
+	}
+	for i := range servers {
+		changed, err := services.ReconcileServerOnlineState(models.DB, &servers[i], now)
+		if err != nil {
+			return err
+		}
+		if changed && !servers[i].Online {
+			controllers.NotifyAgentOffline(servers[i].ID)
+		}
+	}
+	return nil
 }
 
 // 启动预警服务

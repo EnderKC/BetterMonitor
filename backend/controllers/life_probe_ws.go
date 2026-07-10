@@ -5,61 +5,24 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-backend/models"
+	"github.com/user/server-ops-backend/services"
 	"gorm.io/gorm"
 )
 
 var lifeProbePublicListConns = &publicConnSet{}
 var lifeProbePrivateListConns = &publicConnSet{}
-var lifeProbeDetailConns sync.Map // map[uint]*lifeDetailConnSet
+var lifeProbeDetailConns = NewSubscriberRegistry[uint, *lifeDetailConn]()
 
 type lifeDetailConn struct {
 	conn       *SafeConn
 	hours      int
 	dailyDays  int
 	maskDevice bool // 是否需要脱敏设备ID（公开访问时为true）
-}
-
-type lifeDetailConnSet struct {
-	mu    sync.Mutex
-	conns map[*lifeDetailConn]struct{}
-}
-
-func (s *lifeDetailConnSet) add(conn *lifeDetailConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conns == nil {
-		s.conns = make(map[*lifeDetailConn]struct{})
-	}
-	s.conns[conn] = struct{}{}
-}
-
-func (s *lifeDetailConnSet) remove(conn *lifeDetailConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.conns, conn)
-}
-
-func (s *lifeDetailConnSet) len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.conns)
-}
-
-func (s *lifeDetailConnSet) snapshot() []*lifeDetailConn {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	list := make([]*lifeDetailConn, 0, len(s.conns))
-	for conn := range s.conns {
-		list = append(list, conn)
-	}
-	return list
 }
 
 func buildLifeProbeSummaries(includeAll bool) ([]*models.LifeProbeSummary, error) {
@@ -106,22 +69,11 @@ func lifeProbeListPayload(includeAll bool) (map[string]interface{}, error) {
 
 // LifeProbeListWebSocketHandler 推送生命探针列表
 func LifeProbeListWebSocketHandler(c *gin.Context) {
-	token := strings.TrimSpace(c.Query("token"))
-	// 标准化token格式：不区分大小写移除Bearer前缀
-	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
-		token = strings.TrimSpace(token[7:])
-	}
-
-	includeAll := false
-	if token != "" {
-		if claims, err := verifyJWTFromQuery(token); err == nil && claims != nil {
-			includeAll = true
-			log.Printf("[生命探针WS] Token验证成功，用户: %q，将返回完整设备ID", claims.Username)
-		} else {
-			log.Printf("[生命探针WS] Token验证失败(类型: %T)，将脱敏设备ID", err)
-		}
-	} else {
-		log.Printf("[生命探针WS] 未提供token，将脱敏设备ID")
+	includeAll, ok := authorizeOptionalBrowserTicket(c, services.WSTicketClaims{
+		Purpose: services.WSTicketLifeProbeList,
+	})
+	if !ok {
+		return
 	}
 
 	// 列表接口始终允许访问（不受系统开关限制）
@@ -221,38 +173,27 @@ func getLifeProbeDetailsPayload(probeID uint, hours, dailyDays int, maskDevice b
 }
 
 func registerLifeProbeDetailConn(probeID uint, conn *lifeDetailConn) {
-	value, _ := lifeProbeDetailConns.LoadOrStore(probeID, &lifeDetailConnSet{})
-	set := value.(*lifeDetailConnSet)
-	set.add(conn)
+	lifeProbeDetailConns.Add(probeID, conn)
 }
 
 func unregisterLifeProbeDetailConn(probeID uint, conn *lifeDetailConn) {
-	if value, ok := lifeProbeDetailConns.Load(probeID); ok {
-		if set, _ := value.(*lifeDetailConnSet); set != nil {
-			set.remove(conn)
-			if set.len() == 0 {
-				lifeProbeDetailConns.Delete(probeID)
-			}
-		}
-	}
+	lifeProbeDetailConns.Remove(probeID, conn)
 }
 
 func closeLifeProbeDetailConnSet(probeID uint) {
-	if value, ok := lifeProbeDetailConns.LoadAndDelete(probeID); ok {
-		if set, _ := value.(*lifeDetailConnSet); set != nil {
-			conns := set.snapshot()
-			for _, item := range conns {
-				_ = item.conn.WriteControl(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "life probe removed"),
-					time.Now().Add(time.Second))
-				_ = item.conn.Close()
-			}
-		}
+	for _, item := range lifeProbeDetailConns.RemoveAll(probeID) {
+		_ = item.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "life probe removed"),
+			time.Now().Add(time.Second))
+		_ = item.conn.Close()
 	}
 }
 
 // LifeProbeDetailWebSocketHandler 推送单个生命探针详情
 func LifeProbeDetailWebSocketHandler(c *gin.Context) {
+	if rejectLegacyWebSocketAuth(c) {
+		return
+	}
 	idParam := c.Param("id")
 	probeID64, err := strconv.ParseUint(idParam, 10, 64)
 	if err != nil {
@@ -261,17 +202,12 @@ func LifeProbeDetailWebSocketHandler(c *gin.Context) {
 	}
 	probeID := uint(probeID64)
 
-	token := strings.TrimSpace(c.Query("token"))
-	// 标准化token格式：不区分大小写移除Bearer前缀
-	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
-		token = strings.TrimSpace(token[7:])
-	}
-
-	includeAll := false
-	if token != "" {
-		if claims, err := verifyJWTFromQuery(token); err == nil && claims != nil {
-			includeAll = true
-		}
+	includeAll, ok := authorizeOptionalBrowserTicket(c, services.WSTicketClaims{
+		Purpose:     services.WSTicketLifeProbeDetail,
+		LifeProbeID: probeID,
+	})
+	if !ok {
+		return
 	}
 
 	// 公开访问时检查系统设置（fail-closed: 读取失败时拒绝访问）
@@ -381,19 +317,7 @@ func broadcastLifeProbeList(includeAll bool) {
 }
 
 func broadcastLifeProbeDetail(probeID uint) {
-	value, ok := lifeProbeDetailConns.Load(probeID)
-	if !ok {
-		return
-	}
-
-	set, _ := value.(*lifeDetailConnSet)
-	if set == nil || set.len() == 0 {
-		lifeProbeDetailConns.Delete(probeID)
-		return
-	}
-
-	conns := set.snapshot()
-	for _, connInfo := range conns {
+	for _, connInfo := range lifeProbeDetailConns.Snapshot(probeID) {
 		payload, err := getLifeProbeDetailsPayload(probeID, connInfo.hours, connInfo.dailyDays, connInfo.maskDevice)
 		if err != nil {
 			log.Printf("构建生命探针详情失败: %v", err)
