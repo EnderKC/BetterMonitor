@@ -3,20 +3,16 @@ const UserKey = 'server_ops_user';
 
 // 获取令牌
 export function getToken(): string | null {
-  const token = localStorage.getItem(TokenKey);
-  console.log('获取令牌:', token);
-  return token;
+  return localStorage.getItem(TokenKey);
 }
 
 // 设置令牌
 export function setToken(token: string): void {
-  console.log('设置令牌:', token);
   localStorage.setItem(TokenKey, token);
 }
 
 // 删除令牌
 export function removeToken(): void {
-  console.log('删除令牌');
   localStorage.removeItem(TokenKey);
 }
 
@@ -25,9 +21,7 @@ export function getUser(): any {
   const userStr = localStorage.getItem(UserKey);
   if (userStr) {
     try {
-      const user = JSON.parse(userStr);
-      console.log('获取用户信息:', user);
-      return user;
+      return JSON.parse(userStr);
     } catch (e) {
       console.error('解析用户信息失败:', e);
       return null;
@@ -38,13 +32,11 @@ export function getUser(): any {
 
 // 设置用户信息
 export function setUser(user: any): void {
-  console.log('设置用户信息:', user);
   localStorage.setItem(UserKey, JSON.stringify(user));
 }
 
 // 删除用户信息
 export function removeUser(): void {
-  console.log('删除用户信息');
   localStorage.removeItem(UserKey);
 }
 
@@ -56,7 +48,6 @@ export function isAdmin(): boolean {
 
 // 清除所有登录信息
 export function clearLoginInfo(): void {
-  console.log('清除所有登录信息');
   removeToken();
   removeUser();
 }

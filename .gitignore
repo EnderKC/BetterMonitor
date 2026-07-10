@@ -61,6 +61,10 @@ coverage/
 .idea/
 .vscode/
 .claude/
+.agents/
+.codex/
+.trellis/
+AGENTS.md
 *.sublime-workspace
 *.sublime-project
 *.code-workspace

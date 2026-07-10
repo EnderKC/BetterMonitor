@@ -21,15 +21,14 @@ import (
 func main() {
 	// 定义命令行参数
 	var (
-		showVersion   bool
-		showHelp      bool
-		configFile    string
-		serverURL     string
-		registerToken string
-		serverID      uint
-		secretKey     string
-		logFile       string
-		logLevel      string
+		showVersion bool
+		showHelp    bool
+		configFile  string
+		serverURL   string
+		serverID    uint
+		secretKey   string
+		logFile     string
+		logLevel    string
 	)
 
 	// 解析命令行参数
@@ -40,7 +39,7 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "指定配置文件路径")
 	flag.StringVar(&configFile, "c", "", "指定配置文件路径(简写)")
 	flag.StringVar(&serverURL, "server", "", "服务器URL(例如: 127.0.0.1:8080)")
-	flag.StringVar(&registerToken, "token", "", "注册令牌")
+	flag.StringVar(new(string), "token", "", "注册令牌（已弃用，请使用 --server-id 和 --secret-key）")
 	flag.UintVar(&serverID, "server-id", 0, "服务器ID")
 	flag.StringVar(&secretKey, "secret-key", "", "服务器密钥")
 	flag.StringVar(&logFile, "log", "", "日志文件路径")
@@ -118,9 +117,6 @@ func main() {
 	// 应用命令行参数覆盖配置文件
 	if serverURL != "" {
 		cfg.ServerURL = serverURL
-	}
-	if registerToken != "" {
-		cfg.RegisterToken = registerToken
 	}
 	if serverID > 0 {
 		cfg.ServerID = serverID
@@ -212,46 +208,37 @@ func main() {
 		// 首次尝试连接
 		tryConnect := func() bool {
 			log.Info("尝试建立WebSocket连接...")
-			// 如果已经有服务器ID和密钥，尝试连接
-			if cfg.ServerID > 0 && cfg.SecretKey != "" {
-				if err := client.ConnectWebSocket(); err != nil {
-					log.Error("连接WebSocket服务器失败: %s", err)
-					return false
+			if cfg.ServerID == 0 || cfg.SecretKey == "" {
+				if cfg.RegisterToken != "" {
+					log.Warn("检测到 register_token，但当前版本不支持自动注册；请配置 server_id 和 secret_key")
 				}
-				log.Info("WebSocket连接成功")
-				return true
-			} else if cfg.RegisterToken != "" {
-				// 尝试使用注册令牌注册
-				serverID, secretKey, err := client.RegisterAgent(cfg.RegisterToken)
-				if err != nil {
-					log.Error("注册服务器失败: %s", err)
-					return false
-				}
-
-				log.Info("服务器注册成功，ID: %d", serverID)
-
-				// 更新配置
-				cfg.ServerID = serverID
-				cfg.SecretKey = secretKey
-
-				if err := config.SaveConfig(cfg, configFile); err != nil {
-					log.Error("保存配置失败: %s", err)
-				}
-
-				// 连接WebSocket
-				if err := client.ConnectWebSocket(); err != nil {
-					log.Error("连接WebSocket服务器失败: %s", err)
-					return false
-				}
-				log.Info("WebSocket连接成功")
-				return true
+				log.Warn("未配置服务器ID和密钥，无法连接到管理平台")
+				return false
 			}
-			log.Warn("未配置服务器ID和密钥，也未提供注册令牌，无法连接到管理平台")
-			return false
+			if err := client.ConnectWebSocket(); err != nil {
+				log.Error("连接WebSocket服务器失败: %s", err)
+				return false
+			}
+			log.Info("WebSocket连接成功")
+			return true
 		}
 
 		// 首次连接尝试
 		connected = tryConnect()
+		if connected {
+			go func() {
+				sysInfo, err := mon.GetSystemInfo()
+				if err != nil {
+					log.Error("获取系统信息失败: %s", err)
+					return
+				}
+				if err := client.SendSystemInfo(sysInfo); err != nil {
+					log.Error("发送系统信息失败: %s", err)
+				} else {
+					log.Info("初始系统信息已更新")
+				}
+			}()
+		}
 
 		// 立即将连接状态通知其他goroutine
 		if notifyConnStatus(connected) {
@@ -375,16 +362,6 @@ func main() {
 			}
 		}
 	}()
-
-	// 获取系统信息
-	sysInfo, err := mon.GetSystemInfo()
-	if err != nil {
-		log.Error("获取系统信息失败: %s", err)
-	} else if cfg.ServerID > 0 && cfg.SecretKey != "" {
-		if err := client.SendSystemInfo(sysInfo); err != nil {
-			log.Error("发送系统信息失败: %s", err)
-		}
-	}
 
 	// 创建一个配置更新通道
 	configUpdateCh := make(chan struct{}, 1)

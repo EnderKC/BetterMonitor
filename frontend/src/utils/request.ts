@@ -37,7 +37,6 @@ service.interceptors.request.use(
     return config;
   },
   (error) => {
-    console.error('请求错误:', error);
     return Promise.reject(error);
   }
 );
@@ -45,14 +44,10 @@ service.interceptors.request.use(
 // 响应拦截器
 service.interceptors.response.use(
   (response) => {
-    console.log('请求成功响应:', response.config.url, response.data);
-
     // 直接返回响应数据，不做任何转换
     return response.data;
   },
   (error) => {
-    console.error('请求错误:', error.config?.url, error);
-
     // 请求被主动取消时，静默处理，不弹出错误提示
     if (isCancelledRequest(error)) {
       return Promise.reject(error);
@@ -63,7 +58,6 @@ service.interceptors.response.use(
 
     if (response) {
       const { status, data } = response;
-      console.error('错误响应状态:', status, '响应数据:', data);
 
       // 处理常见的错误
       switch (status) {

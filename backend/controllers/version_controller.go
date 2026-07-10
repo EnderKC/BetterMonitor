@@ -78,7 +78,7 @@ func GetSystemInfo(c *gin.Context) {
 
 // GetServerVersions 获取指定服务器的版本信息
 func GetServerVersions(c *gin.Context) {
-	servers, err := models.GetAllServers(0) // 传入0表示获取所有服务器
+	servers, err := models.GetAllServers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,

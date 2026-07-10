@@ -1,10 +1,12 @@
 package controllers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/user/server-ops-backend/config"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/utils"
 )
@@ -113,9 +116,28 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许所有来源的WebSocket连接，生产环境应该限制
-	},
+	CheckOrigin:     checkWebSocketOrigin,
+}
+
+// checkWebSocketOrigin 校验 WebSocket 连接的 Origin，防止跨站 WebSocket 劫持(CSWSH)。
+//   - 无 Origin(Agent 等非浏览器客户端）：放行
+//   - 已配置 CORS 白名单：按白名单校验
+//   - 未配置白名单：退回同源校验(Origin 的 host 必须与请求 Host 一致)，
+//     而不是无条件放行
+func checkWebSocketOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	if config.HasAllowedOrigins() {
+		return config.IsAllowedOrigin(origin)
+	}
+	// 未配置白名单：同源校验
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(originURL.Host, r.Host)
 }
 
 // SafeConn 线程安全的WebSocket连接
@@ -408,6 +430,10 @@ func PublicWebSocketHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
 		return
 	}
+	if !server.AllowPublicView {
+		c.JSON(http.StatusForbidden, gin.H{"error": "该服务器未开启公开访问"})
+		return
+	}
 
 	// 确保服务器有监控数据
 	ensureMonitorDataExists(server.ID)
@@ -454,7 +480,7 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 	defer conn.Close()
 
 	sendServerList := func() error {
-		servers, err := models.GetAllServers(0)
+		servers, err := models.GetAllServers()
 		if err != nil {
 			return err
 		}
@@ -490,6 +516,10 @@ func PublicServersWebSocketHandler(c *gin.Context) {
 
 		var list []PublicServer
 		for _, server := range servers {
+			if !server.AllowPublicView && !isAuthenticated {
+				continue
+			}
+
 			systemInfo := make(map[string]interface{})
 			if server.SystemInfo != "" {
 				_ = json.Unmarshal([]byte(server.SystemInfo), &systemInfo)
@@ -652,27 +682,15 @@ func handlePublicWebSocket(conn *SafeConn, server *models.Server, interrupt chan
 	registerPublicMonitorConnection(server.ID, conn)
 	defer unregisterPublicMonitorConnection(server.ID, conn)
 
-	// 处理接收到的消息
+	// 公开监控连接为单向推送，这里仅读取以检测客户端断开，消息内容忽略
 	for {
-		// 读取消息
-		_, message, err := conn.ReadMessage()
-		if err != nil {
+		if _, _, err := conn.ReadMessage(); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("服务器 %d 的WebSocket读取错误: %v", server.ID, err)
 			} else {
 				log.Printf("服务器 %d 的WebSocket连接正常关闭", server.ID)
 			}
 			break
-		}
-
-		// 解析消息
-		var msg struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("服务器 %d 的WebSocket解析消息错误: %v", server.ID, err)
-			sendErrorMessage(conn, "消息格式错误")
-			continue
 		}
 	}
 
@@ -803,8 +821,7 @@ func sendInitialMonitorData(conn *SafeConn, server *models.Server) error {
 func WebSocketHandler(c *gin.Context) {
 	// 鉴权
 
-	// 记录请求URL和Token（便于调试）
-	log.Printf("WebSocket连接请求: %s, Token: %s", c.Request.URL.Path, c.Query("token"))
+	log.Printf("WebSocket连接请求: %s", c.Request.URL.Path)
 
 	// 尝试从不同的路由参数中获取服务器ID
 	var idStr string
@@ -842,8 +859,7 @@ func WebSocketHandler(c *gin.Context) {
 
 	if !authenticated {
 		token := c.Query("token")
-		log.Printf("尝试Secret Key认证: token_len=%d, match=%t", len(token), token == server.SecretKey)
-		if token != "" && token == server.SecretKey {
+		if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(server.SecretKey)) == 1 {
 			authenticated = true
 			isAgent = true // 标记为Agent连接
 			log.Printf("WebSocket通过Secret Key认证成功")
@@ -1002,27 +1018,16 @@ func handleMonitorWebSocket(conn *SafeConn, server *models.Server, interrupt cha
 	registerPublicMonitorConnection(server.ID, conn)
 	defer unregisterPublicMonitorConnection(server.ID, conn)
 
-	// 处理接收到的消息
+	// 读取循环仅用于检测客户端断开：监控连接是单向推送(服务端 → 客户端)，
+	// 不处理客户端发来的业务消息，因此这里丢弃消息内容。
 	for {
-		// 读取消息
-		_, message, err := conn.ReadMessage()
-		if err != nil {
+		if _, _, err := conn.ReadMessage(); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("监控WebSocket读取错误: %v", err)
 			} else {
 				log.Printf("监控WebSocket连接正常关闭")
 			}
 			break
-		}
-
-		// 解析消息
-		var msg struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("解析WebSocket消息错误: %v", err)
-			sendErrorMessage(conn, "消息格式错误")
-			continue
 		}
 	}
 }

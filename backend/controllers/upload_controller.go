@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,6 +138,20 @@ func InitUpload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("chunk_size 不能超过 %dMB", maxChunkSizeBytes/1024/1024)})
 		return
 	}
+	expectedChunks := int((req.TotalSize + req.ChunkSize - 1) / req.ChunkSize)
+	if req.TotalChunks != expectedChunks {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "total_chunks 与 total_size/chunk_size 不匹配"})
+		return
+	}
+	if !isValidFilePath(req.Path) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件路径"})
+		return
+	}
+	filename, err := sanitizeChunkedFilename(req.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	uploadID := fmt.Sprintf("chunked_%d_%d", serverID, time.Now().UnixNano())
 	now := time.Now()
@@ -145,7 +160,7 @@ func InitUpload(c *gin.Context) {
 		UploadID:    uploadID,
 		ServerID:    serverID,
 		Path:        req.Path,
-		Filename:    req.Filename,
+		Filename:    filename,
 		TotalSize:   req.TotalSize,
 		ChunkSize:   req.ChunkSize,
 		TotalChunks: req.TotalChunks,
@@ -161,7 +176,7 @@ func InitUpload(c *gin.Context) {
 	payload := map[string]interface{}{
 		"upload_id":    uploadID,
 		"path":         req.Path,
-		"filename":     req.Filename,
+		"filename":     filename,
 		"total_size":   req.TotalSize,
 		"chunk_size":   req.ChunkSize,
 		"total_chunks": req.TotalChunks,
@@ -309,6 +324,11 @@ func CompleteUpload(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req) // file_hash 可选
 
+	if len(session.receivedChunks()) != session.TotalChunks {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "分片未全部上传完成"})
+		return
+	}
+
 	session.setStatus("completing", "")
 
 	payload := map[string]interface{}{
@@ -414,6 +434,16 @@ func loadChunkedSession(uploadID string, serverID uint) (*chunkedUploadSession, 
 		return nil, fmt.Errorf("上传会话已过期")
 	}
 	return session, nil
+}
+
+func sanitizeChunkedFilename(name string) (string, error) {
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = strings.TrimSpace(name)
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == "/" || name == ".." {
+		return "", fmt.Errorf("无效的文件名")
+	}
+	return name, nil
 }
 
 // sendChunkedRequest 向 Agent 发送分片上传相关的 WebSocket 消息并等待 ACK

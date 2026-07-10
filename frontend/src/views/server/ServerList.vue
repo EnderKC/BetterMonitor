@@ -60,6 +60,7 @@ const formState = reactive({
   name: '',
   description: '',
   agent_type: 'full' as 'full' | 'monitor',
+  allow_public_view: true,
 });
 
 // 部署 Agent 弹窗状态
@@ -180,6 +181,7 @@ const showEditForm = (record: any) => {
   formState.name = record.name;
   formState.description = record.notes || '';
   formState.agent_type = record.agent_type || 'full'; // Fill current agent type
+  formState.allow_public_view = record.allow_public_view !== false;
 
   formVisible.value = true;
 };
@@ -190,6 +192,7 @@ const resetForm = () => {
   formState.name = '';
   formState.description = '';
   formState.agent_type = 'full';
+  formState.allow_public_view = true;
 };
 
 // 关闭表单
@@ -211,6 +214,7 @@ const handleSubmit = () => {
           name: formState.name,
           notes: formState.description,
           agent_type: formState.agent_type,
+          allow_public_view: formState.allow_public_view,
         });
         message.success('服务器添加成功');
 
@@ -223,7 +227,8 @@ const handleSubmit = () => {
         // 更新服务器
         await request.put(`/servers/${formState.id}/update`, {
           name: formState.name,
-          notes: formState.description
+          notes: formState.description,
+          allow_public_view: formState.allow_public_view
         });
 
         // Check if agent type changed
@@ -570,6 +575,11 @@ onDeactivated(() => {
           </div>
         </a-form-item>
 
+        <a-form-item name="allow_public_view" label="公开展示">
+          <a-switch v-model:checked="formState.allow_public_view" checked-children="开启" un-checked-children="关闭" />
+          <div class="form-help">关闭后，未登录用户无法在探针页面查看该服务器。</div>
+        </a-form-item>
+
         <div class="modal-footer">
           <a-button @click="handleCancel" class="cancel-btn">取消</a-button>
           <a-button type="primary" :loading="formLoading" @click="handleSubmit" class="save-btn">保存</a-button>
@@ -866,6 +876,13 @@ onDeactivated(() => {
   color: var(--text-secondary);
   margin-left: 24px;
   /* Align with text, skipping radio */
+  line-height: 1.4;
+}
+
+.form-help {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
   line-height: 1.4;
 }
 

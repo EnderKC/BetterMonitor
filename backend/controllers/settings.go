@@ -65,6 +65,13 @@ func GetAgentSettings(c *gin.Context) {
 		})
 		return
 	}
+	if c.GetHeader("X-Secret-Key") != server.SecretKey {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "无效的密钥",
+		})
+		return
+	}
 
 	// 获取系统设置
 	settings, err := models.GetSettings()

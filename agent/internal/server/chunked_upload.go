@@ -34,8 +34,8 @@ type ChunkedUploadSession struct {
 	Received    map[int]bool // 已接收分片索引
 	ContainerID string       // 非空则为容器上传
 	CreatedAt   time.Time
-	completing  bool         // 标记是否正在合并，阻止新分片写入
-	mu          sync.Mutex   // 保护 Received 和 completing 字段
+	completing  bool       // 标记是否正在合并，阻止新分片写入
+	mu          sync.Mutex // 保护 Received 和 completing 字段
 }
 
 // ChunkedUploadManager 管理多个分片上传会话
@@ -186,11 +186,25 @@ func (m *ChunkedUploadManager) Complete(uploadID, fileHash string) error {
 		}
 	}
 	session.mu.Unlock()
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		session.mu.Lock()
+		session.completing = false
+		session.mu.Unlock()
+	}()
 
 	// 合并分片到临时文件
 	mergedPath := filepath.Join(session.TempDir, "merged_"+session.Filename)
 	if err := m.mergeChunks(session, mergedPath); err != nil {
 		return err
+	}
+	if stat, err := os.Stat(mergedPath); err != nil {
+		return fmt.Errorf("检查合并文件失败: %w", err)
+	} else if stat.Size() != session.TotalSize {
+		return fmt.Errorf("合并文件大小不匹配: got=%d want=%d", stat.Size(), session.TotalSize)
 	}
 
 	// 校验最终文件哈希
@@ -222,6 +236,7 @@ func (m *ChunkedUploadManager) Complete(uploadID, fileHash string) error {
 	delete(m.sessions, uploadID)
 	m.mu.Unlock()
 	_ = os.RemoveAll(session.TempDir)
+	completed = true
 
 	return nil
 }

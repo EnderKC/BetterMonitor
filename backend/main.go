@@ -18,7 +18,7 @@ func startServerStatusChecker() {
 	ticker := time.NewTicker(15 * time.Second)
 	go func() {
 		for range ticker.C {
-			servers, err := models.GetAllServers(0)
+			servers, err := models.GetAllServers()
 			if err != nil {
 				log.Printf("获取服务器列表失败: %v", err)
 				continue

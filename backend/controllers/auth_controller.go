@@ -17,7 +17,7 @@ type LoginRequest struct {
 // RegisterRequest 注册请求结构
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Password string `json:"password" binding:"required,min=6"`
 	Role     string `json:"role" binding:"required"`
 }
 
@@ -28,19 +28,26 @@ func Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
 		return
 	}
+	if !checkLoginAllowed(c, req.Username) {
+		abortLoginRateLimited(c)
+		return
+	}
 
 	// 查找用户
 	user, err := models.GetUserByUsername(req.Username)
 	if err != nil {
+		recordLoginFailure(c, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
 	// 验证密码
 	if !user.CheckPassword(req.Password) {
+		recordLoginFailure(c, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
+	clearLoginFailures(c, req.Username)
 
 	// 更新最后登录时间
 	user.UpdateLastLogin()
@@ -146,8 +153,16 @@ func ChangePassword(c *gin.Context) {
 	}
 
 	// 获取用户ID
-	userId, _ := c.Get("userId")
-	id := userId.(uint)
+	userIDValue, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	id, ok := userIDValue.(uint)
+	if !ok || id == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
 
 	// 获取用户信息
 	var user models.User

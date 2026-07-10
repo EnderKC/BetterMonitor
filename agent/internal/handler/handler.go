@@ -71,7 +71,7 @@ func (a *App) Start() error {
 
 	// 检查配置
 	if a.config.ServerID == 0 || a.config.SecretKey == "" {
-		a.log.Warn("未配置服务器ID或密钥，将使用初始化模式")
+		a.log.Warn("未配置服务器ID或密钥，Agent无法连接管理平台")
 		return a.startInitMode()
 	}
 
@@ -83,25 +83,6 @@ func (a *App) Start() error {
 		a.log.Info("已获取最新配置")
 	}
 
-	// 收集系统信息
-	sysInfo, err := a.monitor.GetSystemInfo()
-	if err != nil {
-		return fmt.Errorf("获取系统信息失败: %w", err)
-	}
-
-	// 发送系统信息
-	a.log.Info("发送系统信息到服务器...")
-	if err := a.client.SendSystemInfo(sysInfo); err != nil {
-		a.log.Warn("发送系统信息失败: %v", err)
-	} else {
-		a.log.Info("系统信息发送成功")
-
-		// 系统信息发送成功后，再次获取配置确保同步
-		if err := a.client.FetchSettings(); err != nil {
-			a.log.Warn("二次获取配置失败: %v", err)
-		}
-	}
-
 	// 初始化终端处理
 	a.InitTerminalHandling()
 
@@ -110,6 +91,10 @@ func (a *App) Start() error {
 	if err := a.client.ConnectWebSocket(); err != nil {
 		a.log.Warn("WebSocket初始连接失败: %v", err)
 		a.log.Info("将尝试在后台自动重连")
+	} else if err := a.sendSystemInfo(); err != nil {
+		a.log.Warn("发送系统信息失败: %v", err)
+	} else if err := a.client.FetchSettings(); err != nil {
+		a.log.Warn("系统信息同步后二次获取配置失败: %v", err)
 	}
 
 	// 处理信号
@@ -146,7 +131,7 @@ func (a *App) Stop() {
 
 // 启动初始化模式
 func (a *App) startInitMode() error {
-	a.log.Info("进入初始化模式")
+	a.log.Info("进入待配置模式")
 
 	// 获取系统信息
 	sysInfo, err := a.monitor.GetSystemInfo()
@@ -162,34 +147,9 @@ func (a *App) startInitMode() error {
 	a.log.Info("  CPU: %s (%d核)", sysInfo.CPUModel, sysInfo.CPUCores)
 	a.log.Info("  内存: %d MB", sysInfo.MemoryTotal/1024/1024)
 
-	// 检查是否有注册令牌
-	if a.config.RegisterToken == "" {
-		a.log.Info("未配置注册令牌，请在配置文件中设置 register_token 后重启")
-		a.log.Info("或者使用以下命令行启动: ./server-ops-agent --register-token=YOUR_TOKEN")
-	} else {
-		// 尝试使用令牌注册
-		a.log.Info("正在尝试使用令牌注册到服务器...")
-
-		serverID, secretKey, err := a.client.RegisterAgent(a.config.RegisterToken)
-		if err != nil {
-			a.log.Error("注册失败: %v", err)
-		} else {
-			a.log.Info("注册成功！获取到服务器ID: %d", serverID)
-
-			// 更新配置
-			a.config.ServerID = serverID
-			a.config.SecretKey = secretKey
-
-			// 保存配置
-			if err := config.SaveConfig(a.config, ""); err != nil {
-				a.log.Error("保存配置失败: %v", err)
-			} else {
-				a.log.Info("配置已保存，重新启动应用...")
-
-				// 重新启动应用（不会立即退出，因为还有信号监听）
-				return a.Start()
-			}
-		}
+	a.log.Info("请先在Dashboard中创建服务器，并在配置文件中设置 server_id 与 secret_key 后重启Agent")
+	if a.config.RegisterToken != "" {
+		a.log.Warn("检测到 register_token，但当前版本不支持自动注册；该配置将被忽略")
 	}
 
 	// 等待退出信号
@@ -270,6 +230,19 @@ func abs(x float64) float64 {
 	return x
 }
 
+func (a *App) sendSystemInfo() error {
+	sysInfo, err := a.monitor.GetSystemInfo()
+	if err != nil {
+		return fmt.Errorf("获取系统信息失败: %w", err)
+	}
+	a.log.Info("发送系统信息到服务器...")
+	if err := a.client.SendSystemInfo(sysInfo); err != nil {
+		return err
+	}
+	a.log.Info("系统信息发送成功")
+	return nil
+}
+
 // SetRegisterToken 设置注册令牌
 func (a *App) SetRegisterToken(token string) {
 	if token != "" {
@@ -277,4 +250,3 @@ func (a *App) SetRegisterToken(token string) {
 		a.log.Info("已设置注册令牌")
 	}
 }
-

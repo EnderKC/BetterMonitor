@@ -100,7 +100,7 @@ func (s *AlertService) checkAllServers() {
 	}
 
 	// 获取所有活跃服务器
-	servers, err := models.GetAllServers(0)
+	servers, err := models.GetAllServers()
 	if err != nil {
 		log.Printf("获取服务器列表失败: %v", err)
 		return

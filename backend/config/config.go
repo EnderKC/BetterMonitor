@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -14,10 +15,11 @@ import (
 
 // Config 保存应用程序配置
 type Config struct {
-	Port            string
-	DBPath          string
-	JWTSecret       string
-	TokenExpiration int
+	Port             string
+	DBPath           string
+	JWTSecret        string
+	TokenExpiration  int
+	CORSAllowOrigins []string
 }
 
 var (
@@ -45,6 +47,7 @@ func LoadConfig() *Config {
 		// 设置默认值或从环境变量获取
 		port := getEnv("PORT", "8085")
 		dbPath := getEnv("DB_PATH", "./data/data.db")
+		corsAllowOrigins := parseCSVEnv("CORS_ALLOW_ORIGINS")
 
 		// 如果没有设置JWT_SECRET，自动生成一个随机密钥
 		jwtSecret := os.Getenv("JWT_SECRET")
@@ -55,10 +58,11 @@ func LoadConfig() *Config {
 		}
 
 		instance = &Config{
-			Port:            port,
-			DBPath:          dbPath,
-			JWTSecret:       jwtSecret,
-			TokenExpiration: 24, // 默认24小时
+			Port:             port,
+			DBPath:           dbPath,
+			JWTSecret:        jwtSecret,
+			TokenExpiration:  24, // 默认24小时
+			CORSAllowOrigins: corsAllowOrigins,
 		}
 	})
 
@@ -67,13 +71,37 @@ func LoadConfig() *Config {
 
 // CorsMiddleware 配置CORS中间件
 func CorsMiddleware() gin.HandlerFunc {
+	cfg := LoadConfig()
+	allowOrigins := cfg.CORSAllowOrigins
+	if len(allowOrigins) == 0 {
+		allowOrigins = []string{"*"}
+	}
 	return cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     allowOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Secret-Key", "X-Register-Token", "X-Chunk-Hash", "X-Chunk-Compressed"},
 		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
+		AllowCredentials: len(cfg.CORSAllowOrigins) > 0,
 	})
+}
+
+// HasAllowedOrigins 是否配置了 CORS 白名单
+func HasAllowedOrigins() bool {
+	return len(LoadConfig().CORSAllowOrigins) > 0
+}
+
+func IsAllowedOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return true
+	}
+	allowed := LoadConfig().CORSAllowOrigins
+	for _, item := range allowed {
+		if item == "*" || strings.EqualFold(item, origin) {
+			return true
+		}
+	}
+	return false
 }
 
 // 辅助函数从环境变量获取值，如果不存在则返回默认值
@@ -83,4 +111,20 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func parseCSVEnv(key string) []string {
+	raw := os.Getenv(key)
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }

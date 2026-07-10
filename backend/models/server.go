@@ -10,33 +10,32 @@ import (
 // Server 服务器模型
 type Server struct {
 	gorm.Model
-	Name            string    `json:"name" gorm:"not null"`                   // 服务器名称
-	Hostname        string    `json:"hostname" gorm:"type:varchar(255)"`      // 主机名
-	IP              string    `json:"ip"`                                     // 服务器IP
-	PublicIP        string    `json:"public_ip" gorm:"type:varchar(100)"`     // 公网IP
-	OS              string    `json:"os"`                                     // 操作系统
-	Arch            string    `json:"arch"`                                   // 架构
-	CPUCores        int       `json:"cpu_cores"`                              // CPU核心数
-	CPUModel        string    `json:"cpu_model"`                              // CPU型号
-	MemoryTotal     int64     `json:"memory_total"`                           // 总内存(KB)
-	DiskTotal       int64     `json:"disk_total"`                             // 总磁盘空间(KB)
-	LastHeartbeat   time.Time `json:"last_heartbeat"`                         // 最后心跳时间
-	Online          bool      `json:"online" gorm:"default:false"`            // 是否在线
-	SecretKey       string    `json:"secret_key" gorm:"type:varchar(64)"`     // 密钥
-	UserID          uint      `json:"user_id" gorm:"default:0"`               // 所属用户ID
-	Tags            string    `json:"tags" gorm:"type:varchar(255)"`          // 标签，用逗号分隔
-	Description     string    `json:"description" gorm:"type:text"`           // 描述
-	AllowPublicView bool      `json:"allow_public_view" gorm:"default:false"` // 是否允许公开查看
-	Status          string    `json:"status" gorm:"default:'offline'"`        // 服务器状态
-	SystemInfo      string    `json:"system_info" gorm:"type:text"`           // 系统信息 JSON
-	AgentVersion    string    `json:"agent_version" gorm:"type:varchar(64)"`  // Agent版本
+	Name            string    `json:"name" gorm:"not null"`                              // 服务器名称
+	Hostname        string    `json:"hostname" gorm:"type:varchar(255)"`                 // 主机名
+	IP              string    `json:"ip"`                                                // 服务器IP
+	PublicIP        string    `json:"public_ip" gorm:"type:varchar(100)"`                // 公网IP
+	OS              string    `json:"os"`                                                // 操作系统
+	Arch            string    `json:"arch"`                                              // 架构
+	CPUCores        int       `json:"cpu_cores"`                                         // CPU核心数
+	CPUModel        string    `json:"cpu_model"`                                         // CPU型号
+	MemoryTotal     int64     `json:"memory_total"`                                      // 总内存(KB)
+	DiskTotal       int64     `json:"disk_total"`                                        // 总磁盘空间(KB)
+	LastHeartbeat   time.Time `json:"last_heartbeat"`                                    // 最后心跳时间
+	Online          bool      `json:"online" gorm:"default:false"`                       // 是否在线
+	SecretKey       string    `json:"secret_key" gorm:"type:varchar(64)"`                // 密钥
+	Tags            string    `json:"tags" gorm:"type:varchar(255)"`                     // 标签，用逗号分隔
+	Description     string    `json:"description" gorm:"type:text"`                      // 描述
+	AllowPublicView bool      `json:"allow_public_view" gorm:"default:false"`            // 是否允许公开查看
+	Status          string    `json:"status" gorm:"default:'offline'"`                   // 服务器状态
+	SystemInfo      string    `json:"system_info" gorm:"type:text"`                      // 系统信息 JSON
+	AgentVersion    string    `json:"agent_version" gorm:"type:varchar(64)"`             // Agent版本
 	AgentType       string    `json:"agent_type" gorm:"type:varchar(20);default:'full'"` // Agent类型: full 或 monitor
-	CountryCode     string    `json:"country_code" gorm:"type:varchar(10)"`   // 国家代码
-	NetworkInTotal  uint64    `json:"network_in_total" gorm:"default:0"`      // 总入网流量
-	NetworkOutTotal uint64    `json:"network_out_total" gorm:"default:0"`     // 总出网流量
-	Latency         float64   `json:"latency" gorm:"default:0"`               // 延迟(ms)
-	PacketLoss      float64   `json:"packet_loss" gorm:"default:0"`           // 丢包率(%)
-	SortOrder       int       `json:"sort_order" gorm:"default:0;index"`      // 显示顺序
+	CountryCode     string    `json:"country_code" gorm:"type:varchar(10)"`              // 国家代码
+	NetworkInTotal  uint64    `json:"network_in_total" gorm:"default:0"`                 // 总入网流量
+	NetworkOutTotal uint64    `json:"network_out_total" gorm:"default:0"`                // 总出网流量
+	Latency         float64   `json:"latency" gorm:"default:0"`                          // 延迟(ms)
+	PacketLoss      float64   `json:"packet_loss" gorm:"default:0"`                      // 丢包率(%)
+	SortOrder       int       `json:"sort_order" gorm:"default:0;index"`                 // 显示顺序
 	// Monitor 统计信息使用一对多关系
 	Monitors []ServerMonitor `json:"-"`
 }
@@ -92,17 +91,11 @@ func GetServer(id interface{}) (*Server, error) {
 }
 
 // GetAllServers 获取所有服务器
-func GetAllServers(userID uint) ([]Server, error) {
+func GetAllServers() ([]Server, error) {
 	var servers []Server
-	query := DB
-
-	// 如果指定了用户ID，则只获取该用户的服务器
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
 
 	// 按 sort_order 升序排序，sort_order 相同时按 ID 升序排序
-	if err := query.Order("sort_order ASC, id ASC").Find(&servers).Error; err != nil {
+	if err := DB.Order("sort_order ASC, id ASC").Find(&servers).Error; err != nil {
 		return nil, err
 	}
 
@@ -187,7 +180,6 @@ func GetServerByID(id uint) (*Server, error) {
 
 	// 检查服务器的在线状态
 	CheckServerStatus(&server)
-	log.Println("服务器", server)
 
 	return &server, nil
 }

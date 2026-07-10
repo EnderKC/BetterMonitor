@@ -24,6 +24,7 @@ interface ServerState {
   system_info?: any;
   sort_order?: number;
   agent_type?: string; // Agent类型: "full" 或 "monitor"
+  allow_public_view?: boolean;
   // 可选：最新的监控数据
   monitorData?: {
     cpu_usage?: number;
@@ -131,6 +132,7 @@ export const useServerStore = defineStore('serverStore', {
       if (data.tags !== undefined) this.servers[serverId].tags = data.tags;
       if (data.system_info !== undefined) this.servers[serverId].system_info = data.system_info;
       if (data.agent_type !== undefined) this.servers[serverId].agent_type = data.agent_type;
+      if (data.allow_public_view !== undefined) this.servers[serverId].allow_public_view = data.allow_public_view;
 
       // 更新监控数据
       const monitorData = this.servers[serverId].monitorData!;
@@ -219,6 +221,7 @@ export const useServerStore = defineStore('serverStore', {
               secretKey: server.secret_key || server.SecretKey || existingServer?.secretKey,
               sort_order: server.SortOrder || server.sort_order || 0,
               agent_type: server.AgentType || server.agent_type || 'full',
+              allow_public_view: server.AllowPublicView ?? server.allow_public_view ?? true,
               lastUpdate: Date.now(),
               // 确保 monitorData 不被覆盖为空
               monitorData: existingServer?.monitorData || {}

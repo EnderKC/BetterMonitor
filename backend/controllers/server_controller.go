@@ -31,11 +31,12 @@ func generateRandomKey() string {
 func CreateServer(c *gin.Context) {
 	// 解析请求数据，处理字段映射
 	var createData struct {
-		Name        string `json:"name"`
-		Notes       string `json:"notes"`       // 前端发送的字段名
-		Description string `json:"description"` // 也支持直接的description字段
-		Tags        string `json:"tags"`
-		AgentType   string `json:"agent_type"`  // Agent类型: full 或 monitor，默认 full
+		Name            string `json:"name"`
+		Notes           string `json:"notes"`       // 前端发送的字段名
+		Description     string `json:"description"` // 也支持直接的description字段
+		Tags            string `json:"tags"`
+		AgentType       string `json:"agent_type"` // Agent类型: full 或 monitor，默认 full
+		AllowPublicView *bool  `json:"allow_public_view"`
 	}
 
 	if err := c.ShouldBindJSON(&createData); err != nil {
@@ -57,11 +58,15 @@ func CreateServer(c *gin.Context) {
 
 	// 创建服务器对象
 	server := models.Server{
-		Name:      createData.Name,
-		Tags:      createData.Tags,
-		AgentType: agentType,
-		SecretKey: generateRandomKey(), // 自动生成随机密钥
-		Status:    "offline",           // 设置默认状态
+		Name:            createData.Name,
+		Tags:            createData.Tags,
+		AgentType:       agentType,
+		AllowPublicView: true,
+		SecretKey:       generateRandomKey(), // 自动生成随机密钥
+		Status:          "offline",           // 设置默认状态
+	}
+	if createData.AllowPublicView != nil {
+		server.AllowPublicView = *createData.AllowPublicView
 	}
 
 	// 处理描述字段的映射：优先使用notes字段，如果为空则使用description字段
@@ -84,7 +89,7 @@ func CreateServer(c *gin.Context) {
 
 // GetAllServers 获取所有服务器
 func GetAllServers(c *gin.Context) {
-	servers, err := models.GetAllServers(0) // 传入0表示获取所有服务器
+	servers, err := models.GetAllServers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取服务器列表失败"})
 		return
@@ -126,6 +131,13 @@ func GetServerStatus(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "服务器不存在",
+		})
+		return
+	}
+	if !server.AllowPublicView {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "该服务器未开启公开访问",
 		})
 		return
 	}
@@ -172,7 +184,10 @@ func GetPublicServerMonitor(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "服务器不存在"})
 		return
 	}
-	_ = server // 服务器存在即可，不需要额外检查
+	if !server.AllowPublicView {
+		c.JSON(http.StatusForbidden, gin.H{"error": "该服务器未开启公开访问"})
+		return
+	}
 
 	// 获取查询参数
 	hoursStr := c.DefaultQuery("hours", "1")
@@ -223,10 +238,11 @@ func UpdateServer(c *gin.Context) {
 
 	// 解析请求数据，处理字段映射
 	var updateData struct {
-		Name        string `json:"name"`
-		Notes       string `json:"notes"`       // 前端发送的字段名
-		Description string `json:"description"` // 也支持直接的description字段
-		Tags        string `json:"tags"`
+		Name            string `json:"name"`
+		Notes           string `json:"notes"`       // 前端发送的字段名
+		Description     string `json:"description"` // 也支持直接的description字段
+		Tags            string `json:"tags"`
+		AllowPublicView *bool  `json:"allow_public_view"`
 	}
 
 	if err := c.ShouldBindJSON(&updateData); err != nil {
@@ -248,6 +264,9 @@ func UpdateServer(c *gin.Context) {
 
 	if updateData.Tags != "" {
 		server.Tags = updateData.Tags
+	}
+	if updateData.AllowPublicView != nil {
+		server.AllowPublicView = *updateData.AllowPublicView
 	}
 
 	// 保持ID不变
@@ -558,7 +577,7 @@ func RegisterServer(c *gin.Context) {
 	}
 
 	// 查找匹配的服务器
-	servers, err := models.GetAllServers(0)
+	servers, err := models.GetAllServers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取服务器列表失败"})
 		return

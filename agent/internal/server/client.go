@@ -219,7 +219,7 @@ func (c *Client) ConnectWebSocket() error {
 		}
 		url := wsProtocol + serverHost + path + "?token=" + c.secretKey
 
-		c.log.Debug("尝试连接WebSocket: %s", url)
+		c.log.Debug("尝试连接WebSocket: %s", path)
 
 		// 尝试连接
 		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
@@ -232,7 +232,7 @@ func (c *Client) ConnectWebSocket() error {
 		// 如果连接成功
 		c.wsConn = conn
 		c.wsConnected = true // 设置连接状态
-		c.log.Info("WebSocket连接成功: %s", url)
+		c.log.Info("WebSocket连接成功: %s", path)
 
 		// 开始监听消息
 		go c.handleWebSocketMessages()
@@ -379,44 +379,6 @@ func (c *Client) sendResponse(requestID, responseType string, data map[string]in
 	}
 }
 
-// RegisterAgent 向服务端注册 Agent
-func (c *Client) RegisterAgent(token string) (uint, string, error) {
-	serverURL := ensureURLProtocol(c.cfg.ServerURL)
-	url := fmt.Sprintf("%s/api/servers/register", serverURL)
-
-	hostname, _ := os.Hostname()
-
-	payload := struct {
-		Token    string `json:"token"`
-		Hostname string `json:"hostname"`
-	}{
-		Token:    token,
-		Hostname: hostname,
-	}
-
-	body, _ := json.Marshal(payload)
-	resp, err := http.Post(url, "application/json", strings.NewReader(string(body)))
-	if err != nil {
-		return 0, "", fmt.Errorf("注册请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Success  bool   `json:"success"`
-		ServerID uint   `json:"server_id"`
-		Secret   string `json:"secret_key"`
-		Message  string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, "", fmt.Errorf("解析注册响应失败: %w", err)
-	}
-	if !result.Success {
-		return 0, "", fmt.Errorf("注册失败: %s", result.Message)
-	}
-
-	return result.ServerID, result.Secret, nil
-}
-
 // removeProtocolPrefix 移除URL的协议前缀
 func removeProtocolPrefix(url string) string {
 	url = strings.TrimPrefix(url, "https://")
@@ -510,7 +472,7 @@ func (c *Client) FetchSettings() error {
 
 	// 更新Secret Key (如果服务器返回了新的值)
 	if response.SecretKey != "" && response.SecretKey != c.secretKey {
-		c.log.Info("检测到Secret Key更新，旧值: %s, 新值: %s", c.secretKey, response.SecretKey)
+		c.log.Info("检测到Secret Key更新")
 		c.secretKey = response.SecretKey
 		configChanged = true
 	}
