@@ -380,13 +380,6 @@ func failAllPendingRequests(serverID uint) {
 	}
 }
 
-func failAgentRequestsForDisconnectedServer(serverID uint) {
-	agenttransport.FailAgentRequests(serverID, errAgentConnectionClosed)
-	// Legacy request maps remain until Docker, file and terminal callers finish
-	// migrating to their typed request owners.
-	failAllPendingRequests(serverID)
-}
-
 // notifyDockerChannel 使用类型开关安全地向Docker响应通道发送错误
 // 支持 chan interface{} 和 chan map[string]interface{} 两种通道类型
 func notifyDockerChannel(respChanVal interface{}, requestID string, errorResponse map[string]interface{}) {
@@ -1809,19 +1802,6 @@ func sendTerminalClose(sessionID string) {
 	// 从活跃会话中移除
 	ActiveTerminalConnections.CloseCurrent(sessionID)
 	terminalSessions.Delete(sessionID)
-}
-
-func sendAgentCommandEnvelope(serverID uint, command agenttransport.AgentCommandEnvelope) error {
-	safeConn, ok := ActiveAgentConnections.Current(serverID)
-	if !ok || safeConn == nil || safeConn.Conn == nil {
-		return fmt.Errorf("服务器(ID: %d)未连接", serverID)
-	}
-	return safeConn.WriteJSON(command)
-}
-
-// 在package init函数中设置Agent命令发送边界。
-func init() {
-	agenttransport.ConfigureAgentCommandSender(sendAgentCommandEnvelope)
 }
 
 // requestTerminalWorkingDirectoryViaWebSocket 通过WebSocket获取终端当前工作目录
