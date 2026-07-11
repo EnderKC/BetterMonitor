@@ -41,6 +41,7 @@ jobs:
           bash tests/install-agent-contract.sh
           bash tests/repository-hygiene.sh
           bash tests/cicd-contract.sh
+          bash tests/readme-contract.sh
       - name: Verify Backend and Agent
         run: |
           (cd backend && test -z "$(gofmt -l .)" && go test ./... && go vet ./...)

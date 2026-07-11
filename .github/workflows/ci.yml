@@ -87,6 +87,7 @@ jobs:
         run: |
           bash tests/repository-hygiene.sh
           bash tests/cicd-contract.sh
+          bash tests/readme-contract.sh
           docker compose -f docker-compose.all-in-one.yml config >/dev/null
 
   windows-scripts:
