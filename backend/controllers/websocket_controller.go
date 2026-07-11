@@ -16,9 +16,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/user/server-ops-backend/config"
+	"github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/services"
-	"github.com/user/server-ops-backend/utils"
 )
 
 // maskIP 对 IP 地址进行脱敏处理
@@ -381,7 +381,7 @@ func failAllPendingRequests(serverID uint) {
 }
 
 func failAgentRequestsForDisconnectedServer(serverID uint) {
-	utils.FailAgentRequests(serverID, errAgentConnectionClosed)
+	agenttransport.FailAgentRequests(serverID, errAgentConnectionClosed)
 	// Legacy request maps remain until Docker, file and terminal callers finish
 	// migrating to their typed request owners.
 	failAllPendingRequests(serverID)
@@ -1327,8 +1327,8 @@ func handleWebSocket(
 				}
 			}
 		case "docker_containers", "docker_images", "docker_composes", "docker_container_logs", "docker_compose_config", "success", "error", "docker_error":
-			if err := utils.DeliverAgentResponse(server.ID, message); err != nil &&
-				!errors.Is(err, utils.ErrAgentRequestNotFound) {
+			if err := agenttransport.DeliverAgentResponse(server.ID, message); err != nil &&
+				!errors.Is(err, agenttransport.ErrAgentRequestNotFound) {
 				log.Printf("Agent命令响应投递失败: server_id=%d type=%s error=%v", server.ID, msg.Type, err)
 			}
 
@@ -1369,8 +1369,8 @@ func handleWebSocket(
 			}
 
 		case "nginx_success", "nginx_error":
-			if err := utils.DeliverAgentResponse(server.ID, message); err != nil &&
-				!errors.Is(err, utils.ErrAgentRequestNotFound) {
+			if err := agenttransport.DeliverAgentResponse(server.ID, message); err != nil &&
+				!errors.Is(err, agenttransport.ErrAgentRequestNotFound) {
 				log.Printf("Agent命令响应投递失败: server_id=%d type=%s error=%v", server.ID, msg.Type, err)
 			}
 
@@ -1811,7 +1811,7 @@ func sendTerminalClose(sessionID string) {
 	terminalSessions.Delete(sessionID)
 }
 
-func sendAgentCommandEnvelope(serverID uint, command utils.AgentCommandEnvelope) error {
+func sendAgentCommandEnvelope(serverID uint, command agenttransport.AgentCommandEnvelope) error {
 	safeConn, ok := ActiveAgentConnections.Current(serverID)
 	if !ok || safeConn == nil || safeConn.Conn == nil {
 		return fmt.Errorf("服务器(ID: %d)未连接", serverID)
@@ -1821,7 +1821,7 @@ func sendAgentCommandEnvelope(serverID uint, command utils.AgentCommandEnvelope)
 
 // 在package init函数中设置Agent命令发送边界。
 func init() {
-	utils.ConfigureAgentCommandSender(sendAgentCommandEnvelope)
+	agenttransport.ConfigureAgentCommandSender(sendAgentCommandEnvelope)
 }
 
 // requestTerminalWorkingDirectoryViaWebSocket 通过WebSocket获取终端当前工作目录

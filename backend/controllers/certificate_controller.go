@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
 	"github.com/user/server-ops-backend/services"
-	"github.com/user/server-ops-backend/utils"
 )
 
 type certificateAccountRequest struct {
@@ -262,7 +262,7 @@ func GetCertificateContent(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), TimeoutSimpleQuery)
 	defer cancel()
-	resp, err := utils.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
+	resp, err := agenttransport.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("发送命令失败: %v", err)})
 		return

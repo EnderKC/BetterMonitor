@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/user/server-ops-backend/utils"
+	utils "github.com/user/server-ops-backend/internal/agenttransport"
 )
 
 func TestNginxContractManagedFileValidation(t *testing.T) {

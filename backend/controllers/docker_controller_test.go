@@ -14,8 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	utils "github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
-	"github.com/user/server-ops-backend/utils"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

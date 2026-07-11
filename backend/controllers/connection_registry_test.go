@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/user/server-ops-backend/utils"
+	utils "github.com/user/server-ops-backend/internal/agenttransport"
 )
 
 func TestConnectionRegistryStaleHandleCannotDeleteReplacement(t *testing.T) {

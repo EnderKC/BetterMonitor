@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
-	"github.com/user/server-ops-backend/utils"
 )
 
 type DeclarativeSiteRequest struct {
@@ -60,7 +60,7 @@ func sendNginxAgentCommand(
 ) (json.RawMessage, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return utils.SendAgentCommand(requestCtx, serverID, "nginx_command", payload, "nginx_success")
+	return agenttransport.SendAgentCommand(requestCtx, serverID, "nginx_command", payload, "nginx_success")
 }
 
 func writeNginxAgentError(c *gin.Context, err error) {
@@ -76,12 +76,12 @@ func writeNginxAgentError(c *gin.Context, err error) {
 		status = http.StatusRequestTimeout
 		code = "nginx_request_canceled"
 		message = "Nginx 请求已取消"
-	case errors.Is(err, utils.ErrAgentCommandSenderNotConfigured):
+	case errors.Is(err, agenttransport.ErrAgentCommandSenderNotConfigured):
 		status = http.StatusServiceUnavailable
 		code = "agent_unavailable"
 		message = "服务器 Agent 不可用"
 	default:
-		var commandErr *utils.AgentCommandError
+		var commandErr *agenttransport.AgentCommandError
 		if errors.As(err, &commandErr) {
 			code = commandErr.Code
 		}

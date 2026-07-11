@@ -9,8 +9,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
-	"github.com/user/server-ops-backend/utils"
 )
 
 func parseServerId(idText string) (uint, error) {
@@ -69,7 +69,7 @@ func sendDockerAgentRequest(
 
 	requestCtx, cancel := context.WithTimeout(ctx, spec.Timeout)
 	defer cancel()
-	response, err := utils.SendAgentCommand(
+	response, err := agenttransport.SendAgentCommand(
 		requestCtx,
 		serverID,
 		"docker_command",
@@ -109,12 +109,12 @@ func respondDockerAgent(c *gin.Context, serverID uint, payload DockerCommandPayl
 		status = http.StatusRequestTimeout
 		code = "docker_request_canceled"
 		message = "Docker 请求已取消"
-	case errors.Is(err, utils.ErrAgentCommandSenderNotConfigured):
+	case errors.Is(err, agenttransport.ErrAgentCommandSenderNotConfigured):
 		status = http.StatusServiceUnavailable
 		code = "agent_unavailable"
 		message = "服务器 Agent 不可用"
 	default:
-		var commandErr *utils.AgentCommandError
+		var commandErr *agenttransport.AgentCommandError
 		if errors.As(err, &commandErr) {
 			code = commandErr.Code
 		}

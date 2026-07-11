@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/user/server-ops-backend/internal/agenttransport"
 	"github.com/user/server-ops-backend/models"
-	"github.com/user/server-ops-backend/utils"
 )
 
 // 全局CertificateRenewalService实例
@@ -153,7 +153,7 @@ func (s *CertificateRenewalService) renewCertificate(cert *models.ManagedCertifi
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	resp, err := utils.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
+	resp, err := agenttransport.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
 	if err != nil {
 		// 更新状态为续期失败
 		models.UpdateCertificateRenewalStatus(cert.ServerID, cert.ID, "续期失败")
