@@ -55,7 +55,10 @@ out/
 coverage/
 .env.local
 .env.*.local
-!.env
+.env
+backend/.env
+!.env.example
+!backend/.env.example
 
 # 忽略 IDE 和编辑器相关文件
 .idea/
