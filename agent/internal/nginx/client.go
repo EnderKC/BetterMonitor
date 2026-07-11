@@ -323,17 +323,11 @@ func (c *NginxClient) ListSites() ([]SiteSummary, error) {
 
 // GetSiteDetail 获取单个站点的详细配置
 func (c *NginxClient) GetSiteDetail(domain string) (*SiteSummary, error) {
-	if domain == "" {
-		return nil, fmt.Errorf("域名不能为空")
+	normalized, err := NormalizeDomain(domain, false)
+	if err != nil {
+		return nil, err
 	}
-
-	// 域名规范化和安全验证
-	domain = strings.ToLower(strings.TrimSpace(domain))
-
-	// 防止路径穿越攻击: 域名不能包含路径分隔符
-	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
-		return nil, fmt.Errorf("域名格式无效: 包含非法字符")
-	}
+	domain = normalized
 
 	if err := c.ensureDirectories(); err != nil {
 		return nil, err
@@ -822,7 +816,18 @@ func (c *NginxClient) runInContainer(cmd []string) (string, string, error) {
 
 func (c *NginxClient) normalizeSiteConfig(config SiteConfig) (*SiteConfig, error) {
 	site := config
-	site.PrimaryDomain = strings.TrimSpace(strings.ToLower(site.PrimaryDomain))
+	primaryDomain, err := NormalizeDomain(site.PrimaryDomain, false)
+	if err != nil {
+		return nil, err
+	}
+	site.PrimaryDomain = primaryDomain
+	if len(site.ExtraDomains) > 0 {
+		extraDomains, err := NormalizeDomains(site.ExtraDomains, true)
+		if err != nil {
+			return nil, err
+		}
+		site.ExtraDomains = extraDomains
+	}
 
 	if site.RootDir == "" {
 		site.RootDir = filepath.Join(c.containerPaths.WWW, "sites", sanitizeName(site.PrimaryDomain))
@@ -889,15 +894,11 @@ func (c *NginxClient) siteMetadataPath(domain string) string {
 
 // GetRawConfig 获取网站的原始nginx配置文件内容
 func (c *NginxClient) GetRawConfig(domain string) (string, error) {
-	if domain == "" {
-		return "", fmt.Errorf("域名不能为空")
+	normalized, err := NormalizeDomain(domain, false)
+	if err != nil {
+		return "", err
 	}
-
-	// 域名规范化和安全验证
-	domain = strings.ToLower(strings.TrimSpace(domain))
-	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
-		return "", fmt.Errorf("域名格式无效: 包含非法字符")
-	}
+	domain = normalized
 
 	// 获取配置文件路径
 	configPath := c.siteConfigPath(domain)
@@ -993,18 +994,18 @@ func (c *NginxClient) renameAndFsync(oldPath, newPath string) error {
 // SaveRawConfig 保存网站的nginx配置文件(包含备份、校验和reload)
 // 采用"替换→测试→回滚"模式，确保测试阶段使用的是新配置
 func (c *NginxClient) SaveRawConfig(domain, content string) error {
-	if domain == "" {
-		return fmt.Errorf("域名不能为空")
-	}
 	if content == "" {
 		return fmt.Errorf("配置内容不能为空")
 	}
-
-	// 域名规范化和安全验证
-	domain = strings.ToLower(strings.TrimSpace(domain))
-	if strings.Contains(domain, "/") || strings.Contains(domain, "\\") || strings.Contains(domain, "..") {
-		return fmt.Errorf("域名格式无效: 包含非法字符")
+	if len(content) > 1<<20 {
+		return fmt.Errorf("配置内容超过1 MiB限制")
 	}
+
+	normalized, err := NormalizeDomain(domain, false)
+	if err != nil {
+		return err
+	}
+	domain = normalized
 
 	configPath := c.siteConfigPath(domain)
 

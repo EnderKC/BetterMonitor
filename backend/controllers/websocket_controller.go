@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -208,14 +209,15 @@ var ActiveAgentConnections = NewConnectionRegistry[uint]()
 // 存储活跃的用户终端WebSocket连接 - 按会话ID索引
 var ActiveTerminalConnections = NewConnectionRegistry[string]()
 
-// 存储活跃的日志流连接 - key: streamID, value: *SafeConn (用户连接)
-var ActiveLogStreamConnections sync.Map
+var activeDockerLogStreams = newDockerStreamRegistry()
 
 // 存储公开探针监控连接
 var ActivePublicMonitorConnections = NewSubscriberRegistry[uint, *SafeConn]()
 
 // 存储上次广播时间，用于限流
 var LastBroadcastTimes sync.Map
+
+var errAgentConnectionClosed = errors.New("Agent connection closed")
 
 type publicConnSet struct {
 	mu    sync.Mutex
@@ -296,9 +298,6 @@ func NotifyAgentOffline(serverID uint) {
 // key: requestID (string), value: chan interface{} 或 chan map[string]interface{}
 var dockerResponseChannels sync.Map
 
-// 存储Docker命令的请求映射，用于将响应发送给正确的用户
-var dockerRequestMap sync.Map
-
 // 【安全修复】存储每个服务器的待处理请求列表，用于在连接断开时快速失败
 // 键: serverID (uint), 值: *pendingRequestSet
 var serverPendingRequests sync.Map
@@ -364,9 +363,6 @@ func failAllPendingRequests(serverID uint) {
 		if respChanVal, ok := dockerResponseChannels.LoadAndDelete(requestID); ok {
 			notifyDockerChannel(respChanVal, requestID, errorResponse)
 		}
-		// 清理Docker请求映射
-		dockerRequestMap.Delete(requestID)
-
 		// 尝试从文件请求通道获取并发送错误
 		fileRequestMutex.Lock()
 		if respChan, ok := fileRequestMap[requestID]; ok {
@@ -382,6 +378,13 @@ func failAllPendingRequests(serverID uint) {
 			fileRequestMutex.Unlock()
 		}
 	}
+}
+
+func failAgentRequestsForDisconnectedServer(serverID uint) {
+	utils.FailAgentRequests(serverID, errAgentConnectionClosed)
+	// Legacy request maps remain until Docker, file and terminal callers finish
+	// migrating to their typed request owners.
+	failAllPendingRequests(serverID)
 }
 
 // notifyDockerChannel 使用类型开关安全地向Docker响应通道发送错误
@@ -841,8 +844,8 @@ func serveServerWebSocket(
 				return
 			}
 			log.Printf("Agent连接关闭，从映射中移除，服务器ID: %d", id)
-			// 【安全修复】使该服务器的所有待处理请求立即失败
-			failAllPendingRequests(id)
+			failAgentRequestsForDisconnectedServer(id)
+			activeDockerLogStreams.cleanupServer(id)
 
 			// 通知该服务器所有终端会话用户Agent已断开
 			terminalSessions.Range(func(key, value interface{}) bool {
@@ -865,6 +868,8 @@ func serveServerWebSocket(
 				return true
 			})
 		}(server.ID)
+	} else {
+		defer stopDockerLogStreams(activeDockerLogStreams.cleanupOwner(safeConn))
 	}
 
 	// 设置一个通道来接收中断信号
@@ -935,6 +940,10 @@ func handleMonitorWebSocket(conn *SafeConn, server *models.Server, interrupt cha
 }
 
 // 处理WebSocket连接
+func rejectLegacyDockerBrowserRPC(isAgent bool, messageType string) bool {
+	return !isAgent && messageType == TypeDockerCommand
+}
+
 func handleWebSocket(
 	conn *SafeConn,
 	server *models.Server,
@@ -1028,6 +1037,10 @@ func handleWebSocket(
 			sendErrorMessage(conn, "消息格式错误")
 			continue
 		}
+		if rejectLegacyDockerBrowserRPC(isAgent, msg.Type) {
+			sendErrorMessage(conn, "docker_command WebSocket RPC 已移除，请使用 REST API")
+			continue
+		}
 
 		// 根据消息类型处理
 		switch msg.Type {
@@ -1052,9 +1065,6 @@ func handleWebSocket(
 		case TypeProcessKill:
 			// 进程终止的处理
 			handleProcessKill(conn, server, msg.Payload)
-		case TypeDockerCommand:
-			// Docker命令的处理
-			handleDockerCommand(conn, server, msg.Payload)
 		case "docker_logs_stream":
 			// Docker日志流的处理（start / stop）
 			handleDockerLogsStream(conn, server, msg.Payload)
@@ -1316,64 +1326,10 @@ func handleWebSocket(
 					}
 				}
 			}
-		case "docker_containers", "docker_images", "docker_composes", "docker_container_logs", "docker_compose_config", "success", "error":
-			// 处理Docker相关响应
-			var dockerResponse struct {
-				Type      string                 `json:"type"`
-				RequestID string                 `json:"request_id"`
-				Data      map[string]interface{} `json:"data"`
-			}
-			if err := json.Unmarshal(message, &dockerResponse); err != nil {
-				log.Printf("解析Docker响应消息失败: %v, 消息内容: %s", err, string(message))
-				continue
-			}
-
-			log.Printf("收到Docker响应消息: 类型=%s, 请求ID=%s", dockerResponse.Type, dockerResponse.RequestID)
-
-			// 处理Docker响应
-			if dockerResponse.RequestID != "" {
-				// 转发响应到WebSocket客户端
-				connVal, ok := dockerRequestMap.Load(dockerResponse.RequestID)
-				if !ok {
-					log.Printf("错误: 未找到Docker请求ID=%s的WebSocket连接", dockerResponse.RequestID)
-					continue
-				}
-
-				if userConn, ok := connVal.(*SafeConn); ok {
-					if err := userConn.WriteJSON(dockerResponse); err != nil {
-						log.Printf("发送Docker响应到用户失败: %v", err)
-					} else {
-						log.Printf("成功转发Docker响应 [%s] 到用户, 请求ID=%s", dockerResponse.Type, dockerResponse.RequestID)
-					}
-				} else {
-					log.Printf("错误: Docker请求ID=%s的WebSocket连接类型错误, 实际类型: %T", dockerResponse.RequestID, connVal)
-				}
-
-				// 获取响应通道并发送响应数据
-				respChanVal, ok := dockerResponseChannels.Load(dockerResponse.RequestID)
-				if !ok {
-					log.Printf("错误: 未找到Docker请求ID=%s的响应通道", dockerResponse.RequestID)
-				} else {
-					respChan, ok := respChanVal.(chan interface{})
-					if !ok {
-						log.Printf("错误: Docker请求ID=%s的响应通道类型错误", dockerResponse.RequestID)
-					} else {
-						// 发送响应到通道
-						select {
-						case respChan <- dockerResponse.Data:
-							log.Printf("成功发送Docker响应数据到通道, 请求ID=%s", dockerResponse.RequestID)
-						default:
-							log.Printf("错误: Docker请求ID=%s的响应通道已满或已关闭", dockerResponse.RequestID)
-						}
-					}
-				}
-
-				// 响应处理完成后从映射中删除
-				dockerRequestMap.Delete(dockerResponse.RequestID)
-				dockerResponseChannels.Delete(dockerResponse.RequestID)
-				log.Printf("已清理Docker请求ID=%s的映射和通道", dockerResponse.RequestID)
-			} else {
-				log.Printf("警告: 收到的Docker响应消息没有请求ID")
+		case "docker_containers", "docker_images", "docker_composes", "docker_container_logs", "docker_compose_config", "success", "error", "docker_error":
+			if err := utils.DeliverAgentResponse(server.ID, message); err != nil &&
+				!errors.Is(err, utils.ErrAgentRequestNotFound) {
+				log.Printf("Agent命令响应投递失败: server_id=%d type=%s error=%v", server.ID, msg.Type, err)
 			}
 
 		case "docker_logs_stream_data", "docker_logs_stream_end":
@@ -1394,102 +1350,28 @@ func handleWebSocket(
 			}
 
 			// 查找对应的用户连接
-			userConnVal, ok := ActiveLogStreamConnections.Load(streamMsg.StreamID)
+			entry, ok := activeDockerLogStreams.current(streamMsg.StreamID, server.ID)
 			if !ok {
 				log.Printf("未找到日志流 %s 的用户连接", streamMsg.StreamID)
 				continue
 			}
 
-			if userConn, ok := userConnVal.(*SafeConn); ok {
-				if err := userConn.WriteJSON(streamMsg); err != nil {
+			if entry.owner != nil {
+				if err := entry.owner.WriteJSON(streamMsg); err != nil {
 					log.Printf("转发日志流消息到用户失败: stream_id=%s, error=%v", streamMsg.StreamID, err)
 				}
 			}
 
 			// 如果是流结束消息，清理映射
 			if msg.Type == "docker_logs_stream_end" {
-				ActiveLogStreamConnections.Delete(streamMsg.StreamID)
+				activeDockerLogStreams.end(streamMsg.StreamID, server.ID)
 				log.Printf("日志流 %s 已结束，已清理连接映射", streamMsg.StreamID)
 			}
 
 		case "nginx_success", "nginx_error":
-			// 处理Nginx成功/错误响应
-			// 使用json.RawMessage接收任何JSON格式
-			var baseResp struct {
-				Type      string          `json:"type"`
-				RequestID string          `json:"request_id"`
-				Data      json.RawMessage `json:"data"`
-			}
-			if err := json.Unmarshal(message, &baseResp); err != nil {
-				log.Printf("解析Nginx响应消息基础结构失败: %v, 消息内容: %s", err, string(message))
-				continue
-			}
-
-			log.Printf("收到Nginx响应消息: 类型=%s, 请求ID=%s", baseResp.Type, baseResp.RequestID)
-
-			// 处理Nginx响应
-			if baseResp.RequestID != "" {
-				// 确保utils包中的响应处理器能够处理该响应
-				// 直接将原始消息传递给HandleAgentResponse
-				utils.HandleAgentResponse(message)
-
-				// 检查是否为Nginx请求ID (通常以数字-数字格式)
-				respChanVal, ok := dockerResponseChannels.Load(baseResp.RequestID)
-				if !ok {
-					log.Printf("警告: 未找到Nginx请求ID=%s的响应通道，可能是请求已超时", baseResp.RequestID)
-					continue
-				}
-
-				// 获取对应的WebSocket连接
-				connVal, ok := dockerRequestMap.Load(baseResp.RequestID)
-				if !ok {
-					log.Printf("警告: 未找到Nginx请求ID=%s的WebSocket连接，但找到了响应通道", baseResp.RequestID)
-				} else {
-					if userConn, ok := connVal.(*SafeConn); ok {
-						// 转发原始响应给客户端，这样可以避免类型转换问题
-						// 创建一个新的响应结构，保持Data字段为RawMessage
-						response := struct {
-							Type      string          `json:"type"`
-							RequestID string          `json:"request_id"`
-							Data      json.RawMessage `json:"data"`
-						}{
-							Type:      baseResp.Type,
-							RequestID: baseResp.RequestID,
-							Data:      baseResp.Data,
-						}
-
-						// 转发响应到用户
-						if err := userConn.WriteJSON(response); err != nil {
-							log.Printf("发送Nginx响应到用户失败: %v", err)
-						} else {
-							log.Printf("成功转发Nginx响应 [%s] 到用户, 请求ID=%s", baseResp.Type, baseResp.RequestID)
-						}
-					}
-				}
-
-				// 发送响应到通道
-				respChan, ok := respChanVal.(chan interface{})
-				if ok {
-					// 将Data字段解析为interface{}，以便接收任何类型
-					var dataValue interface{}
-					if err := json.Unmarshal(baseResp.Data, &dataValue); err != nil {
-						log.Printf("解析Nginx响应数据失败: %v", err)
-					} else {
-						select {
-						case respChan <- dataValue:
-							log.Printf("成功发送Nginx响应数据到通道, 请求ID=%s", baseResp.RequestID)
-						default:
-							log.Printf("错误: Nginx请求ID=%s的响应通道已满或已关闭", baseResp.RequestID)
-						}
-					}
-				}
-
-				// 响应处理完成后从映射中删除
-				dockerRequestMap.Delete(baseResp.RequestID)
-				dockerResponseChannels.Delete(baseResp.RequestID)
-				log.Printf("已清理Nginx请求ID=%s的映射和通道", baseResp.RequestID)
-			} else {
-				log.Printf("警告: 收到的Nginx响应消息没有请求ID")
+			if err := utils.DeliverAgentResponse(server.ID, message); err != nil &&
+				!errors.Is(err, utils.ErrAgentRequestNotFound) {
+				log.Printf("Agent命令响应投递失败: server_id=%d type=%s error=%v", server.ID, msg.Type, err)
 			}
 
 		case "file_list_response", "file_content_response", "file_tree_response", "file_upload_response",
@@ -1746,72 +1628,13 @@ func handleProcessKill(conn *SafeConn, server *models.Server, payload json.RawMe
 	log.Printf("进程终止请求已发送到Agent，请求ID: %s", requestID)
 }
 
-// 处理Docker命令
-func handleDockerCommand(conn *SafeConn, server *models.Server, payload json.RawMessage) {
-	log.Printf("处理Docker命令，服务器ID: %d", server.ID)
-
-	// 解析基本的Docker命令请求，获取命令类型和操作
-	var reqData struct {
-		Command string          `json:"command"`
-		Action  string          `json:"action"`
-		Params  json.RawMessage `json:"params,omitempty"`
-	}
-	if err := json.Unmarshal(payload, &reqData); err != nil {
-		log.Printf("解析Docker命令请求参数失败: %v", err)
-		sendErrorMessage(conn, "Docker请求格式错误")
-		return
-	}
-
-	log.Printf("收到Docker命令请求: 命令=%s, 操作=%s", reqData.Command, reqData.Action)
-
-	// 生成请求ID
-	requestID := generateRequestID()
-
-	// 构建发送到Agent的消息
-	message := map[string]interface{}{
-		"type":       "docker_command",
-		"request_id": requestID,
-		"payload": map[string]interface{}{
-			"command": reqData.Command,
-			"action":  reqData.Action,
-			"params":  json.RawMessage(reqData.Params),
-		},
-	}
-
-	// 获取Agent连接
-	agentConn, ok := ActiveAgentConnections.Current(server.ID)
-	if !ok {
-		log.Printf("服务器 %d 的Agent未连接", server.ID)
-		sendErrorMessage(conn, "服务器Agent未连接")
-		return
-	}
-
-	// 创建响应通道
-	responseChan := make(chan interface{}, 1)
-	dockerResponseChannels.Store(requestID, responseChan)
-
-	// 在函数返回时清理通道
-	defer dockerResponseChannels.Delete(requestID)
-
-	// 将用户连接与请求ID关联，以便将响应发送回用户
-	dockerRequestMap.Store(requestID, conn)
-	defer dockerRequestMap.Delete(requestID)
-
-	// 发送消息到Agent
-	if err := agentConn.WriteJSON(message); err != nil {
-		log.Printf("发送Docker命令请求到Agent失败: %v", err)
-		sendErrorMessage(conn, "发送请求到Agent失败")
-		return
-	}
-
-	log.Printf("Docker命令请求已发送到Agent，请求ID: %s", requestID)
-}
-
 // handleDockerLogsStream 处理Docker日志流请求（用户 → Agent 转发）
 func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.RawMessage) {
 	var reqData struct {
-		Action   string `json:"action"`
-		StreamID string `json:"stream_id"`
+		Action      string `json:"action"`
+		StreamID    string `json:"stream_id"`
+		ContainerID string `json:"container_id"`
+		Tail        int    `json:"tail"`
 	}
 	if err := json.Unmarshal(payload, &reqData); err != nil {
 		log.Printf("解析日志流请求参数失败: %v", err)
@@ -1821,9 +1644,15 @@ func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.
 
 	log.Printf("收到日志流请求: action=%s, stream_id=%s, 服务器ID=%d", reqData.Action, reqData.StreamID, server.ID)
 
-	if reqData.StreamID == "" {
+	if err := ValidateDockerStreamID(reqData.StreamID); err != nil {
 		sendErrorMessage(conn, "日志流请求缺少 stream_id")
 		return
+	}
+	if reqData.Action == "start" {
+		if err := ValidateContainerRef(reqData.ContainerID); err != nil || reqData.Tail < 1 || reqData.Tail > 10000 {
+			sendErrorMessage(conn, "日志流请求参数无效")
+			return
+		}
 	}
 
 	// 获取Agent连接
@@ -1836,8 +1665,19 @@ func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.
 
 	// start: 注册用户连接映射，以便后续转发日志流数据
 	if reqData.Action == "start" {
-		ActiveLogStreamConnections.Store(reqData.StreamID, conn)
+		if err := activeDockerLogStreams.start(reqData.StreamID, server.ID, conn); err != nil {
+			sendErrorMessage(conn, "日志流已存在")
+			return
+		}
 		log.Printf("已注册日志流 %s 的用户连接", reqData.StreamID)
+	} else if reqData.Action == "stop" {
+		if err := activeDockerLogStreams.stop(reqData.StreamID, server.ID, conn); err != nil {
+			sendErrorMessage(conn, "无权停止该日志流")
+			return
+		}
+	} else {
+		sendErrorMessage(conn, "日志流操作无效")
+		return
 	}
 
 	// 构建转发给Agent的消息（保持原始 payload）
@@ -1851,18 +1691,30 @@ func handleDockerLogsStream(conn *SafeConn, server *models.Server, payload json.
 		sendErrorMessage(conn, "发送日志流请求到Agent失败")
 		// 发送失败时清理映射
 		if reqData.Action == "start" {
-			ActiveLogStreamConnections.Delete(reqData.StreamID)
+			_ = activeDockerLogStreams.stop(reqData.StreamID, server.ID, conn)
 		}
 		return
 	}
 
 	// stop: 清理用户连接映射
 	if reqData.Action == "stop" {
-		ActiveLogStreamConnections.Delete(reqData.StreamID)
 		log.Printf("已清理日志流 %s 的用户连接映射", reqData.StreamID)
 	}
 
 	log.Printf("日志流请求已转发到Agent: action=%s, stream_id=%s", reqData.Action, reqData.StreamID)
+}
+
+func stopDockerLogStreams(entries []dockerStreamEntry) {
+	for _, entry := range entries {
+		agentConn, ok := ActiveAgentConnections.Current(entry.serverID)
+		if !ok {
+			continue
+		}
+		_ = agentConn.WriteJSON(map[string]interface{}{
+			"type":    "docker_logs_stream",
+			"payload": map[string]interface{}{"action": "stop", "stream_id": entry.streamID},
+		})
+	}
 }
 
 // 发送错误消息
@@ -1959,31 +1811,17 @@ func sendTerminalClose(sessionID string) {
 	terminalSessions.Delete(sessionID)
 }
 
-// 导出函数：获取ActiveAgentConnections中的agent连接
-// 供utils.GetAgentConnectionFunc使用
-func GetAgentConnection(serverID uint) (*websocket.Conn, error) {
+func sendAgentCommandEnvelope(serverID uint, command utils.AgentCommandEnvelope) error {
 	safeConn, ok := ActiveAgentConnections.Current(serverID)
-	if !ok {
-		return nil, fmt.Errorf("服务器(ID: %d)未连接", serverID)
+	if !ok || safeConn == nil || safeConn.Conn == nil {
+		return fmt.Errorf("服务器(ID: %d)未连接", serverID)
 	}
-
-	if safeConn == nil || safeConn.Conn == nil {
-		return nil, fmt.Errorf("服务器(ID: %d)连接为空", serverID)
-	}
-
-	// 检查连接是否存活
-	err := safeConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(time.Second))
-	if err != nil {
-		return nil, fmt.Errorf("服务器(ID: %d)连接已断开: %v", serverID, err)
-	}
-
-	return safeConn.Conn, nil
+	return safeConn.WriteJSON(command)
 }
 
-// 在package init函数中设置utils.GetAgentConnectionFunc
+// 在package init函数中设置Agent命令发送边界。
 func init() {
-	// 导入utils包
-	utils.GetAgentConnectionFunc = GetAgentConnection
+	utils.ConfigureAgentCommandSender(sendAgentCommandEnvelope)
 }
 
 // requestTerminalWorkingDirectoryViaWebSocket 通过WebSocket获取终端当前工作目录

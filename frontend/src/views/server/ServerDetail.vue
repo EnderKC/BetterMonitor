@@ -186,7 +186,7 @@ const switchAgentType = () => {
 
 // 更新服务器信息并解析系统信息
 const updateServerInfo = (server: any) => {
-  console.log('🔄 updateServerInfo被调用');
+  console.log('updateServerInfo被调用');
   console.log('调用堆栈:', new Error().stack);
 
   // 处理系统信息 JSON

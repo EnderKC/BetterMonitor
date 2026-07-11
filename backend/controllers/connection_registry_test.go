@@ -1,11 +1,14 @@
 package controllers
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/user/server-ops-backend/utils"
 )
 
 func TestConnectionRegistryStaleHandleCannotDeleteReplacement(t *testing.T) {
@@ -114,4 +117,43 @@ func TestSubscriberRegistryRemoveAllAtomicallyDetachesSubscribers(t *testing.T) 
 	assert.Empty(t, registry.Snapshot(7))
 	assert.Empty(t, registry.RemoveAll(7))
 	assert.False(t, registry.Remove(7, "missing"))
+}
+
+func TestAgentDisconnectFailsBrokerRequests(t *testing.T) {
+	sent := make(chan utils.AgentCommandEnvelope, 1)
+	utils.ConfigureAgentCommandSender(func(_ uint, command utils.AgentCommandEnvelope) error {
+		sent <- command
+		return nil
+	})
+	t.Cleanup(func() {
+		utils.ConfigureAgentCommandSender(sendAgentCommandEnvelope)
+		utils.FailAgentRequests(7, errAgentConnectionClosed)
+	})
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := utils.SendAgentCommand(
+			context.Background(),
+			7,
+			"nginx_command",
+			map[string]interface{}{"action": "nginx_status"},
+			"nginx_success",
+		)
+		result <- err
+	}()
+
+	select {
+	case <-sent:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for broker request")
+	}
+
+	failAgentRequestsForDisconnectedServer(7)
+
+	select {
+	case err := <-result:
+		assert.ErrorIs(t, err, errAgentConnectionClosed)
+	case <-time.After(time.Second):
+		t.Fatal("Agent disconnect did not fail broker request")
+	}
 }

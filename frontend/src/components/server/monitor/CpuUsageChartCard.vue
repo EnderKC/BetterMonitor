@@ -104,7 +104,6 @@ const chartOption = computed(() => ({
         autoresize
       />
       <div v-else class="empty-chart">
-        <span class="empty-icon">📊</span>
         <span class="empty-text">暂无数据</span>
       </div>
     </div>

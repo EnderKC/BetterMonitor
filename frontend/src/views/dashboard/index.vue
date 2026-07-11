@@ -692,15 +692,7 @@ const formatTimeAgo = (timestamp: number) => {
   return date.toLocaleDateString();
 };
 
-// 获取国家旗帜Emoji
-const getFlagEmoji = (countryCode: string) => {
-  if (!countryCode) return '';
-  const codePoints = countryCode
-    .toUpperCase()
-    .split('')
-    .map(char => 127397 + char.charCodeAt(0));
-  return String.fromCodePoint(...codePoints);
-};
+const getCountryLabel = (countryCode: string) => countryCode?.trim().toUpperCase() || '未知';
 
 const getFlagTooltip = (server: any) => {
   if (server?.public_ip) {
@@ -923,7 +915,7 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
             <!-- 头部信息 -->
             <div class="card-header">
               <div class="header-left">
-                <span class="flag-icon">❤️</span>
+                <span class="flag-icon">探针</span>
                 <div class="header-text">
                   <h3 class="server-name" :title="probe.name">{{ probe.name }}</h3>
                 </div>
@@ -1067,8 +1059,8 @@ const getSleepProgress = (probe: LifeProbeSummary) => {
             <div class="card-header">
               <div class="header-left">
                 <span v-if="server.country_code" class="flag-icon" :title="getFlagTooltip(server)">{{
-                  getFlagEmoji(server.country_code) }}</span>
-                <span v-else class="flag-icon" :title="getFlagTooltip(server)">🏳️</span>
+                  getCountryLabel(server.country_code) }}</span>
+                <span v-else class="flag-icon" :title="getFlagTooltip(server)">未知</span>
                 <div class="header-text">
                   <h3 class="server-name" :title="server.name">{{ server.name }}</h3>
                   <a v-if="server.public_ip || server.ip" :href="'http://' + (server.public_ip || server.ip)"

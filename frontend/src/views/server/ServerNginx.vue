@@ -3,7 +3,7 @@ defineOptions({
   name: 'ServerWebsite'
 });
 
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
 import {
@@ -487,12 +487,10 @@ const fetchInstallLogs = async () => {
       if (resp.status === 'completed' || resp.status === 'not_found') {
         stopPollingInstallLogs();
 
-        // 如果是正常完成，延迟刷新状态
+        // Agent 已确认安装完成，立即刷新真实状态。
         if (resp.status === 'completed') {
-          setTimeout(async () => {
-            await fetchOpenRestyStatus();
-            await fetchWebsites();
-          }, 1000);
+          await fetchOpenRestyStatus();
+          await fetchWebsites();
         }
       }
     }
@@ -515,6 +513,10 @@ const closeInstallLogModal = () => {
   installLogs.value = [];
   installSessionId.value = '';
 };
+
+onUnmounted(() => {
+  stopPollingInstallLogs();
+});
 
 const requestInstallOpenResty = () => {
   if (showNativeOnlyWarning.value) {
@@ -1735,7 +1737,7 @@ const goBack = () => {
   -webkit-backdrop-filter: blur(var(--blur-md));
   border: 1px solid var(--card-border);
   border-radius: var(--radius-lg);
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -1753,7 +1755,7 @@ const goBack = () => {
 .website-content {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
 }
 
 /* Alerts */
@@ -1773,7 +1775,7 @@ const goBack = () => {
   backdrop-filter: blur(var(--blur-md));
   -webkit-backdrop-filter: blur(var(--blur-md));
   border: 1px solid var(--card-border);
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
@@ -1793,7 +1795,7 @@ const goBack = () => {
 }
 
 :deep(.ant-card-body) {
-  padding: 24px;
+  padding: 12px;
 }
 
 /* Service Header */
@@ -1901,7 +1903,7 @@ const goBack = () => {
 
 /* Tabs */
 :deep(.ant-tabs-nav) {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 :deep(.ant-tabs-tab) {
@@ -1929,7 +1931,7 @@ const goBack = () => {
 .certificate-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 24px;
+  gap: 12px;
 }
 
 /* Hint Text */
@@ -1966,7 +1968,7 @@ const goBack = () => {
 
 /* Cert Content Modal */
 .cert-content-section {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   background: var(--alpha-black-02);
   padding: 16px;
   border-radius: var(--radius-md);

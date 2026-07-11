@@ -28,6 +28,7 @@ import {
 } from '@ant-design/icons-vue';
 import request from '../../utils/request';
 import { buildAuthenticatedWebSocketURL } from '@/utils/websocket';
+import { createStopOnce, waitForWebSocketOpen } from '@/utils/docker';
 import { useServerStore } from '../../stores/serverStore';
 import { useUIStore } from '../../stores/uiStore';
 import Convert from 'ansi-to-html';
@@ -410,6 +411,11 @@ const sendWsMessage = (data: any) => {
   }
 };
 
+const stopLogStreamOnce = createStopOnce((streamId) => sendWsMessage({
+  type: 'docker_logs_stream',
+  payload: { action: 'stop', stream_id: streamId },
+}));
+
 // ==================== 实时日志流 ====================
 const logDrawerVisible = ref(false);
 const currentLogContainerId = ref('');
@@ -514,18 +520,19 @@ const viewContainerLogs = async (id: string, name: string) => {
 
   // 确保 WebSocket 已连接
   if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-    connectWebSocket();
-    // 等待连接就绪
-    await new Promise<void>((resolve) => {
-      const check = setInterval(() => {
-        if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 100);
-      // 超时 5 秒
-      setTimeout(() => { clearInterval(check); resolve(); }, 5000);
-    });
+    await connectWebSocket();
+    if (!ws.value) {
+      message.error('日志连接创建失败');
+      closeLogDrawer();
+      return;
+    }
+    try {
+      await waitForWebSocketOpen(ws.value);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '日志连接失败');
+      closeLogDrawer();
+      return;
+    }
   }
 
   // 发送 start 消息
@@ -547,13 +554,7 @@ const viewContainerLogs = async (id: string, name: string) => {
 const closeLogDrawer = () => {
   // 发送 stop 消息
   if (logStreamId.value && logStreaming.value) {
-    sendWsMessage({
-      type: 'docker_logs_stream',
-      payload: {
-        action: 'stop',
-        stream_id: logStreamId.value,
-      },
-    });
+    stopLogStreamOnce(logStreamId.value);
   }
   logStreaming.value = false;
   logStreamId.value = '';
@@ -594,10 +595,10 @@ const pullImage = async () => {
   pullLoading.value = true;
   try {
     await request.post(`/servers/${serverId.value}/docker/images/pull`, { image: pullForm.value });
-    message.success('镜像拉取任务已提交');
+    message.success('镜像拉取完成');
     pullImageVisible.value = false;
     pullForm.value = '';
-    setTimeout(() => { fetchImages(); }, 3000);
+    await fetchImages();
   } catch (error) {
     message.error('拉取镜像失败');
   } finally {
@@ -847,7 +848,7 @@ onUnmounted(() => {
     <div class="main-content">
       <a-spin :spinning="loading">
         <a-alert v-if="!isServerOnline" type="warning" show-icon message="服务器当前离线，无法使用Docker管理功能"
-          style="margin-bottom: 24px" class="glass-alert" />
+          style="margin-bottom: 12px" class="glass-alert" />
 
         <div v-else class="glass-panel">
           <a-tabs v-model:activeKey="activeKey" @change="onTabChange" class="custom-tabs">
@@ -1244,12 +1245,12 @@ onUnmounted(() => {
   border-radius: var(--radius-lg);
   border: 1px solid var(--alpha-white-30);
   box-shadow: 0 8px 32px var(--alpha-black-05);
-  padding: 24px;
+  padding: 16px;
   min-height: 600px;
 }
 
 .custom-tabs :deep(.ant-tabs-nav) {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .custom-tabs :deep(.ant-tabs-tab) {

@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -41,7 +40,7 @@ type NginxInfo struct {
 type NginxConfigFile struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
-	Path         string    `json:"path"`
+	Path         string    `json:"-"`
 	Size         int64     `json:"size"`
 	ModTime      time.Time `json:"mod_time"`
 	IsSiteConfig bool      `json:"is_site_config"`
@@ -51,7 +50,7 @@ type NginxConfigFile struct {
 type NginxLogFile struct {
 	ID      string    `json:"id"`
 	Name    string    `json:"name"`
-	Path    string    `json:"path"`
+	Path    string    `json:"-"`
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"mod_time"`
 	Type    string    `json:"type"` // access或error
@@ -105,6 +104,29 @@ var (
 		CompletedAt  time.Time
 	}{}
 )
+
+var (
+	detectNginxPaths    = DetectNginxPaths
+	nginxLogDirectories = func() []string {
+		return []string{
+			"/var/log/nginx",
+			"/usr/local/nginx/logs",
+			"/usr/local/var/log/nginx",
+		}
+	}
+	testNginxConfiguration = func() error {
+		success, _, err := TestNginxConfig()
+		if err != nil {
+			return err
+		}
+		if !success {
+			return fmt.Errorf("Nginx配置测试失败")
+		}
+		return nil
+	}
+)
+
+var nginxManagedIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // DetectNginxPaths 检测Nginx安装路径
 func DetectNginxPaths() (string, string, string) {
@@ -228,7 +250,7 @@ func GetNginxStatus() (*NginxInfo, error) {
 func GetNginxConfigsList() ([]NginxConfigFile, error) {
 	var configs []NginxConfigFile
 
-	_, _, confDir := DetectNginxPaths()
+	_, _, confDir := detectNginxPaths()
 	if confDir == "" {
 		return configs, fmt.Errorf("未找到Nginx配置目录")
 	}
@@ -240,7 +262,7 @@ func GetNginxConfigsList() ([]NginxConfigFile, error) {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && (strings.HasSuffix(path, ".conf")) {
+		if info.Mode().IsRegular() && strings.HasSuffix(path, ".conf") {
 			// 读取文件内容以检查是否包含server块
 			content, err := ioutil.ReadFile(path)
 			isSiteConfig := false
@@ -248,14 +270,8 @@ func GetNginxConfigsList() ([]NginxConfigFile, error) {
 				isSiteConfig = serverBlockRegex.Match(content)
 			}
 
-			// 生成一个基于文件路径的稳定ID，而不是使用随机时间戳
-			// 使用MD5哈希算法，确保相同路径总是生成相同的ID
-			h := md5.New()
-			io.WriteString(h, path)
-			id := fmt.Sprintf("%x", h.Sum(nil))
-
 			configs = append(configs, NginxConfigFile{
-				ID:           id,
+				ID:           nginxManagedFileID(path),
 				Name:         filepath.Base(path),
 				Path:         path,
 				Size:         info.Size(),
@@ -272,9 +288,108 @@ func GetNginxConfigsList() ([]NginxConfigFile, error) {
 	return configs, nil
 }
 
+func nginxManagedFileID(path string) string {
+	sum := md5.Sum([]byte(path))
+	return hex.EncodeToString(sum[:])
+}
+
+func resolveNginxConfigID(id string) (NginxConfigFile, error) {
+	if !nginxManagedIDPattern.MatchString(id) {
+		return NginxConfigFile{}, fmt.Errorf("无效的config_id")
+	}
+	configs, err := GetNginxConfigsList()
+	if err != nil {
+		return NginxConfigFile{}, err
+	}
+	for _, config := range configs {
+		if config.ID != id {
+			continue
+		}
+		if err := validateManagedRegularFile(config.Path); err != nil {
+			return NginxConfigFile{}, err
+		}
+		return config, nil
+	}
+	return NginxConfigFile{}, fmt.Errorf("未找到配置文件")
+}
+
+func validateManagedConfigName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 128 || name == "." || name == ".." || strings.Contains(name, "..") {
+		return "", fmt.Errorf("无效的配置名称")
+	}
+	for index, char := range name {
+		if char > 127 || char < 32 || char == 127 || char == '/' || char == '\\' {
+			return "", fmt.Errorf("无效的配置名称")
+		}
+		isAlphaNumeric := (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9')
+		if index == 0 && !isAlphaNumeric {
+			return "", fmt.Errorf("无效的配置名称")
+		}
+		if !isAlphaNumeric && char != '-' && char != '_' && char != '.' {
+			return "", fmt.Errorf("无效的配置名称")
+		}
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".conf") {
+		name += ".conf"
+	}
+	return name, nil
+}
+
+func validateManagedRegularFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("读取托管文件失败: %s", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("托管目标不是普通文件")
+	}
+	return nil
+}
+
+func atomicReplaceManagedFile(path string, content []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, ".better-monitor-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(content); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	directory, err := os.Open(dir)
+	if err == nil {
+		err = directory.Sync()
+		_ = directory.Close()
+	}
+	return err
+}
+
 // GetNginxConfigContent 获取Nginx配置文件内容
 func GetNginxConfigContent(path string) (string, error) {
-	content, err := ioutil.ReadFile(path)
+	if err := validateManagedRegularFile(path); err != nil {
+		return "", err
+	}
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("读取配置文件失败: %s", err)
 	}
@@ -283,38 +398,97 @@ func GetNginxConfigContent(path string) (string, error) {
 
 // SaveNginxConfig 保存Nginx配置文件内容
 func SaveNginxConfig(path, content string) error {
-	err := ioutil.WriteFile(path, []byte(content), 0644)
+	if len(content) > 1<<20 {
+		return fmt.Errorf("配置内容超过1 MiB限制")
+	}
+	info, err := os.Lstat(path)
 	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %s", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("配置目标不是普通文件")
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取原配置失败: %s", err)
+	}
+	if err := atomicReplaceManagedFile(path, []byte(content), info.Mode().Perm()); err != nil {
 		return fmt.Errorf("保存配置文件失败: %s", err)
+	}
+	if err := testNginxConfiguration(); err != nil {
+		if restoreErr := atomicReplaceManagedFile(path, original, info.Mode().Perm()); restoreErr != nil {
+			return fmt.Errorf("配置测试失败且回滚失败")
+		}
+		return fmt.Errorf("配置测试失败，已回滚")
 	}
 	return nil
 }
 
 // CreateNginxConfig 创建Nginx配置文件
-func CreateNginxConfig(path, content string) error {
-	// 检查文件是否已存在
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("配置文件已存在")
+func CreateNginxConfig(name, content string) (string, error) {
+	if len(content) > 1<<20 {
+		return "", fmt.Errorf("配置内容超过1 MiB限制")
 	}
-
-	// 确保目录存在
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建目录失败: %s", err)
+	managedName, err := validateManagedConfigName(name)
+	if err != nil {
+		return "", err
 	}
-
-	// 写入文件
-	if err := ioutil.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("创建配置文件失败: %s", err)
+	_, _, confDir := detectNginxPaths()
+	if confDir == "" {
+		return "", fmt.Errorf("未找到Nginx配置目录")
 	}
-
-	return nil
+	path := filepath.Join(confDir, managedName)
+	if filepath.Dir(path) != filepath.Clean(confDir) {
+		return "", fmt.Errorf("配置名称超出托管目录")
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("创建配置文件失败: %s", err)
+	}
+	removeOnFailure := true
+	defer func() {
+		_ = file.Close()
+		if removeOnFailure {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := file.WriteString(content); err != nil {
+		return "", fmt.Errorf("写入配置文件失败: %s", err)
+	}
+	if err := file.Sync(); err != nil {
+		return "", fmt.Errorf("同步配置文件失败: %s", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("关闭配置文件失败: %s", err)
+	}
+	if err := testNginxConfiguration(); err != nil {
+		return "", fmt.Errorf("配置测试失败")
+	}
+	removeOnFailure = false
+	return path, nil
 }
 
 // DeleteNginxConfig 删除Nginx配置文件
 func DeleteNginxConfig(path string) error {
+	if err := validateManagedRegularFile(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %s", err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %s", err)
+	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("删除配置文件失败: %s", err)
+	}
+	if err := testNginxConfiguration(); err != nil {
+		if restoreErr := atomicReplaceManagedFile(path, original, info.Mode().Perm()); restoreErr != nil {
+			return fmt.Errorf("配置测试失败且回滚失败")
+		}
+		return fmt.Errorf("配置测试失败，已回滚")
 	}
 	return nil
 }
@@ -323,21 +497,14 @@ func DeleteNginxConfig(path string) error {
 func GetNginxLogsList() ([]NginxLogFile, error) {
 	var logs []NginxLogFile
 
-	// 常见的Nginx日志目录
-	logDirs := []string{
-		"/var/log/nginx",
-		"/usr/local/nginx/logs",
-		"/usr/local/var/log/nginx",
-	}
-
-	for _, dir := range logDirs {
+	for _, dir := range nginxLogDirectories() {
 		if _, err := os.Stat(dir); err == nil {
 			// 目录存在，查找日志文件
 			err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
-				if !info.IsDir() && (strings.Contains(path, "access") || strings.Contains(path, "error")) {
+				if info.Mode().IsRegular() && (strings.Contains(path, "access") || strings.Contains(path, "error")) {
 					// 确定日志类型
 					logType := "other"
 					if strings.Contains(path, "access") {
@@ -346,13 +513,8 @@ func GetNginxLogsList() ([]NginxLogFile, error) {
 						logType = "error"
 					}
 
-					// 生成一个基于文件路径的稳定ID
-					h := md5.New()
-					io.WriteString(h, path)
-					id := fmt.Sprintf("%x", h.Sum(nil))
-
 					logs = append(logs, NginxLogFile{
-						ID:      id,
+						ID:      nginxManagedFileID(path),
 						Name:    filepath.Base(path),
 						Path:    path,
 						Size:    info.Size(),
@@ -371,8 +533,31 @@ func GetNginxLogsList() ([]NginxLogFile, error) {
 	return logs, nil
 }
 
+func resolveNginxLogID(id string) (NginxLogFile, error) {
+	if !nginxManagedIDPattern.MatchString(id) {
+		return NginxLogFile{}, fmt.Errorf("无效的log_id")
+	}
+	logs, err := GetNginxLogsList()
+	if err != nil {
+		return NginxLogFile{}, err
+	}
+	for _, logFile := range logs {
+		if logFile.ID != id {
+			continue
+		}
+		if err := validateManagedRegularFile(logFile.Path); err != nil {
+			return NginxLogFile{}, err
+		}
+		return logFile, nil
+	}
+	return NginxLogFile{}, fmt.Errorf("未找到日志文件")
+}
+
 // GetNginxLogContent 获取Nginx日志文件内容
 func GetNginxLogContent(path string) (string, error) {
+	if err := validateManagedRegularFile(path); err != nil {
+		return "", err
+	}
 	// 对于大文件，仅读取最后1000行
 	if info, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("读取日志文件信息失败: %s", err)
@@ -1392,125 +1577,82 @@ func HandleNginxCommand(action string, params map[string]interface{}) (string, e
 		result, err = GetNginxConfigsList()
 
 	case "nginx_config_content":
-		configId, ok := params["config_id"].(string)
-		if !ok {
-			// 兼容旧版API，尝试获取path参数
-			path, pathOk := params["path"].(string)
-			if !pathOk {
-				return "", fmt.Errorf("缺少config_id或path参数")
-			}
-			result, err = GetNginxConfigContent(path)
-		} else {
-			// 使用config_id查找对应的配置文件路径
-			configs, listErr := GetNginxConfigsList()
-			if listErr != nil {
-				return "", fmt.Errorf("获取配置列表失败: %s", listErr)
-			}
-
-			var configPath string
-			for _, config := range configs {
-				if config.ID == configId {
-					configPath = config.Path
-					break
-				}
-			}
-
-			if configPath == "" {
-				return "", fmt.Errorf("未找到ID为%s的配置文件", configId)
-			}
-
-			result, err = GetNginxConfigContent(configPath)
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
 		}
+		if _, exists := params["id"]; exists {
+			return "", fmt.Errorf("不接受旧id字段")
+		}
+		configID, ok := params["config_id"].(string)
+		if !ok {
+			return "", fmt.Errorf("缺少config_id参数")
+		}
+		configFile, resolveErr := resolveNginxConfigID(configID)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		result, err = GetNginxConfigContent(configFile.Path)
 
 	case "nginx_save_config":
-		// 支持通过config_id或直接path参数保存配置
-		var configPath string
-
-		// 先检查是否提供了config_id
-		configId, hasConfigId := params["config_id"].(string)
-		if hasConfigId {
-			// 通过ID查找配置文件路径
-			configs, listErr := GetNginxConfigsList()
-			if listErr != nil {
-				return "", fmt.Errorf("获取配置列表失败: %s", listErr)
-			}
-
-			for _, config := range configs {
-				if config.ID == configId {
-					configPath = config.Path
-					break
-				}
-			}
-
-			if configPath == "" {
-				return "", fmt.Errorf("未找到ID为%s的配置文件", configId)
-			}
-		} else {
-			// 直接使用path参数
-			path, ok := params["path"].(string)
-			if !ok {
-				return "", fmt.Errorf("缺少path或config_id参数")
-			}
-			configPath = path
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
 		}
-
-		// 获取内容参数
+		if _, exists := params["id"]; exists {
+			return "", fmt.Errorf("不接受旧id字段")
+		}
+		configID, ok := params["config_id"].(string)
+		if !ok {
+			return "", fmt.Errorf("缺少config_id参数")
+		}
 		content, ok := params["content"].(string)
 		if !ok {
 			return "", fmt.Errorf("缺少内容参数")
 		}
-
-		// 保存配置文件
-		err = SaveNginxConfig(configPath, content)
+		configFile, resolveErr := resolveNginxConfigID(configID)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		err = SaveNginxConfig(configFile.Path, content)
 		result = map[string]interface{}{
 			"success": err == nil,
 			"message": "配置保存成功",
 		}
 
 	case "nginx_create_config":
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
+		}
 		name, ok := params["name"].(string)
 		if !ok {
 			return "", fmt.Errorf("缺少名称参数")
-		}
-		path, ok := params["path"].(string)
-		if !ok {
-			return "", fmt.Errorf("缺少路径参数")
 		}
 		content, ok := params["content"].(string)
 		if !ok {
 			content = ""
 		}
-		err = CreateNginxConfig(path, content)
+		_, err = CreateNginxConfig(name, content)
 		result = map[string]interface{}{
 			"success": err == nil,
 			"message": "配置创建成功",
 			"name":    name,
-			"path":    path,
 		}
 
 	case "nginx_delete_config":
-		configId, ok := params["config_id"].(string)
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
+		}
+		if _, exists := params["id"]; exists {
+			return "", fmt.Errorf("不接受旧id字段")
+		}
+		configID, ok := params["config_id"].(string)
 		if !ok {
-			// 兼容旧版API，检查id参数
-			id, idOk := params["id"].(string)
-			if !idOk {
-				return "", fmt.Errorf("缺少config_id参数")
-			}
-			configId = id
+			return "", fmt.Errorf("缺少config_id参数")
 		}
-		// 需要先获取配置列表，然后根据ID找到对应的路径
-		configs, _ := GetNginxConfigsList()
-		var configPath string
-		for _, config := range configs {
-			if config.ID == configId {
-				configPath = config.Path
-				break
-			}
+		configFile, resolveErr := resolveNginxConfigID(configID)
+		if resolveErr != nil {
+			return "", resolveErr
 		}
-		if configPath == "" {
-			return "", fmt.Errorf("未找到ID为%s的配置文件", configId)
-		}
-		err = DeleteNginxConfig(configPath)
+		err = DeleteNginxConfig(configFile.Path)
 		result = map[string]interface{}{
 			"success": err == nil,
 			"message": "配置删除成功",
@@ -1520,82 +1662,44 @@ func HandleNginxCommand(action string, params map[string]interface{}) (string, e
 		result, err = GetNginxLogsList()
 
 	case "nginx_log_content":
-		id, ok := params["id"].(string)
-		if !ok {
-			// 尝试获取path参数
-			path, pathOk := params["path"].(string)
-			if !pathOk {
-				return "", fmt.Errorf("缺少id或path参数")
-			}
-			result, err = GetNginxLogContent(path)
-		} else {
-			// 使用id查找对应的日志文件路径
-			logs, listErr := GetNginxLogsList()
-			if listErr != nil {
-				return "", fmt.Errorf("获取日志列表失败: %s", listErr)
-			}
-
-			var logPath string
-			for _, log := range logs {
-				if log.ID == id {
-					logPath = log.Path
-					break
-				}
-			}
-
-			if logPath == "" {
-				return "", fmt.Errorf("未找到ID为%s的日志文件", id)
-			}
-
-			result, err = GetNginxLogContent(logPath)
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
 		}
+		if _, exists := params["id"]; exists {
+			return "", fmt.Errorf("不接受旧id字段")
+		}
+		logID, ok := params["log_id"].(string)
+		if !ok {
+			return "", fmt.Errorf("缺少log_id参数")
+		}
+		logFile, resolveErr := resolveNginxLogID(logID)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		result, err = GetNginxLogContent(logFile.Path)
 
 	case "nginx_log_download":
-		id, ok := params["id"].(string)
+		if _, exists := params["path"]; exists {
+			return "", fmt.Errorf("不接受path字段")
+		}
+		if _, exists := params["id"]; exists {
+			return "", fmt.Errorf("不接受旧id字段")
+		}
+		logID, ok := params["log_id"].(string)
 		if !ok {
-			// 尝试获取path参数
-			path, pathOk := params["path"].(string)
-			if !pathOk {
-				return "", fmt.Errorf("缺少id或path参数")
-			}
-			// 如果直接提供了path，需要获取文件名
-			name := filepath.Base(path)
-			content, err := ioutil.ReadFile(path)
-			if err != nil {
-				return "", fmt.Errorf("读取日志文件失败: %s", err)
-			}
-			result = map[string]interface{}{
-				"filename": name,
-				"content":  string(content),
-			}
-		} else {
-			// 使用id查找对应的日志文件路径
-			logs, listErr := GetNginxLogsList()
-			if listErr != nil {
-				return "", fmt.Errorf("获取日志列表失败: %s", listErr)
-			}
-
-			var logPath, logName string
-			for _, log := range logs {
-				if log.ID == id {
-					logPath = log.Path
-					logName = log.Name
-					break
-				}
-			}
-
-			if logPath == "" {
-				return "", fmt.Errorf("未找到ID为%s的日志文件", id)
-			}
-
-			content, err := ioutil.ReadFile(logPath)
-			if err != nil {
-				return "", fmt.Errorf("读取日志文件失败: %s", err)
-			}
-			result = map[string]interface{}{
-				"filename": logName,
-				"content":  string(content),
-			}
+			return "", fmt.Errorf("缺少log_id参数")
+		}
+		logFile, resolveErr := resolveNginxLogID(logID)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		content, readErr := os.ReadFile(logFile.Path)
+		if readErr != nil {
+			return "", fmt.Errorf("读取日志文件失败")
+		}
+		result = map[string]interface{}{
+			"filename": logFile.Name,
+			"content":  string(content),
 		}
 
 	case "nginx_restart":
@@ -1771,8 +1875,6 @@ func HandleNginxCommand(action string, params map[string]interface{}) (string, e
 	}
 
 	if err != nil {
-		// 使用logger包中的函数记录错误
-		fmt.Printf("执行Nginx命令失败: action=%s, error=%v\n", action, err)
 		return "", err
 	}
 

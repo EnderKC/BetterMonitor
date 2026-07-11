@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -259,19 +260,16 @@ func GetCertificateContent(c *gin.Context) {
 		"key_path":         cert.KeyPath,
 	}
 
-	message := map[string]interface{}{
-		"type":    "nginx_command",
-		"payload": payload,
-	}
-
-	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), TimeoutSimpleQuery)
+	defer cancel()
+	resp, err := utils.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("发送命令失败: %v", err)})
 		return
 	}
 
 	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+	if err := json.Unmarshal(resp, &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("解析响应失败: %v", err)})
 		return
 	}

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -148,14 +149,11 @@ func (s *CertificateRenewalService) renewCertificate(cert *models.ManagedCertifi
 	}
 
 	// 发送续期命令到Agent
-	message := map[string]interface{}{
-		"type":    "nginx_command",
-		"payload": payload,
-	}
-
 	log.Printf("发送证书续期请求: %s (服务器: %d)", cert.PrimaryDomain, cert.ServerID)
 
-	resp, err := utils.SendCommandToAgent(server.ID, server.SecretKey, message)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	resp, err := utils.SendAgentCommand(ctx, server.ID, "nginx_command", payload, "nginx_success")
 	if err != nil {
 		// 更新状态为续期失败
 		models.UpdateCertificateRenewalStatus(cert.ServerID, cert.ID, "续期失败")
@@ -164,7 +162,7 @@ func (s *CertificateRenewalService) renewCertificate(cert *models.ManagedCertifi
 
 	// 解析响应
 	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+	if err := json.Unmarshal(resp, &result); err != nil {
 		models.UpdateCertificateRenewalStatus(cert.ServerID, cert.ID, "续期失败")
 		return fmt.Errorf("解析续期响应失败: %w", err)
 	}

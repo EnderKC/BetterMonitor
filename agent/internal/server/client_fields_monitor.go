@@ -7,3 +7,5 @@ type clientOpsFields struct{}
 
 // initOpsFields 监控版无需初始化操作类字段
 func (c *Client) initOpsFields() {}
+
+func (c *Client) closeOperationResources() {}

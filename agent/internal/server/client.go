@@ -42,6 +42,8 @@ type Client struct {
 	// 升级并发保护：同一时间只允许一个升级任务
 	upgrading         int32
 	upgradeMarkerPath string
+	responseSink      func(requestID, responseType string, data map[string]interface{})
+	jsonSink          func(value interface{}) error
 
 	// 操作类功能字段（通过 build tag 控制）
 	clientOpsFields
@@ -234,6 +236,7 @@ func (c *Client) CloseWebSocket() {
 // 处理WebSocket消息
 func (c *Client) handleWebSocketMessages(conn *websocket.Conn, cancel context.CancelFunc) {
 	defer func() {
+		c.closeOperationResources()
 		cancel()
 		_ = conn.Close()
 		c.wsMutex.Lock()
@@ -380,6 +383,9 @@ func (c *Client) handleAgentHeartbeat(ctx context.Context, conn *websocket.Conn)
 
 // 安全地向当前WebSocket写入JSON数据
 func (c *Client) writeJSON(v interface{}) error {
+	if c.jsonSink != nil {
+		return c.jsonSink(v)
+	}
 	c.wsMutex.Lock()
 	defer c.wsMutex.Unlock()
 
@@ -423,6 +429,10 @@ func (c *Client) sendResponse(requestID, responseType string, data map[string]in
 		"type":       responseType,
 		"request_id": requestID,
 		"data":       data,
+	}
+	if c.responseSink != nil {
+		c.responseSink(requestID, responseType, data)
+		return
 	}
 
 	if err := c.writeJSON(response); err != nil {

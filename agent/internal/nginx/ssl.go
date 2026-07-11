@@ -78,14 +78,11 @@ func ObtainCertHTTP(domain string, webroot string) (*CertificateResult, error) {
 
 // ObtainCertificate 通过Lego执行HTTP-01流程
 func ObtainCertificate(req CertificateRequest) (*CertificateResult, error) {
-	if len(req.Domains) == 0 {
-		return nil, fmt.Errorf("至少需要一个域名")
+	if err := NormalizeCertificateRequest(&req); err != nil {
+		return nil, err
 	}
 
-	useHTTP := strings.EqualFold(req.Provider, "") || strings.EqualFold(req.Provider, "http01")
-	if useHTTP && req.Webroot == "" {
-		return nil, fmt.Errorf("必须提供HTTP-01验证目录")
-	}
+	useHTTP := req.Provider == "http01"
 
 	email := req.Email
 	if email == "" {
@@ -191,8 +188,15 @@ func (p *webrootProvider) CleanUp(domain, token, keyAuth string) error {
 }
 
 func buildDNSProvider(name string, config map[string]string) (challenge.Provider, error) {
-	switch strings.ToLower(name) {
-	case "alidns", "aliyun":
+	provider, err := NormalizeProvider(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateDNSConfig(config); err != nil {
+		return nil, err
+	}
+	switch provider {
+	case "alidns":
 		apiKey := config["access_key_id"]
 		apiSecret := config["access_key_secret"]
 		if apiKey == "" || apiSecret == "" {
@@ -202,7 +206,7 @@ func buildDNSProvider(name string, config map[string]string) (challenge.Provider
 		cfg.APIKey = apiKey
 		cfg.SecretKey = apiSecret
 		return alidns.NewDNSProviderConfig(cfg)
-	case "cloudflare", "cf":
+	case "cloudflare":
 		cfg := cloudflare.NewDefaultConfig()
 		token := config["api_token"]
 		if token != "" {
@@ -219,7 +223,7 @@ func buildDNSProvider(name string, config map[string]string) (challenge.Provider
 		}
 		return cloudflare.NewDNSProviderConfig(cfg)
 	default:
-		return nil, fmt.Errorf("暂不支持的DNS提供商: %s", name)
+		return nil, fmt.Errorf("暂不支持的DNS提供商")
 	}
 }
 

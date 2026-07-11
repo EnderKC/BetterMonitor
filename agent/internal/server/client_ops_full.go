@@ -1260,6 +1260,199 @@ func (c *Client) handleProcessKill(message []byte) {
 
 // ─── Docker 命令处理 ──────────────────────────────────────────────────────────
 
+func validateDockerImageReference(imageRef string) error {
+	if imageRef == "" || imageRef != strings.TrimSpace(imageRef) || len(imageRef) > 512 || strings.HasPrefix(imageRef, "-") {
+		return fmt.Errorf("invalid image reference")
+	}
+	for _, char := range imageRef {
+		if char > 127 || char <= 32 || char == 127 {
+			return fmt.Errorf("invalid image reference")
+		}
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9':
+		case strings.ContainsRune("._-/:@+", char):
+		default:
+			return fmt.Errorf("invalid image reference")
+		}
+	}
+	return nil
+}
+
+func validateDockerContainerReference(ref string) error {
+	if ref == "" || ref != strings.TrimSpace(ref) || len(ref) > 128 {
+		return fmt.Errorf("invalid container reference")
+	}
+	for index, char := range ref {
+		if char > 127 || char <= 32 || char == 127 {
+			return fmt.Errorf("invalid container reference")
+		}
+		if index == 0 && !isDockerIdentifierChar(char, false) {
+			return fmt.Errorf("invalid container reference")
+		}
+		if !isDockerIdentifierChar(char, true) {
+			return fmt.Errorf("invalid container reference")
+		}
+	}
+	return nil
+}
+
+func validateDockerComposeProjectName(name string) error {
+	if err := validateDockerContainerReference(name); err != nil {
+		return fmt.Errorf("invalid Compose project name")
+	}
+	if name == "." || name == ".." || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid Compose project name")
+	}
+	return nil
+}
+
+func isDockerIdentifierChar(char rune, allowPunctuation bool) bool {
+	if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
+		return true
+	}
+	return allowPunctuation && (char == '_' || char == '-' || char == '.')
+}
+
+func validateDockerTail(tail int) error {
+	if tail < 1 || tail > 10_000 {
+		return fmt.Errorf("invalid Docker log tail")
+	}
+	return nil
+}
+
+func validateDockerOperationTimeout(timeout int) error {
+	if timeout < 1 || timeout > 300 {
+		return fmt.Errorf("invalid Docker operation timeout")
+	}
+	return nil
+}
+
+func validateDockerText(value string, maxBytes int, allowEmpty bool) error {
+	if value == "" {
+		if allowEmpty {
+			return nil
+		}
+		return fmt.Errorf("Docker field is empty")
+	}
+	if len(value) > maxBytes {
+		return fmt.Errorf("Docker field is too large")
+	}
+	for _, char := range value {
+		if char < 32 || char == 127 {
+			return fmt.Errorf("Docker field contains control characters")
+		}
+	}
+	return nil
+}
+
+func validateDockerEnvironmentKey(key string) error {
+	if key == "" || len(key) > 256 {
+		return fmt.Errorf("invalid environment key")
+	}
+	for index, char := range key {
+		if index == 0 {
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_' {
+				continue
+			}
+			return fmt.Errorf("invalid environment key")
+		}
+		if !isDockerIdentifierChar(char, false) && char != '_' {
+			return fmt.Errorf("invalid environment key")
+		}
+	}
+	return nil
+}
+
+func validateDockerRestartPolicy(policy string) error {
+	if policy == "" || policy == "no" || policy == "always" || policy == "unless-stopped" || policy == "on-failure" {
+		return nil
+	}
+	prefix, attempts, found := strings.Cut(policy, ":")
+	if !found || prefix != "on-failure" || attempts == "" {
+		return fmt.Errorf("invalid restart policy")
+	}
+	count, err := strconv.Atoi(attempts)
+	if err != nil || count < 1 || count > 100 {
+		return fmt.Errorf("invalid restart policy")
+	}
+	return nil
+}
+
+type dockerCreateParams struct {
+	Name    string            `json:"name"`
+	Image   string            `json:"image"`
+	Ports   []string          `json:"ports"`
+	Volumes []string          `json:"volumes"`
+	Env     map[string]string `json:"env"`
+	Command string            `json:"command"`
+	Restart string            `json:"restart"`
+	Network string            `json:"network"`
+}
+
+func validateDockerCreateParams(params dockerCreateParams) error {
+	if err := validateDockerContainerReference(params.Name); err != nil {
+		return err
+	}
+	if err := validateDockerImageReference(params.Image); err != nil {
+		return err
+	}
+	if len(params.Ports) > 128 || len(params.Volumes) > 128 || len(params.Env) > 256 {
+		return fmt.Errorf("too many Docker create parameters")
+	}
+	for _, port := range params.Ports {
+		if err := validateDockerText(port, 256, false); err != nil {
+			return err
+		}
+	}
+	for _, volume := range params.Volumes {
+		if err := validateDockerText(volume, 1024, false); err != nil {
+			return err
+		}
+	}
+	for key, value := range params.Env {
+		if err := validateDockerEnvironmentKey(key); err != nil {
+			return err
+		}
+		if err := validateDockerText(value, 4096, true); err != nil {
+			return err
+		}
+	}
+	if err := validateDockerText(params.Command, 8192, true); err != nil {
+		return err
+	}
+	if err := validateDockerRestartPolicy(params.Restart); err != nil {
+		return err
+	}
+	if params.Network != "" {
+		if err := validateDockerContainerReference(params.Network); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) sendInvalidDockerRequest(requestID string, cause error) {
+	if cause != nil {
+		c.log.Warn("拒绝无效Docker请求: request_id=%s error=%v", requestID, cause)
+	}
+	c.sendResponse(requestID, "docker_error", map[string]interface{}{
+		"code":  "invalid_docker_request",
+		"error": "Docker请求无效",
+	})
+}
+
+func (c *Client) sendDockerOperationFailure(requestID, code, message string, cause error) {
+	if cause != nil {
+		c.log.Error("Docker操作失败: request_id=%s code=%s error=%v", requestID, code, cause)
+	}
+	c.sendResponse(requestID, "docker_error", map[string]interface{}{
+		"code":  code,
+		"error": message,
+	})
+}
+
 // handleDockerCommand 处理Docker命令
 func (c *Client) handleDockerCommand(message []byte) {
 	var msg struct {
@@ -1273,19 +1466,18 @@ func (c *Client) handleDockerCommand(message []byte) {
 
 	if err := json.Unmarshal(message, &msg); err != nil {
 		c.log.Error("解析Docker命令请求失败: %v", err)
-		c.sendResponse(msg.RequestID, "error", map[string]interface{}{
-			"error": "无效的请求参数",
-		})
+		c.sendInvalidDockerRequest(msg.RequestID, err)
 		return
 	}
 
 	c.log.Info("收到Docker命令请求: 操作=%s, 命令=%s", msg.Payload.Action, msg.Payload.Command)
 
-	dockerManager, err := monitor.NewDockerManager(c.log)
+	dockerManager, err := newDockerCommandManager(c.log)
 	if err != nil {
 		c.log.Error("创建Docker管理器失败: %v", err)
 		c.sendResponse(msg.RequestID, "docker_error", map[string]interface{}{
-			"error": fmt.Sprintf("创建Docker管理器失败: %v", err),
+			"code":  "docker_manager_unavailable",
+			"error": "Docker管理器不可用",
 		})
 		return
 	}
@@ -1299,23 +1491,17 @@ func (c *Client) handleDockerCommand(message []byte) {
 	case "composes":
 		c.handleComposesCommand(msg.RequestID, msg.Payload.Action, msg.Payload.Params, dockerManager)
 	default:
-		c.log.Error("未知的Docker命令: %s", msg.Payload.Command)
-		c.sendResponse(msg.RequestID, "docker_error", map[string]interface{}{
-			"error": fmt.Sprintf("未知的Docker命令: %s", msg.Payload.Command),
-		})
+		c.sendInvalidDockerRequest(msg.RequestID, fmt.Errorf("unknown Docker command"))
 	}
 }
 
 // handleContainersCommand 处理容器相关命令
-func (c *Client) handleContainersCommand(requestID string, action string, params json.RawMessage, dockerManager *monitor.DockerManager) {
+func (c *Client) handleContainersCommand(requestID string, action string, params json.RawMessage, dockerManager dockerCommandManager) {
 	switch action {
 	case "list":
 		containers, err := dockerManager.GetContainers(true)
 		if err != nil {
-			c.log.Error("获取容器列表失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("获取容器列表失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_containers_list_failed", "获取容器列表失败", err)
 			return
 		}
 		c.sendResponse(requestID, "docker_containers", map[string]interface{}{
@@ -1328,23 +1514,21 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			Tail        int    `json:"tail"`
 		}
 		if err := json.Unmarshal(params, &logParams); err != nil {
-			c.log.Error("解析容器日志参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的容器日志参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
-
-		if logParams.Tail <= 0 {
-			logParams.Tail = 100
+		if err := validateDockerContainerReference(logParams.ContainerID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerTail(logParams.Tail); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
+			return
 		}
 
 		logs, err := dockerManager.GetContainerLogs(logParams.ContainerID, logParams.Tail)
 		if err != nil {
-			c.log.Error("获取容器日志失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("获取容器日志失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_logs_failed", "获取容器日志失败", err)
 			return
 		}
 		c.sendResponse(requestID, "docker_container_logs", map[string]interface{}{
@@ -1356,18 +1540,16 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			ContainerID string `json:"container_id"`
 		}
 		if err := json.Unmarshal(params, &startParams); err != nil {
-			c.log.Error("解析启动容器参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的启动容器参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerContainerReference(startParams.ContainerID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.StartContainer(startParams.ContainerID); err != nil {
-			c.log.Error("启动容器失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("启动容器失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_start_failed", "启动容器失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1380,18 +1562,20 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			Timeout     int    `json:"timeout,omitempty"`
 		}
 		if err := json.Unmarshal(params, &stopParams); err != nil {
-			c.log.Error("解析停止容器参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的停止容器参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerContainerReference(stopParams.ContainerID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerOperationTimeout(stopParams.Timeout); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.StopContainer(stopParams.ContainerID, stopParams.Timeout); err != nil {
-			c.log.Error("停止容器失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("停止容器失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_stop_failed", "停止容器失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1404,18 +1588,20 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			Timeout     int    `json:"timeout,omitempty"`
 		}
 		if err := json.Unmarshal(params, &restartParams); err != nil {
-			c.log.Error("解析重启容器参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的重启容器参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerContainerReference(restartParams.ContainerID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerOperationTimeout(restartParams.Timeout); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.RestartContainer(restartParams.ContainerID, restartParams.Timeout); err != nil {
-			c.log.Error("重启容器失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("重启容器失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_restart_failed", "重启容器失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1428,18 +1614,16 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			Force       bool   `json:"force,omitempty"`
 		}
 		if err := json.Unmarshal(params, &removeParams); err != nil {
-			c.log.Error("解析删除容器参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的删除容器参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerContainerReference(removeParams.ContainerID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.RemoveContainer(removeParams.ContainerID, removeParams.Force); err != nil {
-			c.log.Error("删除容器失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("删除容器失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_remove_failed", "删除容器失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1447,21 +1631,13 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 		})
 
 	case "create":
-		var createParams struct {
-			Name    string            `json:"name"`
-			Image   string            `json:"image"`
-			Ports   []string          `json:"ports"`
-			Volumes []string          `json:"volumes"`
-			Env     map[string]string `json:"env"`
-			Command string            `json:"command"`
-			Restart string            `json:"restart"`
-			Network string            `json:"network"`
-		}
+		var createParams dockerCreateParams
 		if err := json.Unmarshal(params, &createParams); err != nil {
-			c.log.Error("解析创建容器参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的创建容器参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerCreateParams(createParams); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
@@ -1470,10 +1646,7 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 			createParams.Command, createParams.Restart, createParams.Network)
 
 		if err != nil {
-			c.log.Error("创建容器失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("创建容器失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_container_create_failed", "创建容器失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1482,23 +1655,17 @@ func (c *Client) handleContainersCommand(requestID string, action string, params
 		})
 
 	default:
-		c.log.Error("未知的容器操作: %s", action)
-		c.sendResponse(requestID, "error", map[string]interface{}{
-			"error": fmt.Sprintf("未知的容器操作: %s", action),
-		})
+		c.sendInvalidDockerRequest(requestID, fmt.Errorf("unknown container action"))
 	}
 }
 
 // handleImagesCommand 处理镜像相关命令
-func (c *Client) handleImagesCommand(requestID string, action string, params json.RawMessage, dockerManager *monitor.DockerManager) {
+func (c *Client) handleImagesCommand(requestID string, action string, params json.RawMessage, dockerManager dockerCommandManager) {
 	switch action {
 	case "list":
 		images, err := dockerManager.GetImages()
 		if err != nil {
-			c.log.Error("获取镜像列表失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("获取镜像列表失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_images_list_failed", "获取镜像列表失败", err)
 			return
 		}
 		c.sendResponse(requestID, "docker_images", map[string]interface{}{
@@ -1510,23 +1677,29 @@ func (c *Client) handleImagesCommand(requestID string, action string, params jso
 			Image string `json:"image"`
 		}
 		if err := json.Unmarshal(params, &pullParams); err != nil {
-			c.log.Error("解析拉取镜像参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的拉取镜像参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
-		go func() {
-			if err := dockerManager.PullImage(pullParams.Image); err != nil {
-				c.log.Error("拉取镜像失败: %v", err)
-				return
-			}
-			c.log.Info("镜像 %s 拉取成功", pullParams.Image)
-		}()
-
+		if err := validateDockerImageReference(pullParams.Image); err != nil {
+			c.sendResponse(requestID, "docker_error", map[string]interface{}{
+				"code":  "invalid_docker_image",
+				"error": "镜像引用无效",
+			})
+			return
+		}
+		if err := dockerManager.PullImage(pullParams.Image); err != nil {
+			c.log.Error("拉取镜像失败: %v", err)
+			c.sendResponse(requestID, "docker_error", map[string]interface{}{
+				"code":  "docker_image_pull_failed",
+				"error": "镜像拉取失败",
+			})
+			return
+		}
+		c.log.Info("镜像 %s 拉取成功", pullParams.Image)
 		c.sendResponse(requestID, "success", map[string]interface{}{
-			"message": fmt.Sprintf("正在拉取镜像: %s，请稍后刷新", pullParams.Image),
+			"success": true,
+			"message": "镜像拉取成功",
 		})
 
 	case "remove":
@@ -1535,18 +1708,16 @@ func (c *Client) handleImagesCommand(requestID string, action string, params jso
 			Force   bool   `json:"force,omitempty"`
 		}
 		if err := json.Unmarshal(params, &removeParams); err != nil {
-			c.log.Error("解析删除镜像参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的删除镜像参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerImageReference(removeParams.ImageID); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.RemoveImage(removeParams.ImageID, removeParams.Force); err != nil {
-			c.log.Error("删除镜像失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("删除镜像失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_image_remove_failed", "删除镜像失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1554,23 +1725,17 @@ func (c *Client) handleImagesCommand(requestID string, action string, params jso
 		})
 
 	default:
-		c.log.Error("未知的镜像操作: %s", action)
-		c.sendResponse(requestID, "error", map[string]interface{}{
-			"error": fmt.Sprintf("未知的镜像操作: %s", action),
-		})
+		c.sendInvalidDockerRequest(requestID, fmt.Errorf("unknown image action"))
 	}
 }
 
 // handleComposesCommand 处理Compose相关命令
-func (c *Client) handleComposesCommand(requestID string, action string, params json.RawMessage, dockerManager *monitor.DockerManager) {
+func (c *Client) handleComposesCommand(requestID string, action string, params json.RawMessage, dockerManager dockerCommandManager) {
 	switch action {
 	case "list":
 		composes, err := dockerManager.GetComposes()
 		if err != nil {
-			c.log.Error("获取Compose项目列表失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("获取Compose项目列表失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_composes_list_failed", "获取Compose项目列表失败", err)
 			return
 		}
 		c.sendResponse(requestID, "docker_composes", map[string]interface{}{
@@ -1582,18 +1747,16 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(params, &upParams); err != nil {
-			c.log.Error("解析启动Compose项目参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的启动Compose项目参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerComposeProjectName(upParams.Name); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.ComposeUp(upParams.Name); err != nil {
-			c.log.Error("启动Compose项目失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("启动Compose项目失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_compose_up_failed", "启动Compose项目失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1605,18 +1768,16 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(params, &downParams); err != nil {
-			c.log.Error("解析停止Compose项目参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的停止Compose项目参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerComposeProjectName(downParams.Name); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.ComposeDown(downParams.Name); err != nil {
-			c.log.Error("停止Compose项目失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("停止Compose项目失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_compose_down_failed", "停止Compose项目失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1628,19 +1789,17 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(params, &configParams); err != nil {
-			c.log.Error("解析获取Compose配置参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的获取Compose配置参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerComposeProjectName(configParams.Name); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		config, err := dockerManager.GetComposeConfig(configParams.Name)
 		if err != nil {
-			c.log.Error("获取Compose配置失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("获取Compose配置失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_compose_config_failed", "获取Compose配置失败", err)
 			return
 		}
 		c.sendResponse(requestID, "docker_compose_config", map[string]interface{}{
@@ -1653,18 +1812,20 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal(params, &createParams); err != nil {
-			c.log.Error("解析创建Compose项目参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的创建Compose项目参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerComposeProjectName(createParams.Name); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if len(createParams.Content) > 1<<20 {
+			c.sendInvalidDockerRequest(requestID, fmt.Errorf("Compose content too large"))
 			return
 		}
 
 		if err := dockerManager.CreateCompose(createParams.Name, createParams.Content); err != nil {
-			c.log.Error("创建Compose项目失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("创建Compose项目失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_compose_create_failed", "创建Compose项目失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1676,18 +1837,16 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(params, &removeParams); err != nil {
-			c.log.Error("解析删除Compose项目参数失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": "无效的删除Compose项目参数",
-			})
+			c.sendInvalidDockerRequest(requestID, err)
+			return
+		}
+		if err := validateDockerComposeProjectName(removeParams.Name); err != nil {
+			c.sendInvalidDockerRequest(requestID, err)
 			return
 		}
 
 		if err := dockerManager.RemoveCompose(removeParams.Name); err != nil {
-			c.log.Error("删除Compose项目失败: %v", err)
-			c.sendResponse(requestID, "error", map[string]interface{}{
-				"error": fmt.Sprintf("删除Compose项目失败: %v", err),
-			})
+			c.sendDockerOperationFailure(requestID, "docker_compose_remove_failed", "删除Compose项目失败", err)
 			return
 		}
 		c.sendResponse(requestID, "success", map[string]interface{}{
@@ -1695,14 +1854,27 @@ func (c *Client) handleComposesCommand(requestID string, action string, params j
 		})
 
 	default:
-		c.log.Error("未知的Compose操作: %s", action)
-		c.sendResponse(requestID, "error", map[string]interface{}{
-			"error": fmt.Sprintf("未知的Compose操作: %s", action),
-		})
+		c.sendInvalidDockerRequest(requestID, fmt.Errorf("unknown Compose action"))
 	}
 }
 
 // ─── Nginx 命令处理 ──────────────────────────────────────────────────────────
+
+var handleNginxMonitorCommand = monitor.HandleNginxCommand
+
+func nginxActionErrorCode(action string) string {
+	action = strings.TrimSpace(strings.ToLower(action))
+	if action == "" {
+		return "nginx_operation_failed"
+	}
+	for _, char := range action {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_' {
+			continue
+		}
+		return "nginx_operation_failed"
+	}
+	return "nginx_" + action + "_failed"
+}
 
 // handleNginxCommand 处理Nginx命令
 func (c *Client) handleNginxCommand(message []byte) {
@@ -1734,27 +1906,24 @@ func (c *Client) handleNginxCommand(message []byte) {
 
 	c.log.Info("处理Nginx命令: %s", action)
 
-	result, err := monitor.HandleNginxCommand(action, msg.Payload)
+	result, err := handleNginxMonitorCommand(action, msg.Payload)
 	if err != nil {
-		c.log.Error("执行Nginx命令失败: %v", err)
-
+		code := nginxActionErrorCode(action)
+		c.log.Error("执行Nginx命令失败: action=%s code=%s", action, code)
 		c.sendResponse(msg.RequestID, "nginx_error", map[string]interface{}{
-			"error": err.Error(),
+			"code":  code,
+			"error": "Nginx操作失败",
 		})
 		return
 	}
 
 	c.log.Info("Nginx命令执行成功: %s", action)
-	c.log.Debug("Nginx命令执行结果: %s", result)
 
 	c.sendRawResponse(msg.RequestID, "nginx_success", result)
 }
 
 // sendRawResponse 发送原始响应，不包装result字段
 func (c *Client) sendRawResponse(requestID, responseType, jsonData string) {
-	c.wsWriteMutex.Lock()
-	defer c.wsWriteMutex.Unlock()
-
 	if responseType == "success" && requestID != "" {
 		responseType = "nginx_success"
 	} else if responseType == "error" && requestID != "" {
@@ -1773,12 +1942,8 @@ func (c *Client) sendRawResponse(requestID, responseType, jsonData string) {
 		Data:      json.RawMessage(jsonData),
 	}
 
-	if c.wsConn != nil {
-		if err := c.wsConn.WriteJSON(response); err != nil {
-			c.log.Error("发送WebSocket响应失败: %v", err)
-		}
-	} else {
-		c.log.Error("WebSocket连接未建立，无法发送响应")
+	if err := c.writeJSON(response); err != nil {
+		c.log.Error("发送WebSocket响应失败: type=%s request_id=%s", responseType, requestID)
 	}
 }
 
@@ -1882,7 +2047,11 @@ func (c *Client) streamDockerLogs(streamID string, sess *logStreamSession) {
 	go func() {
 		defer close(lineCh)
 		for scanner.Scan() {
-			lineCh <- scanner.Text()
+			select {
+			case lineCh <- scanner.Text():
+			case <-sess.stopCh:
+				return
+			}
 		}
 		scanDone <- scanner.Err()
 	}()

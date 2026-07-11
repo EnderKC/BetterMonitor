@@ -343,7 +343,7 @@ const extractServerHeader = (serverBlock) => {
     }
     
     if (isCertbot) {
-      header += " 🔒";
+      header += " [TLS]";
     }
   } else {
     if (type === "重定向") {
@@ -1425,4 +1425,4 @@ const debugShowServerBlocks = () => {
 .glass-card.preview-card:hover .code-area {
   box-shadow: 0 0 15px rgba(64, 150, 255, 0.15);
 }
-</style> 
+</style>

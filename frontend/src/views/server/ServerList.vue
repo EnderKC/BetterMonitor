@@ -594,7 +594,6 @@ onDeactivated(() => {
           </div>
 
           <div v-if="formMode === 'edit'" class="warning-box">
-            <span class="warning-icon">⚠️</span>
             <div class="warning-content">
               <span class="warning-title">注意</span>
               <span>切换类型可能需要 Agent 在线以触发自动更新。如果 Agent 离线，请在上线后手动更新。</span>

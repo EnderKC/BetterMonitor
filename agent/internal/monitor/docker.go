@@ -32,7 +32,40 @@ var (
 	ErrComposeConfigInaccessible = errors.New("Compose配置路径不可访问")
 	// ErrComposeConfigFileNotFound 表示配置文件路径已确定但文件不存在于磁盘
 	ErrComposeConfigFileNotFound = errors.New("Compose配置文件不存在")
+	ErrDockerImagePullFailed     = errors.New("Docker image pull failed")
 )
+
+type dockerCommandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+func runDockerCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func validateDockerImageRef(imageRef string) error {
+	if imageRef == "" || imageRef != strings.TrimSpace(imageRef) {
+		return fmt.Errorf("镜像引用为空或包含首尾空白")
+	}
+	if len(imageRef) > 512 {
+		return fmt.Errorf("镜像引用过长")
+	}
+	if strings.HasPrefix(imageRef, "-") {
+		return fmt.Errorf("镜像引用不能以 - 开头")
+	}
+	for _, char := range imageRef {
+		if char > 127 || char == ' ' || char == '\t' || char == '\r' || char == '\n' || char < 32 || char == 127 {
+			return fmt.Errorf("镜像引用包含非法字符")
+		}
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9':
+		case strings.ContainsRune("._-/:@+", char):
+		default:
+			return fmt.Errorf("镜像引用包含非法字符")
+		}
+	}
+	return nil
+}
 
 func sanitizeComposeProjectName(projectName string) (string, error) {
 	name := strings.TrimSpace(projectName)
@@ -215,6 +248,7 @@ type DockerManager struct {
 	client     *client.Client
 	log        *logger.Logger
 	ctx        context.Context
+	runCommand dockerCommandRunner
 	composeDir string
 	execConns  map[string]types.HijackedResponse
 }
@@ -241,6 +275,7 @@ func NewDockerManager(log *logger.Logger) (*DockerManager, error) {
 		client:     cli,
 		log:        log,
 		ctx:        ctx,
+		runCommand: runDockerCommand,
 		composeDir: composeDir,
 		execConns:  make(map[string]types.HijackedResponse),
 	}, nil
@@ -644,13 +679,33 @@ func (dm *DockerManager) GetImages() ([]ImageInfo, error) {
 
 // PullImage 拉取镜像
 func (dm *DockerManager) PullImage(imageRef string) error {
-	// 使用命令行方式拉取镜像，避免认证问题
-	cmd := exec.Command("docker", "pull", imageRef)
-	output, err := cmd.CombinedOutput()
+	if err := validateDockerImageRef(imageRef); err != nil {
+		return err
+	}
+	runner := dm.runCommand
+	if runner == nil {
+		runner = runDockerCommand
+	}
+	ctx := dm.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	output, err := runner(ctx, "docker", "pull", imageRef)
 	if err != nil {
-		return fmt.Errorf("拉取镜像失败: %v, 输出: %s", err, string(output))
+		if dm.log != nil {
+			dm.log.Warn("拉取镜像失败: error=%v output=%s", err, boundedDockerCommandOutput(output))
+		}
+		return fmt.Errorf("%w: %v", ErrDockerImagePullFailed, err)
 	}
 	return nil
+}
+
+func boundedDockerCommandOutput(output []byte) string {
+	const maxBytes = 2048
+	if len(output) > maxBytes {
+		output = output[:maxBytes]
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // RemoveImage 删除镜像
